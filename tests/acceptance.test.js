@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { AgentWorkspace } from '../lib/workspace.js';
 import { HerdrClient } from '../lib/herdr.js';
@@ -39,16 +39,21 @@ const WAIT_CASES = [
   ['message-with-stale-done', { ...REAL_WAIT_PAYLOADS.done, reason: 'message', ended: false }, false],
   ['unknown-payload', { something: 'unexpected' }, false],
   ['malformed-json', 'not-json', false],
+  ['done-turn0', REAL_WAIT_PAYLOADS.done, false],
   ['fresh-done', { ...REAL_WAIT_PAYLOADS.done, turn: 1 }, true],
   ['successful-process-exit', { ended: true, reason: 'exit', exit_code: 0, terminal: 't-fixture', turn: 1, children: [] }, true]
 ];
 
 async function withTempDir(run) {
-  const tmp = mkdtempSync(join(tmpdir(), 'council-acceptance-'));
+  const tmp = resolve(mkdtempSync(join(tmpdir(), 'council-acceptance-')));
+  const osTmp = resolve(tmpdir());
   try {
     return await run(tmp);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    // Windows policy: only ever rmSync a resolved path inside the OS temp dir.
+    if (tmp.startsWith(osTmp) && tmp !== osTmp) {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   }
 }
 
@@ -63,10 +68,26 @@ function screenTextFor(scenario, index, marker) {
   return `${index === 0 ? 'SCREEN_PROPOSAL' : 'REVIEW_FINDING'}\n[VOTE: ${marker}] [SCORE: 9] [RATIONALE: exact proposal was inspected]`;
 }
 
+// Real hc wait contracts as HerdrClient.wait outputs: startup must be waited
+// out, not failed (owner's live Codex smoke test). Last entry repeats.
+const STARTUP_WAIT_PLAN = [
+  { success: false, ended: true, reason: 'status', status: 'idle', turn: 0, children: [] },
+  { success: false, ended: false, reason: 'timeout', status: 'working', turn: 1 },
+  { success: true, ended: true, reason: 'status', status: 'done', turn: 2 }
+];
+const MESSAGE_THEN_DONE_PLAN = [
+  { success: false, ended: false, reason: 'message', status: 'working', turn: 1 },
+  { success: true, ended: true, reason: 'status', status: 'done', turn: 2 }
+];
+
 // Herdr mock implementing the owner's orchestrator fixture semantics for one scenario.
-function orchestratorHerdr(cwd, mode, scenario) {
+// options.waitPlan feeds every target a sequence of wait results to model startup
+// progression; get() then reports live/turn 0 so no false done can be read from it.
+function orchestratorHerdr(cwd, mode, scenario, options = {}) {
   const { names, roles } = participants(mode);
   const marker = scenario === 'all-reject' ? 'reject' : 'approve';
+  const waitPlan = options.waitPlan || null;
+  const waitPolls = {};
   const launched = [];
   const dismissed = [];
   const locate = target => launched.find(record => record.address === target || record.opts.name === target);
@@ -106,9 +127,16 @@ function orchestratorHerdr(cwd, mode, scenario) {
       };
     },
     get(target) {
+      if (waitPlan) {
+        return { success: true, details: { address: target, state: 'live', turn: 0, status: { state: 'live' } } };
+      }
       return { success: true, details: { address: target, state: 'live', reported: true, turn: 1, status: { state: 'done' } } };
     },
     wait(target) {
+      waitPolls[target] = (waitPolls[target] || 0) + 1;
+      if (waitPlan) {
+        return { terminal: target, ...waitPlan[Math.min(waitPolls[target] - 1, waitPlan.length - 1)] };
+      }
       const record = locate(target);
       if (scenario === 'reviewer-timeout' && record && record.index > 0) {
         return { success: false, isTimeout: true, ended: false, status: 'working', reason: 'timeout', turn: 0, terminal: target, error: 'Reviewer still working.' };
@@ -129,7 +157,7 @@ function orchestratorHerdr(cwd, mode, scenario) {
       return { success: true };
     }
   };
-  return { herdr, launched, dismissed };
+  return { herdr, launched, dismissed, waitPolls };
 }
 
 function promotedReport(sessionDir) {
@@ -203,56 +231,70 @@ for (const mode of ['council', 'review']) {
   }
 }
 
-// --- Delegate: 6 execution scenarios
+// --- Delegate: 6 execution scenarios + startup timing
+
+function delegateHerdr(scenario, options = {}) {
+  const address = 't-fixture-specialist';
+  const dismissed = [];
+  const waitPlan = options.waitPlan || null;
+  const waitPolls = {};
+  const herdr = {
+    launchAgent(opts) {
+      return {
+        success: true,
+        name: opts.name,
+        ...(scenario === 'missing-address' ? {} : { address }),
+        details: {
+          ...(scenario === 'missing-address' ? {} : { address }),
+          turn: 0,
+          first_message: { sent: scenario !== 'delivery-not-sent' }
+        }
+      };
+    },
+    get(target) {
+      if (waitPlan) {
+        return { success: true, details: { address: target, state: 'live', turn: 0, status: { state: 'live' } } };
+      }
+      return { success: true, details: { address: target, state: 'live', turn: 1, status: { state: 'done' } } };
+    },
+    wait(target) {
+      waitPolls[target] = (waitPolls[target] || 0) + 1;
+      if (waitPlan) {
+        return { target, ...waitPlan[Math.min(waitPolls[target] - 1, waitPlan.length - 1)] };
+      }
+      if (scenario === 'timeout' || scenario === 'blocked') {
+        return {
+          success: false,
+          target,
+          status: scenario === 'blocked' ? 'blocked' : 'working',
+          ended: false,
+          isBlocked: scenario === 'blocked',
+          isTimeout: scenario === 'timeout',
+          error: scenario
+        };
+      }
+      return { success: true, target, ended: true, status: 'done', reason: 'status', turn: 1 };
+    },
+    read(target) {
+      return {
+        success: scenario !== 'read-failed',
+        target,
+        content: 'ACTUAL_SPECIALIST_RESULT=42',
+        error: scenario === 'read-failed' ? 'Read failed with stale data.' : null
+      };
+    },
+    dismiss(target) {
+      dismissed.push(target);
+      return { success: true };
+    }
+  };
+  return { herdr, dismissed, waitPolls, address };
+}
 
 for (const scenario of DELEGATE_SCENARIOS) {
   test(`acceptance: delegate/${scenario} honors execution and cleanup contract`, async () => {
     await withTempDir(async cwd => {
-      const address = 't-fixture-specialist';
-      const dismissed = [];
-      const herdr = {
-        launchAgent(opts) {
-          return {
-            success: true,
-            name: opts.name,
-            ...(scenario === 'missing-address' ? {} : { address }),
-            details: {
-              ...(scenario === 'missing-address' ? {} : { address }),
-              turn: 0,
-              first_message: { sent: scenario !== 'delivery-not-sent' }
-            }
-          };
-        },
-        get(target) {
-          return { success: true, details: { address: target, state: 'live', turn: 1, status: { state: 'done' } } };
-        },
-        wait(target) {
-          if (scenario === 'timeout' || scenario === 'blocked') {
-            return {
-              success: false,
-              target,
-              status: scenario === 'blocked' ? 'blocked' : 'working',
-              ended: false,
-              isBlocked: scenario === 'blocked',
-              isTimeout: scenario === 'timeout',
-              error: scenario
-            };
-          }
-          return { success: true, target, ended: true, status: 'done', reason: 'status', turn: 1 };
-        },
-        read(target) {
-          return {
-            success: scenario !== 'read-failed',
-            target,
-            content: 'ACTUAL_SPECIALIST_RESULT=42',
-            error: scenario === 'read-failed' ? 'Read failed with stale data.' : null
-          };
-        },
-        dismiss(target) {
-          dismissed.push(target);
-          return { success: true };
-        }
-      };
+      const { herdr, dismissed, address } = delegateHerdr(scenario);
       const result = await new CouncilOrchestrator({ cwd, herdr }).runDelegate({
         agent: 'codex',
         task: 'Return the actual specialist result.',
@@ -269,6 +311,53 @@ for (const scenario of DELEGATE_SCENARIOS) {
     });
   });
 }
+
+// --- Startup timing: a real agent starts idle at turn 0; failing on the first
+// poll loses the work (proven live by the owner's Codex smoke test).
+
+test('acceptance: council waits out agent startup (idle turn 0 -> working -> done) within the deadline', async () => {
+  await withTempDir(async cwd => {
+    const { herdr, waitPolls } = orchestratorHerdr(cwd, 'council', 'healthy', { waitPlan: STARTUP_WAIT_PLAN });
+    const result = await new CouncilOrchestrator({ cwd, herdr }).runMode({
+      mode: 'council',
+      task: 'Assess this exact proposal.',
+      agents: ['codex', 'codex', 'codex'],
+      timeoutSec: 15
+    });
+    assert.equal(result.success, true, `a startup reaching done must succeed (status: ${result.status})`);
+    assert.ok(Math.max(0, ...Object.values(waitPolls)) >= 3, 'orchestrator must re-poll wait instead of failing on the first idle report');
+    assert.equal(promotedReport(result.sessionDir), true, 'the completed startup run promotes its report');
+  });
+});
+
+test('acceptance: review waits out a message turn before done within the deadline', async () => {
+  await withTempDir(async cwd => {
+    const { herdr, waitPolls } = orchestratorHerdr(cwd, 'review', 'healthy', { waitPlan: MESSAGE_THEN_DONE_PLAN });
+    const result = await new CouncilOrchestrator({ cwd, herdr }).runMode({
+      mode: 'review',
+      task: 'Assess this exact proposal.',
+      agents: ['codex', 'codex', 'codex'],
+      timeoutSec: 15
+    });
+    assert.equal(result.success, true, `a message -> done startup must succeed (status: ${result.status})`);
+    assert.ok(Math.max(0, ...Object.values(waitPolls)) >= 2, 'orchestrator must re-poll wait after a message event');
+  });
+});
+
+test('acceptance: delegate waits out agent startup (idle turn 0 -> working -> done) within the deadline', async () => {
+  await withTempDir(async cwd => {
+    const { herdr, dismissed, address, waitPolls } = delegateHerdr('healthy', { waitPlan: STARTUP_WAIT_PLAN });
+    const result = await new CouncilOrchestrator({ cwd, herdr }).runDelegate({
+      agent: 'codex',
+      task: 'Return the actual specialist result.',
+      keepTerminals: false,
+      timeoutSec: 15
+    });
+    assert.equal(result.success, true, `a delegate startup reaching done must succeed (status: ${result.status})`);
+    assert.ok(Math.max(0, ...Object.values(waitPolls)) >= 3, 'delegate must re-poll wait instead of failing on the first idle report');
+    assert.deepEqual(dismissed, [address], 'delegate dismisses its own agent only after completion');
+  });
+});
 
 // --- Real hc wait contract (HerdrClient.wait over captured payload shapes)
 
