@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentWorkspace, sanitizeName, atomicWrite } from '../lib/workspace.js';
@@ -230,6 +230,77 @@ test('AgentWorkspace detects post-vote mutation and refuses promotion', () => {
     assert.equal(promo.promoted, false);
     assert.match(promo.reason, /mutation/i);
     assert.equal(existsSync(join(sessionDir, 'reports', 'report.md')), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AgentWorkspace reports metaMissing when meta.json is absent', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'council-meta-test-'));
+  try {
+    const ws = new AgentWorkspace(tmp);
+    const { sessionDir } = ws.initSession({ sessionId: 'meta-check', mode: 'review', task: 'Task' });
+    const art = ws.writeArtifact(sessionDir, { phase: 'draft', author: 'author', content: 'test' });
+
+    // Remove meta.json
+    unlinkSync(art.metaPath);
+
+    const read = ws.readArtifact(sessionDir, 'draft', 'author');
+    assert.equal(read.content, 'test');
+    assert.equal(read.metaMissing, true);
+    assert.equal(read.verified, false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AgentWorkspace tracks invalid unparseable ballots without flipping quorum', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'council-invalid-ballot-'));
+  try {
+    const ws = new AgentWorkspace(tmp);
+    const { sessionDir } = ws.initSession({ sessionId: 'invalid-ballot', mode: 'council', task: 'Task' });
+
+    ws.castBallot(sessionDir, { round: 1, voter: 'valid-voter', role: 'author', vote: 'approve', score: 9 });
+
+    // Write a corrupt/unparseable ballot
+    const corruptPath = join(sessionDir, 'ballots', 'round-1', 'corrupt-voter.json');
+    writeFileSync(corruptPath, '{ corrupt json !!!', 'utf8');
+
+    const tally = ws.tallyBallots(sessionDir, 1, ['valid-voter', 'corrupt-voter'], { quorum: 1.0 });
+
+    assert.equal(tally.castCount, 2);
+    assert.equal(tally.validCastCount, 1);
+    assert.equal(tally.invalidCount, 1);
+    assert.equal(tally.invalidBallots[0].voter, 'corrupt-voter');
+    assert.equal(tally.quorumMet, true); // Quorum met because both voters cast something
+    assert.equal(tally.approveCount, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AgentWorkspace persists election audit details in validation record', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'council-election-audit-'));
+  try {
+    const ws = new AgentWorkspace(tmp);
+    const { sessionDir } = ws.initSession({ sessionId: 'election-audit', mode: 'council', task: 'Task' });
+
+    ws.castBallot(sessionDir, { round: 1, voter: 'bob', role: 'author', score: 8 });
+    ws.castBallot(sessionDir, { round: 1, voter: 'alice', role: 'judge', score: 9 });
+
+    const election = ws.electRepresentative(sessionDir, 1, ['bob', 'alice']);
+    const val = ws.validateChoice(sessionDir, {
+      representative: election.elected,
+      election,
+      round: 1,
+      verdict: 'validated'
+    });
+
+    assert.equal(val.record.representative, 'alice');
+    assert.ok(val.record.election);
+    assert.equal(val.record.election.elected, 'alice');
+    assert.equal(val.record.election.rule, 'highest-score-then-lexicographic-name');
+    assert.equal(val.record.election.candidates.length, 2);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
