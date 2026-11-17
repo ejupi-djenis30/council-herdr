@@ -76,3 +76,17 @@ Independent probes confirmed that a quoted author's vote can be attributed to a 
 - Do not build quote/fence heuristics to turn screen text into authorization. A checksum proves content consistency, not authorship.
 
 The owner's workflow probes are being updated accordingly: positive cases use explicit direct ballots, while a new screen-only case must remain provisional. Negative execution cases also carry direct approvals so an execution failure cannot be hidden behind a separate missing-quorum failure.
+
+## Test ownership assignment
+
+Junie is explicitly authorized to create and own `tests/acceptance.test.js`, in addition to the independent review document and scratch probes. This is an exception to the earlier read-only test restriction, not permission to edit implementation or other existing tests. The new file should preserve the independent workflow/delegate/wait contracts as ordinary `node:test` regressions in isolated temporary directories, without depending on the ignored owner scratch folder. Antigravity retains ownership of product code and all other existing tests. Junie may commit only the new test file before the implementation checkpoint and then audit the stable implementation hash.
+
+## Next product increment, after reliability acceptance
+
+The next priority is supervising existing Herdr agents, matching the user's actual Antigravity/Junie workflow. Do not implement this until the current gates pass.
+
+1. **Reuse explicitly selected terminals.** Attach a bounded task to terminal addresses the user selected, record the starting turn and task delivery, and leave those borrowed terminals alive after completion. Never clean up a terminal merely because its name matches a role. Acceptance: one Council session coordinates the existing Antigravity and Junie without launching duplicates or interrupting unrelated work.
+2. **Start, inspect, and retrieve without holding the host tool call open.** Return the session ID, participant addresses, state and next action promptly; let the host inspect progress and collect the final report later. Acceptance: progress/read/steering remain usable while an agent works, and stopping/restarting the client does not manufacture completion.
+3. **Review concrete work.** Freeze a bounded diff or proposal, identify its revision, collect independent findings with file/line references, and produce an actionable list of fixes and owners. Acceptance: a real change is improved by the review and unresolved dissent stays visible.
+
+Useful reports and recoverable execution take precedence over additional voting rounds, retention policies, more modes, or unverified host packaging.
