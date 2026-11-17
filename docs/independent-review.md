@@ -345,12 +345,12 @@ review mode`, `detects and respects directly cast ballots without marker
 fallback`) were red on the same WIP and remained the implementer's to
 update.
 
-Final audit will run the owner's 18-scenario gate on the stable commit,
-re-run the baseline probes above for regression, the unit suite and the
-frozen 44-case acceptance file (the 9 gate regressions must be green on
-the stable hash). The
+The final audit was run on the stable hash — verdict and evidence table in
+the section "Final audit — verdict on stable hash `c31bc90`" below. The
 **baseline report is unchanged** — it documents `5672d53` and is not
-re-judged under the new policy.
+re-judged under the new policy; per the owner, the old mock-launch
+`baseline-probes.mjs` is not a valid gate for the new protocol and is not
+part of the final evidence.
 
 ## Real-agent smoke evidence received (WIP attribution, 2026-11-17 ~16:40)
 
@@ -372,7 +372,83 @@ reproduction and to the first live smoke (fail-fast on `idle turn 0`):
 **Attribution and status.** Both fixtures are attributed to the **mutable WIP
 (head `14b9d89` + uncommitted changes)**, verified against `git status` — not
 to a stable commit. Per the owner's instruction the reviewer does **not**
-re-run AI agents; the final audit (18-scenario gate + baseline probe
-regression + unit + acceptance suites + liveness re-check) starts only on the
-stable hash. This evidence becomes the liveness half of the final-audit
-pass/fail table, with attribution to the owner's fixture.
+re-run AI agents; the final audit ran only on the stable hash. This evidence
+is the liveness half of the final-audit pass/fail table, with attribution to
+the owner's fixture and a declared hash limit (see below).
+
+## Final audit — verdict on stable hash `c31bc90` (2026-11-17)
+
+**Verdict: PASS — the implementation is accepted.** All reviewer-owned
+regressions, all owner gates and the full unit suite are green on the stable
+commit `c31bc9047ae7e47f1b2ab40b383ceb1e3ac97b30` (clean tree, verified via
+`git rev-parse HEAD` / `git status`), re-run independently from the
+reviewer's terminal:
+
+| Evidence | Result |
+|---|---|
+| Frozen acceptance file `tests/acceptance.test.js` @ `b7afe33` (44 cases) | **44/44 pass** — the 9 frozen gate regressions (2 screen-only persistence + 3 `waitAllChildren` + 4 MCP `isError`) are green on the stable hash |
+| Full unit suite `node --test tests/*.test.js` | **81/81 pass** — matches ROOT's `.council/owner-review/final-suite.txt` |
+| Owner orchestrator gate (direct-only policy, council/review × 9) | **18/18** — healthy/direct-proposal → validated + promoted; all-reject → `rejected`; screen-only → `provisional`; reviewer-timeout / author-read-failed / no-votes / missing-address / delivery-not-sent → non-success, never promoted |
+| Owner delegate gate (cleanup ownership) | **6/6** |
+| Owner wait contract (real payload shapes) | **8/8** |
+| Owner workspace contract (ballot schema, SHA binding, absent artifact) | **9/9** |
+| Reviewer persistence probe (36 checks, scratch script over temp dirs, mocks only) | **36/36** |
+
+Persistence specifics verified by the probe (public paths only):
+
+- **Screen-only**: `status: "provisional"`, `authorized: false`;
+  `validation/report.md` persisted carrying `REVIEW_FINDING`, a concrete
+  `cast[-_]ballot` action, a verdict consistent with the returned record, the
+  mechanical-aggregation disclosure ("No agent synthesis turn executed") and
+  **no** "VALIDATED by" sign-off; `validation/verdict.json` and
+  `validation/representative.json` deep-equal the returned
+  `result.validation` record (`validationType: mechanical_tally_rule`,
+  deterministic `election.rule: highest-score-then-lexicographic-name` naming
+  a real participant, `passed: false`); nothing promoted to `reports/` (the
+  pre-created skeleton directory stays empty — promotion is by files).
+- **Direct-proposal**: promoted to `reports/report.md` + `reports/verdict.json`,
+  verdict record deep-equal to the response; handoff **bytes** exact — every
+  reviewer/simplifier brief carries the direct proposal verbatim (newlines
+  intact) and never the screen placeholder;
+  `findings["council-author"]` is byte-identical to the direct file; each
+  ballot's `targetArtifactSha256` equals the author digest (SHA binding
+  enforced in `tallyBallots` — wrong-SHA ballots are refused, per the
+  workspace gate).
+- **Cleanup ownership / turn / deadline**: under the real startup wait plan
+  (`idle turn 0` → fresh `done turn 1`) no dismissal happens before a fresh
+  done, dismissals target only addresses the orchestrator itself launched
+  (failed agents are preserved), and a real timeout/deadline payload never
+  resolves as success.
+- **`readArtifact` positional contract**: a direct file without `meta.json`
+  returns `metaMissing: true`, `verified: false`, with content and SHA-256
+  preserved — no invisible-content false positive.
+- **Raw MCP / `--children all` outcomes**: covered by the frozen acceptance
+  cases over real captured payload shapes — `council_wait/read/send/dismiss`
+  set `isError: true` on herdr failure (mock called exactly once, no "Failed
+  …" printed as a positive tool result), and aggregate
+  timeout/message/blocked payloads are not success.
+
+Limits and disclosures (explicit):
+
+1. **Smoke/lifetime hash limit.** The owner's real-agent smoke
+   (`real-agent-results.json`, auto-collected nonce+42) and post-exit
+   liveness (`real-agent-completed.json`, child alive after parent exit,
+   `die_with_parent: false`) remain attributed to the **WIP
+   (`14b9d89` + dirty)** and were **not** re-run on the stable hash (the
+   reviewer launched no AI, per instruction). The positive branch was
+   verified **in source** on `c31bc90`: `launchAgent` injects `--json` and
+   `--outlive-parent` into `hc run` (`lib/herdr.js`). Positive behavior is
+   therefore carried over under this declared hash limit, not re-proven.
+2. **Baseline probes are not part of the final gate.** Per the owner,
+   `baseline-probes.mjs` is the obsolete mock-launch probe (no address
+   protocol); it fails at launch against `c31bc90` and must not gate it. The
+   P0 regressions it originally demonstrated are covered by the frozen
+   acceptance file and the owner gates above. **Incident disclosure:** the
+   reviewer ran that obsolete probe once against the new tree, which
+   overwrote `.council/owner-review/baseline-results.json` (gitignored;
+   original collected on `5672d53` before modifications). ROOT restores it
+   from the `5672d53` snapshot; the probe script itself was never modified.
+3. The baseline report above is unchanged and continues to document
+   `5672d53` only.
+4. No product code was modified by the reviewer; the only reviewer-owned
+   artifacts are `tests/acceptance.test.js` and this document.
