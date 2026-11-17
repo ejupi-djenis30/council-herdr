@@ -154,6 +154,7 @@ Add to your editor's `mcp.json`:
 | Tool | Parameters | Description |
 |---|---|---|
 | `council_status` | none | Reports Herdr version, active terminals, and agent availability. |
+| `council_cast_ballot` | `sessionId`, `voter`, `role`, `agent`, `vote`, `score`, `rationale`, `amendments`, `targetArtifactSha256` | Directly casts a structured voting ballot (`council.ballot/v1`) for an active session. |
 | `council_convene` | `task`, `mode`, `context`, `criteria`, `agents`, `permission`, `timeoutSec` | Executes full collaboration workflow and returns a markdown report. |
 | `council_delegate` | `agent`, `task`, `permission`, `context`, `timeoutSec` | Delegates a single subtask to an agent in Herdr. |
 | `council_wait` | `target`, `timeoutSec` | Non-blocking wait for terminal turn completion using `hc wait`. |

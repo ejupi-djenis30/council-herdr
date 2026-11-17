@@ -7,6 +7,7 @@ Every participating Council member casts an explicit voting ballot stored at `.a
 ```json
 {
   "$schema": "council.ballot/v1",
+  "sessionId": "council-session-123",
   "round": 1,
   "voter": "council-skeptic",
   "role": "skeptic",
@@ -22,6 +23,29 @@ Every participating Council member casts an explicit voting ballot stored at `.a
   "submittedAt": "2026-11-17T12:00:00.000Z"
 }
 ```
+
+## Ballot Authoring Methods
+
+Council participants can cast their ballots using any of three methods:
+
+1. **MCP Tool (`council_cast_ballot`)**: Direct programmatic submission by agents connected to the MCP server:
+   ```json
+   {
+     "sessionId": "council-123",
+     "voter": "council-skeptic",
+     "role": "skeptic",
+     "agent": "codex",
+     "vote": "amend",
+     "score": 7,
+     "rationale": "Needs exponential backoff",
+     "amendments": ["Add jitter"]
+   }
+   ```
+2. **CLI Command (`council cast-ballot`)**: Direct submission from terminal scripts or agents with shell access:
+   ```bash
+   council cast-ballot --session council-123 --voter council-skeptic --vote amend --score 7 --rationale "Needs exponential backoff"
+   ```
+3. **Screen Output Markers (Fallback)**: If an agent outputs text markers in its turn (`[VOTE: ...] [SCORE: ...] [RATIONALE: ...]`), the orchestrator synthesizes the ballot into `ballots/round-<n>/<voter>.json`. If a direct ballot already exists on disk, it is honored directly without synthesis fallback.
 
 ## Tally & Quorum Protocol
 

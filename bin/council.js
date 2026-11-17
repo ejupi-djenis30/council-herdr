@@ -20,6 +20,7 @@ COMMANDS:
   read <target> [--lines <n>]   Read screen history from a terminal
   send <target> <message>       Send input/instruction to a terminal
   dismiss <targets...>          Kill and remove terminal(s) from Herdr
+  cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
 
 CONVENE OPTIONS:
   --mode <name>                 Mode: council (default), review, debate, parallel, pipeline
@@ -31,6 +32,18 @@ CONVENE OPTIONS:
   --timeout <sec>               Timeout in seconds per agent turn (default: 180)
   --keep                        Keep Herdr terminals open after completion
 
+CAST-BALLOT OPTIONS:
+  --session <id>                Session ID or directory in .agent_workspace/
+  --voter <name>                Voter identifier (e.g. council-skeptic)
+  --vote <approve|reject|amend> Ballot vote decision (default: approve)
+  --score <1-10>                Score between 1 and 10 (default: 8)
+  --rationale <text>            Explanation or risk justification for the vote
+  --role <role>                 Role: author, reviewer, skeptic, simplifier, judge (default: reviewer)
+  --agent <agent>               Agent CLI: claude, codex, antigravity, junie (default: codex)
+  --round <n>                   Voting round number (default: 1)
+  --amendments <a,b...>         Comma-separated requested amendments
+  --target-sha <sha256>         Target artifact SHA-256 digest being voted on
+
 DELEGATE OPTIONS:
   --agent <name>                Target agent: claude, codex, antigravity, junie
   --task <string>               Instruction for the agent
@@ -41,6 +54,7 @@ EXAMPLES:
   council convene --mode council --task "Design a resilient telemetry pipeline"
   council convene --mode review --task "Review src/auth.js" --permission read
   council delegate --agent codex --task "Write unit tests for parser"
+  council cast-ballot --session council-123 --voter council-skeptic --vote amend --score 7 --rationale "Needs retry backoff"
   council mcp
 `);
 }
@@ -223,6 +237,43 @@ async function main() {
         const res = herdr.dismiss(t);
         console.log(`Dismissed ${t}: ${res.success ? 'OK' : 'Failed'}`);
       }
+      break;
+    }
+
+    case 'cast-ballot':
+    case 'ballot': {
+      const sessionId = flags.session || flags._[0];
+      const voter = flags.voter || flags._[1];
+      const vote = flags.vote || flags._[2] || 'approve';
+      const score = flags.score !== undefined ? Number(flags.score) : 8;
+      const rationale = flags.rationale || flags.reason || (flags._.length > 3 ? flags._.slice(3).join(' ') : '');
+      const role = flags.role || 'reviewer';
+      const agent = flags.agent || 'codex';
+      const round = flags.round ? Number(flags.round) : 1;
+      const amendments = flags.amendments ? flags.amendments.split(',').map(s => s.trim()) : [];
+      const targetArtifactSha256 = flags['target-sha'] || flags.targetSha || '';
+
+      if (!sessionId || !voter || !rationale) {
+        console.error('Error: --session, --voter, and --rationale are required for cast-ballot.');
+        console.error('Usage: council cast-ballot --session <id> --voter <name> --vote <approve|reject|amend> --score <1-10> --rationale "<text>"');
+        process.exit(1);
+      }
+
+      const sDir = orchestrator.workspace.resolveSessionDir(sessionId);
+      const res = orchestrator.workspace.castBallot(sDir, {
+        round,
+        voter,
+        role,
+        agent,
+        vote,
+        score,
+        rationale,
+        amendments,
+        targetArtifactSha256
+      });
+
+      console.log(`Ballot recorded for ${voter} (round ${round}) at ${res.ballotPath}`);
+      console.log(JSON.stringify(res.ballot, null, 2));
       break;
     }
 

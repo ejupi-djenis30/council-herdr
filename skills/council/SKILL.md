@@ -53,6 +53,9 @@ When Council's MCP server is connected:
    - `council_wait({ target: "council-author" })`
    - `council_dismiss({ target: "council-author" })`
 
+5. **Direct Ballot Authoring**:
+   - `council_cast_ballot({ sessionId, voter, role, agent, vote, score, rationale, amendments, targetArtifactSha256 })`
+
 ### Method 2: Using the Packaged CLI
 
 If MCP tools are not active in the current host, use the bundled CLI:
@@ -69,6 +72,9 @@ node bin/council.js convene --mode review --task "Review commit diff for memory 
 
 # Delegate to Codex
 node bin/council.js delegate --agent codex --task "Add edge case unit tests"
+
+# Cast a direct voting ballot
+node bin/council.js cast-ballot --session <id> --voter council-skeptic --vote amend --score 7 --rationale "Add retry jitter"
 
 # Check status or dismiss terminals
 node bin/council.js status

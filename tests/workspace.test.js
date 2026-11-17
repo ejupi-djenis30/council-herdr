@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { AgentWorkspace, sanitizeName, atomicWrite } from '../lib/workspace.js';
 
 test('sanitizeName protects against Windows reserved device names, case, and dots', () => {
@@ -301,6 +301,22 @@ test('AgentWorkspace persists election audit details in validation record', () =
     assert.equal(val.record.election.elected, 'alice');
     assert.equal(val.record.election.rule, 'highest-score-then-lexicographic-name');
     assert.equal(val.record.election.candidates.length, 2);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AgentWorkspace resolves session directories from ID or path', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'council-resolve-'));
+  try {
+    const ws = new AgentWorkspace(tmp);
+    const resolvedFromId = ws.resolveSessionDir('my-session');
+    assert.equal(resolvedFromId, join(tmp, '.agent_workspace', 'my-session'));
+
+    const existingDir = join(tmp, 'custom-session');
+    mkdirSync(existingDir, { recursive: true });
+    const resolvedFromPath = ws.resolveSessionDir(existingDir);
+    assert.equal(resolvedFromPath, resolve(existingDir));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

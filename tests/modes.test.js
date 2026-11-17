@@ -150,3 +150,55 @@ test('CouncilOrchestrator runs delegate mode', async () => {
   assert.match(res.output, /Mock output from delegate-codex/);
   assert.equal(mockHerdr.dismissed.length, 1);
 });
+
+test('CouncilOrchestrator detects and respects directly cast ballots without marker fallback', async () => {
+  const { rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+
+  const mockHerdr = new MockHerdrClient();
+  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
+  const testSid = `test-direct-ballot-${Date.now().toString(36)}`;
+  const sDir = orchestrator.workspace.resolveSessionDir(testSid);
+
+  // Directly cast a ballot prior to the voting stage
+  orchestrator.workspace.castBallot(sDir, {
+    round: 1,
+    voter: 'council-skeptic',
+    role: 'skeptic',
+    agent: 'codex',
+    vote: 'reject',
+    score: 2,
+    rationale: 'Direct ballot: fatal race condition in storage engine'
+  });
+
+  const progressEvents = [];
+  const res = await orchestrator.runMode({
+    mode: 'council',
+    sessionId: testSid,
+    task: 'Evaluate storage engine design',
+    agents: ['claude', 'codex', 'antigravity'],
+    keepTerminals: false,
+    onProgress: (ev) => progressEvents.push(ev)
+  });
+
+  assert.equal(res.success, true);
+
+  // Verify that ballot_detected was emitted for the direct voter
+  const directEvent = progressEvents.find(
+    e => e.stage === 'ballot_detected' && e.name === 'council-skeptic'
+  );
+  assert.ok(directEvent, 'Expected ballot_detected event for council-skeptic');
+  assert.equal(directEvent.source, 'direct');
+
+  // Verify that the direct ballot's score and rationale are recorded in the tally
+  assert.equal(res.tally.rejectCount, 1);
+  assert.ok(
+    res.tally.dissent.some(d => d.rationale.includes('fatal race condition')),
+    'Direct ballot rationale should be included in tally dissent'
+  );
+
+  // Clean up
+  try {
+    rmSync(sDir, { recursive: true, force: true });
+  } catch {}
+});

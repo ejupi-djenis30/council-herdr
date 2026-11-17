@@ -38,6 +38,7 @@ test('CouncilMcpServer lists all council tools', async () => {
   assert.equal(response.id, 2);
   const toolNames = response.result.tools.map(t => t.name);
   assert.ok(toolNames.includes('council_status'));
+  assert.ok(toolNames.includes('council_cast_ballot'));
   assert.ok(toolNames.includes('council_convene'));
   assert.ok(toolNames.includes('council_delegate'));
   assert.ok(toolNames.includes('council_wait'));
@@ -112,4 +113,39 @@ test('CouncilMcpServer executes tools via tools/call', async () => {
   });
   assert.equal(response.id, 13);
   assert.match(response.result.content[0].text, /Dismissed terminal t1/);
+
+  // Test council_cast_ballot
+  const testSid = `test-ballot-mcp-${Date.now().toString(36)}`;
+  await server.handleMessage({
+    jsonrpc: '2.0',
+    id: 14,
+    method: 'tools/call',
+    params: {
+      name: 'council_cast_ballot',
+      arguments: {
+        sessionId: testSid,
+        voter: 'council-skeptic',
+        role: 'skeptic',
+        agent: 'codex',
+        vote: 'amend',
+        score: 7,
+        rationale: 'Edge case in connection pooling needs explicit timeout',
+        amendments: ['Add 5s connect timeout']
+      }
+    }
+  });
+  assert.equal(response.id, 14);
+  const ballotResult = JSON.parse(response.result.content[0].text);
+  assert.equal(ballotResult.status, 'ok');
+  assert.equal(ballotResult.ballot.voter, 'council-skeptic');
+  assert.equal(ballotResult.ballot.vote, 'amend');
+  assert.equal(ballotResult.ballot.score, 7);
+  assert.equal(ballotResult.ballot.$schema, 'council.ballot/v1');
+
+  // Clean up test workspace
+  try {
+    const { rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    rmSync(join(server.workspace.baseDir, testSid), { recursive: true, force: true });
+  } catch {}
 });
