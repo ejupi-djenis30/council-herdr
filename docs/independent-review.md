@@ -7,7 +7,7 @@ reviewer; the implementer must not edit it.
 
 - **Baseline audited:** `5672d53` (`5672d5354abbf934707bff90539628be3b4680ce`), audited 2026-11-17 from a **clean detached clone** — never the implementer's working tree.
 - **Baseline suite on the same clone:** `node --test tests/*.test.js` → **37/37 pass** (268 ms). The suite is green while every P0 below reproduces; it does not exercise the failure paths.
-- **Implementation audit:** **pending** — will be appended after Antigravity publishes a stable commit hash. Interim WIP results are explicitly **not** attributed to any commit.
+- **Implementation audit:** **PASS — accepted on stable hash `c31bc90`** (`c31bc9047ae7e47f1b2ab40b383ceb1e3ac97b30`); verdict, evidence table and limits in the final section "Final audit — verdict on stable hash `c31bc90`" below.
 
 ## Method and evidence limits
 
@@ -352,7 +352,7 @@ re-judged under the new policy; per the owner, the old mock-launch
 `baseline-probes.mjs` is not a valid gate for the new protocol and is not
 part of the final evidence.
 
-## Real-agent smoke evidence received (WIP attribution, 2026-11-17 ~16:40)
+## Real-agent smoke evidence received (WIP attribution, 2026-11-17)
 
 The owner (Codex, `t10k`) ran a **second real-agent smoke test from root** and
 it **PASSED** — this is the positive counterpart to gate 6's failure
@@ -446,9 +446,11 @@ Limits and disclosures (explicit):
    acceptance file and the owner gates above. **Incident disclosure:** the
    reviewer ran that obsolete probe once against the new tree, which
    overwrote `.council/owner-review/baseline-results.json` (gitignored;
-   original collected on `5672d53` before modifications). ROOT restores it
-   from the `5672d53` snapshot; the probe script itself was never modified.
+   original collected on `5672d53` before modifications). ROOT restored it
+   from the `5672d53` snapshot and all five P0s were reconfirmed on the
+   restored archive; the probe script itself was never modified.
 3. The baseline report above is unchanged and continues to document
    `5672d53` only.
 4. No product code was modified by the reviewer; the only reviewer-owned
-   artifacts are `tests/acceptance.test.js` and this document.
+   artifacts in the repository are the tracked files
+   `tests/acceptance.test.js` and `docs/independent-review.md`.
