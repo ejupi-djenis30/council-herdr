@@ -94,3 +94,9 @@ Useful reports and recoverable execution take precedence over additional voting 
 ## Closing handoff
 
 After Antigravity's implementation and Junie's frozen acceptance tests (`b7afe33`), the owner took the final runtime/report/metadata fixes and integration commit. Antigravity is now read-only reviewer; Junie performs the independent audit of that stable commit. No implementation edits, extra feature scope or further AI smoke launches are assigned during this final audit. The owner's final suite passed 81/81; the real Codex delegation and terminal-lifetime checks passed separately, with their evidence limits recorded in the independent review.
+
+## Acceptance decision — 2026-11-17
+
+The owner accepts the local reliability milestone on implementation commit `c31bc9047ae7e47f1b2ab40b383ceb1e3ac97b30`. Antigravity's read-only review found no P0/P1 issues; Junie's independent audit recorded PASS in `c86866e`, with 81/81 tests, the owner gates and 36 additional persistence checks passing. The live Codex/lifetime evidence remains attributed to the tested WIP (`14b9d89` plus changes), with the positive execution branch checked against the stable implementation; it is not claimed as a fresh AI run on the final hash or proof of every host integration.
+
+Next assignment is design only: reuse explicitly selected existing Herdr terminals and expose nonblocking session start/status/result operations. Keep production code/tests unchanged while proposing the smallest complete increment and its acceptance cases. A resume/re-tally command for provisional sessions is a later nonblocking backlog item.

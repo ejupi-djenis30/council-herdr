@@ -2,7 +2,7 @@
 
 Council adds bounded delegation, proposal handoffs, independent review and durable results to Herdr. Herdr runs the visible, interactive terminals; Council organizes their work.
 
-The reliability milestone is under final review. See [acceptance and priorities](docs/owner-brief.md) and [the independent review](docs/independent-review.md).
+The reliability milestone passed local verification and independent review on commit `c31bc90`: 81/81 tests plus separate live Herdr/Codex evidence with its declared hash limits. See [acceptance and priorities](docs/owner-brief.md) and [the independent review](docs/independent-review.md).
 
 ## Available workflows
 
