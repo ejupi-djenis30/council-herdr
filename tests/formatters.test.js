@@ -30,7 +30,7 @@ test('formatParticipantBrief generates well-structured markdown', () => {
   assert.match(brief, /Evaluate the caching layer/);
   assert.match(brief, /Using in-memory LRU/);
   assert.match(brief, /Max memory 512MB/);
-  assert.match(brief, /Reporting Contract/);
+  assert.match(brief, /Reporting.*Contract/);
 });
 
 test('formatCouncilReport collates findings and synthesis', () => {

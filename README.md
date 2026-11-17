@@ -31,6 +31,9 @@ flowchart TD
 
 - **Zero Production Dependencies**: Runs on modern Node.js (`>= 20`) without installing or maintaining third-party npm packages.
 - **Herdr-Native**: Automatically formats and spawns real interactive agent terminals inside Herdr (`hc run --bg ...`), tracks turn states with `hc wait`, and reads screen buffers with `hc read`.
+- **Deterministic Workspace (`.agent_workspace/`)**: All briefs, drafts, reviews, ballots, and decisions are exchanged through structured, atomic subdirectories with cryptographic SHA-256 indexing (`artifacts/index.jsonl`).
+- **Formal Voting & Representative Validation**: Every council member casts a structured ballot (`council.ballot/v1`) with quorum checks and dissent preservation; an elected Representative verifies artifact SHA-256 integrity and signs the final binding ruling.
+- **Lazy Genius / Ponytail Protocol**: Integrates the *Ponytail* decision ladder ("The best code is the code you never wrote") to aggressively eliminate premature abstractions, unnecessary dependencies, and code bloat.
 - **Universal Plugin Support**:
   - **Antigravity (AGY)**: Native plugin manifest (`plugin.json`), MCP integration (`mcp_config.json`), rules, and progressive disclosure skills.
   - **Claude Code**: Packaged `.claude-plugin/`, marketplace metadata, slash command (`/council`), and `.mcp.json`.

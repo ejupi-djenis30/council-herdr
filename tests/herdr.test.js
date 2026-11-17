@@ -39,7 +39,7 @@ test('HerdrClient writes brief file for multiline tasks', () => {
   });
 
   assert.equal(res.success, true);
-  const briefPath = join(testCwd, '.council', 'briefs', 'brief-test-agent.md');
+  const briefPath = join(testCwd, '.agent_workspace', 'default', 'briefs', 'test-agent.md');
   assert.equal(existsSync(briefPath), true, 'Brief file should be created');
 
   // Cleanup brief file

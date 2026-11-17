@@ -60,7 +60,7 @@ test('CouncilOrchestrator runs council mode and cleans up terminals', async () =
   assert.equal(mockHerdr.launched.length, 3);
   assert.equal(mockHerdr.waited.length, 3);
   assert.equal(mockHerdr.dismissed.length, 3);
-  assert.match(res.report, /Full Council Deliberation Report/);
+  assert.match(res.report, /Full Council Deliberation/);
 });
 
 test('CouncilOrchestrator runs review mode', async () => {

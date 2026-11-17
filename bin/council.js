@@ -110,6 +110,8 @@ async function main() {
       }
       const agents = flags.agents ? flags.agents.split(',').map(s => s.trim()) : ['claude', 'codex', 'antigravity'];
       const mode = flags.mode || 'council';
+      const representative = flags.representative || null;
+      const sessionId = flags.session || null;
       const permission = flags.permission || 'read';
       const timeoutSec = flags.timeout ? Number(flags.timeout) : 180;
       const keepTerminals = Boolean(flags.keep);
@@ -117,6 +119,8 @@ async function main() {
       console.log(`[Council] Convening in ${mode.toUpperCase()} mode with agents: ${agents.join(', ')}...`);
       const result = await orchestrator.runMode({
         mode,
+        sessionId,
+        representative,
         task,
         context: flags.context || '',
         criteria: flags.criteria || '',
@@ -125,8 +129,11 @@ async function main() {
         timeoutSec,
         keepTerminals,
         onProgress: ev => {
+          if (ev.stage === 'workspace_initialized') console.log(`  -> Workspace: ${ev.sessionDir}`);
           if (ev.stage === 'launch') console.log(`  -> Spawning ${ev.name} (${ev.agent})...`);
           if (ev.stage === 'waiting_initial') console.log(`  -> Waiting for deliberations...`);
+          if (ev.stage === 'voting_round') console.log(`  -> Formal voting round ${ev.round} in progress...`);
+          if (ev.stage === 'representative_validation') console.log(`  -> Representative validation (${ev.representative})...`);
           if (ev.stage === 'cleanup') console.log(`  -> Cleaning up terminals...`);
         }
       });
