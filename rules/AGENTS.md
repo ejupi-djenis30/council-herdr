@@ -1,26 +1,13 @@
-# Council Rules for AI Agents
+# Council rules
 
-When the Council plugin is active, you can delegate tasks, run peer reviews, conduct structured debates, and reach consensus by orchestrating a Council of AI agents (Claude Code, Codex, Antigravity, Junie) running inside Herdr.
+Council coordinates bounded `delegate`, `council` and `review` workflows through Herdr. `debate`, `parallel` and `pipeline` are disabled experimental modes.
 
-## Principles of the Council
+1. Read the installed `hc --skill`. Keep agents visible, interactive and scoped; no extra agents without authorization.
+2. Complete the author before reviewer launch. Hand off exact proposal content/path and digest. Prefer direct artifacts; label screen fallbacks honestly.
+3. Interpret delivery, status, turn and wait reason. Startup idle is not completion. Use bounded Herdr waits; preserve incomplete agents and never blindly resubmit.
+4. Cleanup completed, owned terminal addresses only. Recoverable agents must survive orchestrator exit. Never automatically dismiss borrowed/user terminals.
+5. Only valid direct ballots from completed participants authorize approval. Screen text, examples and quoted votes are informational. Missing quorum or rejection cannot become approval.
+6. Persist provisional reports, evidence and next actions under `validation/`. Promote approved reports only after validation. Mechanical checks are not signatures or agent endorsements; checksums do not establish authorship.
+7. Default to read permissions. If a sandbox lacks `hc` or direct writes, collect its final response rather than bypassing permissions.
 
-1. **Evidence-Based Deliberation**:
-   - Competing perspectives strengthen solutions. Do not default to unexamined consensus.
-   - Separate proposals from critiques and final synthesis.
-
-2. **Roles in the Council**:
-   - **Author / Implementer**: Produces the primary design or code implementation.
-   - **Systematic Reviewer**: Checks correctness, test coverage, and specifications.
-   - **Critical Skeptic**: Identifies edge cases, race conditions, failure modes, and unstated assumptions.
-   - **Radical Simplifier (Lazy Genius)**: Eliminates speculative abstractions, over-engineering, and unnecessary machinery.
-   - **Judge / Synthesizer**: Reconciles disagreements, weighs trade-offs, and provides an authoritative ruling.
-
-3. **Herdr-Native Execution Rules**:
-   - Agents run in real interactive terminals inside Herdr (`hc run --bg --name <n> --cwd <dir> -- <agent> "<task>"`).
-   - Use `hc wait` or `council_wait` to wait for agent turns to finish. **Never poll or sleep in loops.**
-   - Screen buffers and history can be inspected with `hc read` or `council_read`.
-   - Clean up completed terminals with `hc kill` + `hc rm` or `council_dismiss` unless the user asks to inspect them.
-
-4. **Safety & Permissions**:
-   - Default to `permission: read` (plan / read-only mode) for reviews, debates, and architectural deliberations.
-   - Use `permission: write` only when the user explicitly requests code modification or automated implementation.
+For development acceptance and file ownership read `docs/owner-brief.md`. Host configuration files alone do not establish automatic discovery or live compatibility.

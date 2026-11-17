@@ -4,9 +4,18 @@
 > **Repository**: [Council](file:///C:/Users/djeeju/Documents/Tools/Council)  
 > **Evaluators**: Antigravity (`t106`) & Junie (`t10c`)  
 > **Review Date**: 2026-11-17  
-> **Status**: **RATIFIED / LGTM**  
+> **Status**: **HISTORICAL REVIEW — SUPERSEDED; NOT CURRENT ACCEPTANCE**
 
 ---
+
+This document records an earlier review and its limited test scope. The later
+independent audit of baseline `5672d53` reproduced false approvals, ignored
+wait/read failures, missing proposal handoffs and unsafe cleanup despite a green
+suite. Its former LGTM is not a release endorsement. Current acceptance is
+defined in [the owner brief](owner-brief.md) and evaluated in
+[the independent review](independent-review.md). The historical descriptions
+below, including host compatibility, six modes and signed/ratified claims, must
+not be treated as current product guarantees.
 
 ## 1. Executive Summary
 

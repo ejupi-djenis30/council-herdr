@@ -1,184 +1,71 @@
-# Council (v2.0)
+# Council
 
-> **Herdr-native multi-agent collaboration plugin for Claude Code, Codex, Antigravity, Junie, and all AI coding assistants.**
+Council adds bounded delegation, proposal handoffs, independent review and durable results to Herdr. Herdr runs the visible, interactive terminals; Council organizes their work.
 
-Council coordinates teams of AI agents to solve complex engineering challenges through structured deliberation, independent peer review, formal debate, and consensus synthesis. Built specifically to run on top of **Herdr** (`hc`), Council launches agents into persistent, visible terminals that humans and agents can observe and steer in real time.
+The reliability milestone is under final review. See [acceptance and priorities](docs/owner-brief.md) and [the independent review](docs/independent-review.md).
 
-```mermaid
-flowchart TD
-    User["User / Orchestrator Agent"]
-    Council["Council Core (MCP / CLI)"]
-    Herdr["Herdr Core (hc)"]
-    
-    User -->|Convene / Delegate| Council
-    Council -->|Spawn & Supervise| Herdr
-    
-    Herdr --> Author["council-author\n(Claude Code)"]
-    Herdr --> Skeptic["council-skeptic\n(Codex)"]
-    Herdr --> Simplifier["council-simplifier\n(Antigravity / Junie)"]
-    
-    Author -->|Proposal| Herdr
-    Skeptic -->|Red-Team Critique| Herdr
-    Simplifier -->|Simplification| Herdr
-    
-    Herdr -->|Submissions| Council
-    Council -->|Synthesized Verdict & Action Plan| User
+## Available workflows
+
+| Mode | Behavior |
+| --- | --- |
+| `delegate` | One specialist receives a bounded task; Council waits for its actual turn and collects the result. |
+| `council` | An author produces a proposal; a skeptic and simplifier receive that exact proposal and its SHA-256 digest. |
+| `review` | An author produces a proposal; a reviewer and simplifier inspect it before the voting tally. |
+
+`debate`, `parallel` and `pipeline` are experimental and disabled. Council currently launches new participants. Reusing existing Herdr terminals and a nonblocking start/status/result API are the next priorities.
+
+## Run it
+
+Requirements: Node.js 20 or newer, `hc` on the parent process's PATH, and a selected agent CLI with working authentication. There are no production npm dependencies. Live checks here used Windows, Node.js 24.14.1 and `hc 0.1.21`; those checks do not verify other environments.
+
+Run from the project directory the agents should inspect. Replace the executable path with the absolute path to this checkout:
+
+```powershell
+node C:/path/to/Council/bin/council.js doctor
+node C:/path/to/Council/bin/council.js delegate --agent codex --task "Inspect src/parser.js and report concrete edge cases" --permission read
+node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
 ```
 
----
+Inside Herdr, read `hc --skill` and run long commands in named background terminals:
 
-## Highlights
-
-- **Zero Production Dependencies**: Runs on modern Node.js (`>= 20`) without installing or maintaining third-party npm packages.
-- **Herdr-Native**: Automatically formats and spawns real interactive agent terminals inside Herdr (`hc run --bg ...`), tracks turn states with `hc wait`, and reads screen buffers with `hc read`.
-- **Deterministic Workspace (`.agent_workspace/`)**: All briefs, drafts, reviews, ballots, and decisions are exchanged through structured, atomic subdirectories with cryptographic SHA-256 indexing (`artifacts/index.jsonl`).
-- **Formal Voting & Representative Validation**: Every council member casts a structured ballot (`council.ballot/v1`) with quorum checks and dissent preservation; an elected Representative verifies artifact SHA-256 integrity and signs the final binding ruling.
-- **Lazy Genius / Ponytail Protocol**: Integrates the *Ponytail* decision ladder ("The best code is the code you never wrote") to aggressively eliminate premature abstractions, unnecessary dependencies, and code bloat.
-- **Universal Plugin Support**:
-  - **Antigravity (AGY)**: Native plugin manifest (`plugin.json`), MCP integration (`mcp_config.json`), rules, and progressive disclosure skills.
-  - **Claude Code**: Packaged `.claude-plugin/`, marketplace metadata, slash command (`/council`), and `.mcp.json`.
-  - **OpenAI Codex**: Configured `.codex-plugin/` and skills.
-  - **Junie**: Native skill loader support via `skills/council/SKILL.md`.
-  - **Cursor / Windsurf / OpenCode / Zed**: Standard Model Context Protocol (MCP 2024-11-05) over stdio.
-- **6 Collaboration Modes**:
-  1. **Council**: Full multi-perspective panel (Author, Skeptic, Simplifier, Judge) to solve consequential architectural decisions.
-  2. **Review**: Multi-reviewer peer inspection (Correctness + Radical Simplification).
-  3. **Debate**: Two competing viewpoints argued vigorously and settled by an impartial referee.
-  4. **Parallel**: High-throughput fan-out across multiple independent subtasks.
-  5. **Pipeline**: Sequential staged handoffs (Spec &rarr; Implementation &rarr; Verification).
-  6. **Delegate**: Single bounded subtask offloaded to a designated specialist agent.
-
----
-
-## Quickstart
-
-### 1. Check Environment Health
-
-Verify that Herdr (`hc`) and your agent CLIs are detected:
-
-```bash
-node bin/council.js doctor
+```powershell
+hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal"
+hc wait parser-review
+hc read parser-review
 ```
 
-Output:
-```text
---- Council Environment Health Check ---
-Herdr Core CLI (hc): Available (hc 0.1.21)
-Current Session:     Inside Herdr terminal (t106)
+`doctor` checks executable availability, not authentication or every host integration. Default agents are Claude, Codex and Antigravity; `--agents codex,junie,antigravity` selects another panel. Use `--permission write` only for an authorized editing task. `--timeout` is the turn budget in seconds; `--keep` retains completed participants for inspection.
 
-Supported Agent CLIs:
-  - claude      : Ready (C:\Users\djeeju\.local\bin\claude.exe)
-  - codex       : Ready (C:\Users\djeeju\AppData\Roaming\npm\codex)
-  - antigravity : Ready (C:\Users\djeeju\AppData\Local\agy\bin\agy.exe)
-  - junie       : Ready (C:\Users\djeeju\.local\bin\junie.bat)
+## Results and approvals
+
+Sessions live under `.agent_workspace/<session-id>/` in the target project. Inputs, briefs, proposals, reviews, direct ballots and validation records are separate artifacts. Reviewers receive the author's proposal before starting.
+
+- Only valid **direct ballots**, bound to the session, expected voter, round and exact proposal digest, contribute to authorizing quorum. The participant's turn must complete successfully.
+- Screen output and vote markers are informational. A quoted vote cannot authorize approval on somebody else's behalf. Insufficient direct ballots leave the result provisional and unauthorized.
+- Provisional reports, evidence and next actions belong under `validation/`. Approved reports are promoted to `reports/` only after validation.
+- The tally and integrity checks are mechanical. An elected representative name is not an agent synthesis, signature or endorsement. SHA-256 verifies content consistency, not authorship.
+- Blocked, timed out and incomplete participants are preserved for recovery. Managed terminals outlive a short-lived orchestrator. Cleanup targets completed, owned terminal addresses. Inspect a preserved terminal with `hc get <address>` and `hc read <address>` before steering it.
+
+Read-only agents can return their final answer normally. A sandbox may lack `hc` or artifact-write access; it must not be weakened to submit a ballot. Screen evidence remains useful as a provisional report.
+
+For an explicit vote, use the proposal digest supplied in the review brief:
+
+```powershell
+node C:/path/to/Council/bin/council.js cast-ballot --session <session-id-or-path> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Add a bounded connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
 ```
 
-### 2. Convene a Council
+Submit from the same target project, or pass the explicit session directory. A ballot written after a workflow returns does not automatically rerun or promote it. See [voting and validation](docs/voting-and-validation.md).
 
-```bash
-# Full multi-perspective council
-node bin/council.js convene --mode council --task "Design a high-throughput event processing pipeline"
+## MCP and host packaging
 
-# Focused peer review on a file or diff
-node bin/council.js convene --mode review --task "Review src/auth.js for session hijacking vulnerabilities"
+Start the stdio server with `node /absolute/path/to/Council/bin/council.js mcp`. Configure the host to launch it in the intended project directory; the server's working directory determines the target project and session location.
 
-# Delegate a task to Codex
-node bin/council.js delegate --agent codex --task "Generate comprehensive property tests for tokenizer"
-```
+Tools: `council_convene`, `council_delegate`, `council_cast_ballot`, `council_status`, `council_wait`, `council_read`, `council_send`, `council_dismiss`. Workflow calls wait for results; nonblocking sessions are not implemented yet. Herdr remains available for inspection and steering while a call runs.
 
----
+The repository includes host manifests/configuration examples for Claude Code, Codex and Antigravity, plus a reusable skill for Junie and other hosts. These files do not establish automatic discovery or live compatibility with every application. The verified live-agent check used Codex through Herdr; MCP protocol/error behavior is tested separately.
 
-## Host Integration Guide
+## Verification
 
-### 1. Antigravity (AGY)
-- **Automatic Discovery**: If Council is located in your workspace or linked into `~/.gemini/config/plugins/council`, Antigravity detects `plugin.json` and loads the `council` skill and MCP tools automatically.
-- **Manual Registration**: Add to your project `.agents/plugins.json` or `config.json`:
-  ```json
-  {
-    "mcpServers": {
-      "council": {
-        "command": "node",
-        "args": ["C:/Users/djeeju/Documents/Tools/Council/bin/council.js", "mcp"]
-      }
-    }
-  }
-  ```
+Run `npm test`. Independent regressions cover failed waits/reads, missing delivery and addresses, exact proposal handoffs, direct-only authorization, provisional evidence, owned cleanup and startup timing. Live Herdr checks and a bounded Codex read-only task are recorded in [the review](docs/independent-review.md); mocked tests are not live-agent proof.
 
-### 2. Claude Code
-- Load directly via CLI flag:
-  ```bash
-  claude --plugin-dir C:/Users/djeeju/Documents/Tools/Council
-  ```
-- Or link into Claude's global MCP settings:
-  ```json
-  {
-    "mcpServers": {
-      "council": {
-        "command": "node",
-        "args": ["C:/Users/djeeju/Documents/Tools/Council/bin/council.js", "mcp"]
-      }
-    }
-  }
-  ```
-- Use the `/council` slash command inside Claude Code.
-
-### 3. OpenAI Codex
-- Register in your Codex config (`~/.codex/config.toml` or MCP settings):
-  ```toml
-  [mcp_servers.council]
-  command = "node"
-  args = ["C:/Users/djeeju/Documents/Tools/Council/bin/council.js", "mcp"]
-  ```
-
-### 4. Junie
-- Link or copy `skills/council` to `~/.junie/skills/council`.
-- Junie loads the skill automatically during sessions.
-
-### 5. Cursor, Windsurf, Zed & Other MCP Hosts
-Add to your editor's `mcp.json`:
-```json
-{
-  "mcpServers": {
-    "council": {
-      "command": "node",
-      "args": ["C:/Users/djeeju/Documents/Tools/Council/bin/council.js", "mcp"]
-    }
-  }
-}
-```
-
----
-
-## MCP Tools Reference
-
-| Tool | Parameters | Description |
-|---|---|---|
-| `council_status` | none | Reports Herdr version, active terminals, and agent availability. |
-| `council_cast_ballot` | `sessionId`, `voter`, `role`, `agent`, `vote`, `score`, `rationale`, `amendments`, `targetArtifactSha256` | Directly casts a structured voting ballot (`council.ballot/v1`) for an active session. |
-| `council_convene` | `task`, `mode`, `context`, `criteria`, `agents`, `permission`, `timeoutSec` | Executes full collaboration workflow and returns a markdown report. |
-| `council_delegate` | `agent`, `task`, `permission`, `context`, `timeoutSec` | Delegates a single subtask to an agent in Herdr. |
-| `council_wait` | `target`, `timeoutSec` | Non-blocking wait for terminal turn completion using `hc wait`. |
-| `council_read` | `target`, `lines` | Retrieves recent output buffer from a Herdr terminal. |
-| `council_send` | `target`, `message` | Sends steering input or follow-up to an agent in Herdr. |
-| `council_dismiss` | `target` | Terminates and removes a terminal from Herdr (`hc kill` + `hc rm`). |
-
----
-
-## Agent Launch Recipes under Herdr
-
-Council applies verified, safe Windows launch recipes:
-
-| Agent | Read-Only (Plan) | Write (Edit) | Notes |
-|---|---|---|---|
-| **Claude Code** | `claude --permission-mode plan` | `claude --permission-mode acceptEdits` | Trailing task argument |
-| **Codex** | `codex --no-daemon -s read-only -a never` | `codex --no-daemon -s workspace-write -a never` | Must have `--no-daemon` under Herdr |
-| **Antigravity** | `agy --mode plan -i "<task>"` | `agy --mode accept-edits -i "<task>"` | Task is value of `-i` |
-| **Junie** | `junie --plan "--prompt=<task>"` | `junie "--prompt=<task>"` | Requires `--prompt=` to stay interactive |
-
-Long briefs are automatically saved to `.council/briefs/` to avoid command line length limits and character corruption on Windows.
-
----
-
-## License
-
-MIT &copy; Ejupi-Labs.
+MIT - Ejupi-Labs.

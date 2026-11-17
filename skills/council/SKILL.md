@@ -1,103 +1,56 @@
 ---
 name: council
-description: Coordinate Claude Code, Codex, Antigravity, and Junie with Council to solve complex engineering decisions, multi-agent peer reviews, debates, and parallel tasks via Herdr.
+description: Delegate bounded tasks and review concrete proposals through visible Herdr agents, preserving evidence and honest completion states.
 ---
 
-# Council: Multi-Agent Collaboration via Herdr
+# Council through Herdr
 
-Council coordinates a team of AI coding agents (**Claude Code, Codex, Antigravity, Junie**) running inside **Herdr** (`hc`). It provides structured deliberation modes, role-based specialization, and automated synthesis.
+Use Council when a bounded specialist task or independent review improves the work. Herdr runs terminals; Council adds briefs, handoffs and session artifacts.
 
-## When to Convene the Council
+Supported modes: `delegate`, `council`, `review`. `debate`, `parallel` and `pipeline` are disabled experimental modes. Existing-terminal adoption and nonblocking start/status/result are not implemented yet.
 
-- **Hard Architectural or Design Decisions**: When there are multiple viable approaches and trade-offs must be evaluated rigorously (`mode: council`).
-- **Comprehensive Peer Review**: When an author drafts a solution and needs independent review plus ruthless simplification (`mode: review`).
-- **Formal Debate**: When two competing paradigms or technologies clash and need an evidence-based verdict (`mode: debate`).
-- **Sharded Work / Fan-Out**: When multiple independent investigations or refactorings can run in parallel (`mode: parallel`).
-- **Sequential Staged Pipeline**: When tasks form a chain (e.g. Spec -> Implement -> Test -> Review) (`mode: pipeline`).
-- **Targeted Delegation**: When a single specialized subtask is offloaded to another agent in Herdr (`mode: delegate`).
+## Start
 
-## How to Convene the Council
+1. Verify the intended project directory, selected CLI and authentication. `doctor` checks executable availability. Read the installed `hc --skill` before delegating or running long commands.
+2. Default to `permission: read`. Use write permissions only when the user's task authorizes editing. Supply exact scope and criteria; forbid extra agents unless explicitly assigned.
+3. If connected, use `council_convene` for council/review or `council_delegate` for one specialist. The MCP server must run in the intended project directory.
+4. Otherwise invoke the bundled CLI by absolute path from that project:
 
-### Method 1: Using Council MCP Tools (Recommended)
-
-When Council's MCP server is connected:
-
-1. **Check Environment**:
-   Call `council_status` to verify available agent CLIs and active Herdr terminals.
-
-2. **Convene Collaboration**:
-   Call `council_convene`:
-   ```json
-   {
-     "mode": "council",
-     "task": "Design a distributed caching strategy for the order service",
-     "criteria": "Must support 50k RPS, tolerate node restarts, and minimize Redis memory footprint",
-     "agents": ["claude", "codex", "antigravity"],
-     "permission": "read"
-   }
-   ```
-
-3. **Delegate a Subtask**:
-   Call `council_delegate`:
-   ```json
-   {
-     "agent": "codex",
-     "task": "Implement unit tests for the token bucket rate limiter in src/limiter.js",
-     "permission": "write"
-   }
-   ```
-
-4. **Steer or Read Live Terminals**:
-   - `council_read({ target: "council-author", lines: 50 })`
-   - `council_send({ target: "council-author", message: "Focus on memory footprint first" })`
-   - `council_wait({ target: "council-author" })`
-   - `council_dismiss({ target: "council-author" })`
-
-5. **Direct Ballot Authoring**:
-   - `council_cast_ballot({ sessionId, voter, role, agent, vote, score, rationale, amendments, targetArtifactSha256 })`
-
-### Method 2: Using the Packaged CLI
-
-If MCP tools are not active in the current host, use the bundled CLI:
-
-```bash
-# Check environment and agent CLIs
-node bin/council.js doctor
-
-# Convene a council
-node bin/council.js convene --mode council --task "Architect database sharding schema"
-
-# Run a peer review
-node bin/council.js convene --mode review --task "Review commit diff for memory leaks"
-
-# Delegate to Codex
-node bin/council.js delegate --agent codex --task "Add edge case unit tests"
-
-# Cast a direct voting ballot
-node bin/council.js cast-ballot --session <id> --voter council-skeptic --vote amend --score 7 --rationale "Add retry jitter"
-
-# Check status or dismiss terminals
-node bin/council.js status
-node bin/council.js dismiss council-author council-skeptic
+```powershell
+node C:/path/to/Council/bin/council.js delegate --agent codex --task "Inspect parser edge cases" --permission read
+node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
 ```
 
-## Council Roles
+Inside Herdr, run a long workflow in a named background terminal and use `hc wait`:
 
-- **Author / Implementer** (`council-author`): Produces the initial design or code.
-- **Systematic Reviewer** (`council-reviewer`): Checks correctness, test coverage, safety, and maintainability.
-- **Critical Skeptic** (`council-skeptic`): Red-teams the solution, exposing failure modes, edge cases, and hidden pitfalls.
-- **Radical Simplifier / Lazy Genius** (`council-simplifier`): Targets premature abstraction and accidental complexity, seeking the simplest complete alternative.
-- **Judge / Synthesizer** (`council-judge`): Delivers balanced consensus, actionable next steps, and reconciles dissent.
+```powershell
+hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal"
+hc wait parser-review
+hc read parser-review
+```
 
-## Herdr Execution Recipes (Under the Hood)
+Do not launch a duplicate after timeout. Inspect the session and reported addresses first. Do not restart Herdr or force input through a blocked prompt.
 
-Council runs all agents under Herdr with safe Windows-tested recipes:
+## Submission and approval
 
-| Agent | Read-Only (Plan) | Write (Edit) |
-|---|---|---|
-| Claude Code | `claude --permission-mode plan` | `claude --permission-mode acceptEdits` |
-| Codex | `codex --no-daemon -s read-only -a never` | `codex --no-daemon -s workspace-write -a never` |
-| Antigravity | `agy --mode plan -i "<task>"` | `agy --mode accept-edits -i "<task>"` |
-| Junie | `junie --plan "--prompt=<task>"` | `junie "--prompt=<task>"` |
+The author finishes before reviewers start. Reviewers receive the exact proposal and its SHA-256 digest. Write artifacts only through a permitted channel. A read-only agent can return a final response on screen.
 
-Each agent appears in Herdr's window (`herdr-app`), remaining visible, interactive, and steerable by the user.
+Only explicit direct ballots bound to the session, expected voter, round and proposal digest authorize promotion, after that participant completes its turn. Never cast votes on others' behalf from screen quotes. Markers are informational; absent direct quorum leaves a provisional, unauthorized result.
+
+If a permitted direct channel exists, use `council_cast_ballot` or:
+
+```powershell
+node C:/path/to/Council/bin/council.js cast-ballot --session <session-id-or-directory> --voter <assigned-voter> --role <assigned-role> --agent <agent> --vote <approve|reject|amend> --score <1-10> --rationale "<reason>" --target-sha <proposal-sha256>
+```
+
+Use the assigned voter and the digest from the brief. From another directory, pass the explicit session path. A later ballot does not automatically rerun a finished workflow. If `hc` or direct writes are unavailable, finish the normal final answer; do not search unrelated directories or broaden permissions to force submission.
+
+## Inspect and report
+
+- Read, steer and wait through Council tools or `hc` using actual terminal addresses, not assumed role names.
+- Startup idle, timeout, blocked, delivery-not-started and malformed output are not completion. Respect the deadline and never blindly resubmit tasks.
+- Cleanup only completed terminals created by the workflow. Preserve recoverable agents beyond orchestrator exit; never automatically dismiss borrowed/user terminals.
+- Present findings, dissent, authorization state and concrete next actions. Persist provisional reports under `validation/`; approved reports go to `reports/`.
+- Tally and digest checks are mechanical, not an agent synthesis, signature or endorsement.
+
+Host files are configuration scaffolding, not proof of automatic discovery or live compatibility with an untested host.

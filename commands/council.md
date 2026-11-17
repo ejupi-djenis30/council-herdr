@@ -1,23 +1,19 @@
 ---
 name: council
-description: Convene an AI Council or run multi-agent collaboration (council, review, debate, parallel, pipeline) via Herdr.
+description: Delegate bounded work or review a concrete proposal through visible Herdr agents.
 ---
 
 # /council
 
-Convene a multi-agent Council of AI agents (Claude Code, Codex, Antigravity, Junie) running inside Herdr.
+- `/council <task>`: author proposal followed by skeptic and simplifier reviews.
+- `/council review <task>`: author proposal followed by reviewer and simplifier reviews.
+- `/council delegate <agent> <task>`: one specialist task.
+- `/council status` or `/council doctor`: inspect parent-environment availability and Herdr terminals.
 
-## Usage
+`debate`, `parallel` and `pipeline` are disabled experimental modes. Existing terminals are not adopted automatically.
 
-- `/council <task>`: Convene a standard 3-agent Council (Author, Skeptic, Simplifier) to deliberate on an architectural or implementation choice.
-- `/council review <task>`: Run a multi-perspective peer review on the current diff or files.
-- `/council debate <option-a> vs <option-b>`: Launch a formal debate between two viewpoints, judged by a referee agent.
-- `/council status`: Check the status of active Herdr terminals.
-- `/council doctor`: Check availability of Herdr and installed agent CLIs.
+Use connected `council_convene` or `council_delegate` tools, or the bundled CLI by absolute path from the intended project directory. Follow the installed `hc --skill` and run long commands under `hc run --bg`.
 
-## Command Execution
+Default to read permissions. Present real findings, dissent, authorization state and next actions. Screen-only results are provisional. Only valid direct ballots from completed participants authorize promotion; a mechanical tally is not an agent signature or synthesis.
 
-When invoked by the user:
-1. If MCP tools are available, call `council_convene` with the specified mode and task.
-2. If executing via terminal, run `node bin/council.js convene --task "<task>"`.
-3. Present the resulting Council synthesis report clearly to the user.
+On timeout or blocked/delivery failure, inspect the session and reported addresses. Preserve recoverable agents, do not blindly relaunch tasks, and never automatically dismiss user terminals. See `skills/council/SKILL.md`.

@@ -1,47 +1,17 @@
-# Council: Herdr-Native Multi-Agent Collaboration Engine
+# Council project instructions
 
-Welcome to the **Council** repository. This project is a universal collaboration plugin designed to orchestrate AI agents (**Claude Code, Codex, Antigravity, Junie**, and other AI coding assistants) using the **Herdr** terminal multiplexer (`hc`).
+Council adds briefs, proposal handoffs, independent review and durable results to Herdr. Herdr owns execution and terminal visibility.
 
-## Key Capabilities
+Read [docs/owner-brief.md](docs/owner-brief.md) for acceptance criteria and file ownership. Supported workflows: `council`, `review`, `delegate`. `debate`, `parallel` and `pipeline` are experimental and disabled.
 
-1. **Herdr-Native Execution**:
-   - Launches interactive background terminals in Herdr (`hc run --bg --name <n> --cwd <dir> -- <agent> "<task>"`).
-   - Keeps agents visible, steerable, and alive in `herdr-app`.
-   - Uses `hc wait` for non-blocking coordination and `hc read` for screen inspection.
+- Follow the installed `hc --skill` when launching, waiting on or steering terminals. Keep tasks interactive, bounded and visible. No extra agents without an explicit assignment.
+- A command exit code of zero is not task completion. Interpret delivery, status, turn and wait reason; preserve incomplete agents and respect deadlines.
+- Track launched terminal addresses. Cleanup only completed terminals owned by the workflow. Never automatically dismiss borrowed/user terminals.
+- Complete the author proposal before reviewer launch. Preserve exact bytes and digest; prefer direct artifacts and label screen fallbacks honestly.
+- Only valid direct ballots from completed participants authorize approval. Screen markers are informational. Missing votes stay missing; invalid ballots or rejection cannot become approval.
+- Mechanical validation is not an agent signature or endorsement. Persist provisional evidence and next actions under `validation/`; approved deliverables belong under `reports/` after checks pass.
+- Stay within the user's editing authorization. A read-only sandbox may lack `hc` or artifact-write access; collect its final answer without bypassing permissions.
 
-2. **6 Deliberation Modes**:
-   - `council`: Author, Skeptic, and Simplifier deliberate; Judge produces a synthesized verdict.
-   - `review`: Author drafts; Reviewer and Simplifier (Lazy Genius) inspect and trim.
-   - `debate`: Two agents advocate competing viewpoints; Judge rules.
-   - `parallel`: Sharded fan-out of independent tasks across multiple agents.
-   - `pipeline`: Sequential handoffs passing intermediate artifacts down the chain.
-   - `delegate`: Single task delegated to a specialist agent in Herdr.
+Use `npm test` and `node bin/council.js doctor`. Inside Herdr, run long commands under `hc run --bg` and wait with `hc wait`. Distinguish mocked regressions, live transport checks and real-agent checks in review claims.
 
-3. **Multi-Host Compatibility**:
-   - **Antigravity**: Discovered via `plugin.json`, `mcp_config.json`, `skills/council/SKILL.md`, and `rules/AGENTS.md`.
-   - **Claude Code**: Discovered via `.claude-plugin/plugin.json`, slash command `/council`, and `.mcp.json`.
-   - **Codex**: Discovered via `.codex-plugin/plugin.json` and skills.
-   - **Junie**: Discovered via `skills/council/SKILL.md`.
-   - **Universal**: Standard Model Context Protocol (MCP) stdio server (`bin/council.js mcp`).
-
-## CLI Quick Reference
-
-```bash
-# Verify environment and agent availability
-node bin/council.js doctor
-
-# Check live Herdr terminals
-node bin/council.js status
-
-# Convene a Council session
-node bin/council.js convene --mode council --task "Architect authentication service"
-
-# Run a peer review
-node bin/council.js convene --mode review --task "Inspect src/parser.js for edge cases"
-
-# Delegate a task to an agent
-node bin/council.js delegate --agent codex --task "Write property-based tests for serializer"
-
-# Start the MCP stdio server
-node bin/council.js mcp
-```
+Reuse of selected existing agents and a nonblocking session API are the next increment, after reliability acceptance.

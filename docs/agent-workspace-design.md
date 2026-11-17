@@ -1,40 +1,37 @@
-# Deterministic Agent Workspace & Artifact Exchange
+# Agent workspace and handoff
 
-## Architecture
-
-Council v2.0 enforces a strict deterministic file and artifact exchange protocol under `.agent_workspace/<session-id>/`. This eliminates brittle terminal screen-scraping and guarantees that every proposal, critique, review, ballot, and decision is cryptographically indexed and auditable.
+Council creates `.agent_workspace/<session-id>/` in the target project. The server/CLI working directory determines that project unless a caller explicitly constructs it with another root.
 
 ```text
 .agent_workspace/<session-id>/
-├── session.json                             # Canonical session manifest (mode, task hash, participants)
-├── task/
-│   ├── task.md                              # Authoritative user task / problem statement
-│   ├── context.md                           # Background context and code snippets
-│   └── criteria.md                          # Constraints and acceptance criteria
-├── briefs/
-│   ├── <agent-name>.md                      # Deterministic per-agent launch briefs
-├── artifacts/
-│   ├── index.jsonl                          # Append-only ledger of all produced artifacts (SHA-256)
-│   ├── draft/<agent-name>/artifact.md       # Initial author proposals
-│   ├── review/<agent-name>/artifact.md      # Peer reviews and critiques
-│   └── verdict/<agent-name>/artifact.md     # Synthesis and final implementations
-├── ballots/
-│   └── round-<n>/
-│       ├── <agent-name>.json                # Standardized council.ballot/v1 voting ballots
-│       └── tally.json                       # Computed voting tally (quorum, approvals, dissent)
-├── validation/
-│   ├── representative.json                  # Signed representative validation record
-│   └── report.md                            # Comprehensive validation audit report
-├── transcripts/
-│   └── <agent-name>.log                     # Execution stdout and screen dumps
-└── reports/
-    ├── report.md                            # Final ratified markdown deliverable
-    └── verdict.json                         # Structured outcome metadata
+  session.json
+  task/                         task, context and criteria
+  briefs/                       participant instructions
+  artifacts/
+    index.jsonl                 artifact metadata/digests
+    draft/                      council author proposal
+    proposal/                   review author proposal
+    review/                     participant reviews
+    delegation/                 specialist output
+  ballots/round-1/              direct ballots and tally
+  validation/                   validation, provisional evidence and next actions
+  reports/                      approved deliverables only
 ```
 
-## Guarantees
+## Handoff contract
 
-1. **Deterministic Naming**: All agent names and session paths are normalized to lowercase `[a-z0-9-]`.
-2. **Atomic Writes**: Every artifact and JSON file is written to a temporary file first (`*.tmp`) before renaming, preventing partial reads across concurrent Herdr processes.
-3. **SHA-256 Integrity Verification**: Every written artifact has its SHA-256 digest recorded in `meta.json` and `artifacts/index.jsonl`. During voting and representative validation, the target artifact's digest is verified.
-4. **Isolated Ownership**: Agents write exclusively to their own subdirectories under `artifacts/<phase>/<name>/` and `ballots/round-<n>/<name>.json`. The orchestrator manages shared ledgers.
+1. The author completes before reviewers launch.
+2. The orchestrator prefers a direct proposal file, ingests its exact bytes, computes metadata and records its digest. A direct file can be submitted without author-generated `meta.json`; the orchestrator creates its own integrity record.
+3. Reviewers receive the exact proposal and SHA-256 being evaluated. The proposal path in the brief must match the artifact on disk.
+4. If direct output is unavailable through the participant's permissions, collect its final screen response and identify it as a screen fallback. Console history is best-effort evidence, not proof of ballot provenance.
+5. Count only valid direct ballots from completed participants for authorization. Preserve screen findings without turning quoted votes into endorsements.
+
+## Integrity and ownership
+
+Artifact metadata and the JSONL index record SHA-256 digests. Verification compares current content with the expected digest; missing/unverified or changed proposals cannot authorize promotion. A checksum is not an identity check, signature or immutable ledger.
+
+Writes use temporary files and rename with retries for common Windows locking errors. The persistent-lock copy/unlink fallback is not atomic; do not describe every fallback write as an atomic transaction. Invalid or partially readable ballots must fail validation conservatively.
+
+Each participant has its own output location. The orchestrator owns shared metadata, tally and result promotion. Track terminal addresses independently from artifact role names, retain incomplete agents beyond orchestrator exit and clean up only completed terminals created by the workflow.
+
+A provisional workflow preserves a readable report and next actions under `validation/`; it does not create an approved report under `reports/`. Future adoption of user-owned Herdr terminals and resumable/nonblocking sessions are separate product work.
