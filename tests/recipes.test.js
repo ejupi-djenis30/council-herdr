@@ -61,10 +61,11 @@ test('buildHcRunArgs passes arguments safely after -- delimiter', () => {
 
   assert.equal(args[0], 'run');
   assert.equal(args[1], '--bg');
-  assert.equal(args[2], '--name');
-  assert.equal(args[3], 'council-author');
-  assert.equal(args[4], '--cwd');
-  assert.equal(args[5], 'C:\\test\\dir');
-  assert.equal(args[6], '--');
-  assert.deepEqual(args.slice(7), ['claude', '--permission-mode', 'plan', 'Do review']);
+  assert.equal(args[2], '--outlive-parent');
+  assert.equal(args[3], '--name');
+  assert.equal(args[4], 'council-author');
+  assert.equal(args[5], '--cwd');
+  assert.equal(args[6], 'C:\\test\\dir');
+  assert.equal(args[7], '--');
+  assert.deepEqual(args.slice(8), ['claude', '--permission-mode', 'plan', 'Do review']);
 });

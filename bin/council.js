@@ -23,7 +23,8 @@ COMMANDS:
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
 
 CONVENE OPTIONS:
-  --mode <name>                 Mode: council (default), review, debate, parallel, pipeline
+  --mode <name>                 Mode: council (default), review, delegate
+                                debate, parallel, pipeline are experimental and disabled
   --task <string>               The task or question to deliberate on
   --context <string>            Background context or file content
   --criteria <string>           Acceptance or decision criteria
@@ -153,6 +154,9 @@ async function main() {
       });
 
       console.log('\n' + result.report);
+      if (!result.success) {
+        process.exit(1);
+      }
       break;
     }
 
@@ -173,6 +177,11 @@ async function main() {
         timeoutSec: flags.timeout ? Number(flags.timeout) : 180,
         keepTerminals: Boolean(flags.keep)
       });
+
+      if (!result.success) {
+        console.error(`\nDelegation failed: ${result.error}`);
+        process.exit(1);
+      }
 
       console.log('\n--- Output from ' + agent + ' ---');
       console.log(result.output);

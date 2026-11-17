@@ -272,7 +272,7 @@ test('AgentWorkspace tracks invalid unparseable ballots without flipping quorum'
     assert.equal(tally.validCastCount, 1);
     assert.equal(tally.invalidCount, 1);
     assert.equal(tally.invalidBallots[0].voter, 'corrupt-voter');
-    assert.equal(tally.quorumMet, true); // Quorum met because both voters cast something
+    assert.equal(tally.quorumMet, false); // Quorum requires valid ballots (1/2 < 1.0)
     assert.equal(tally.approveCount, 1);
   } finally {
     rmSync(tmp, { recursive: true, force: true });

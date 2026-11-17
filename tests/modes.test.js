@@ -1,26 +1,78 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { CouncilOrchestrator, SUPPORTED_MODES } from '../lib/modes.js';
+import { AgentWorkspace } from '../lib/workspace.js';
 
 class MockHerdrClient {
-  constructor() {
+  constructor(options = {}) {
     this.launched = [];
     this.waited = [];
     this.dismissed = [];
+    this.castDirectOnLaunch = options.castDirectOnLaunch !== false;
   }
 
   launchAgent(opts) {
-    this.launched.push(opts);
-    return { success: true, name: opts.name, agent: opts.agent };
+    const address = `t-mock-${this.launched.length}`;
+    this.launched.push({ ...opts, address });
+
+    if (this.castDirectOnLaunch && opts.sessionDir) {
+      const ws = new AgentWorkspace();
+      const authorContent = 'Mock proposal content for author';
+      const sha = ws.sha256(authorContent);
+      const isReview = opts.name.startsWith('r-');
+      let voter = opts.name;
+      let role = 'reviewer';
+      if (opts.name.includes('auth')) {
+        voter = isReview ? 'review-author' : 'council-author';
+        role = 'author';
+      } else if (opts.name.includes('skep')) {
+        voter = 'council-skeptic';
+        role = 'skeptic';
+      } else if (opts.name.includes('simp')) {
+        voter = isReview ? 'review-simplifier' : 'council-simplifier';
+        role = 'simplifier';
+      } else if (opts.name.includes('rev')) {
+        voter = 'review-reviewer';
+        role = 'reviewer';
+      }
+
+      const ballotPath = join(opts.sessionDir, 'ballots', 'round-1', `${ws.sanitizeName(voter)}.json`);
+      if (!existsSync(ballotPath)) {
+        ws.castBallot(opts.sessionDir, {
+          round: 1,
+          voter,
+          role,
+          agent: opts.agent,
+          vote: 'approve',
+          score: 9,
+          rationale: 'Direct mock ballot approved',
+          targetArtifactSha256: sha,
+          source: 'direct'
+        });
+      }
+    }
+
+    return {
+      success: true,
+      name: opts.name,
+      address,
+      agent: opts.agent,
+      details: { address, first_message: { sent: true } }
+    };
   }
 
   wait(name) {
     this.waited.push(name);
-    return { success: true, target: name, output: 'done' };
+    return { success: true, target: name, terminal: name, ended: true, status: 'done', reason: 'status', turn: 1 };
   }
 
   read(name) {
-    return { success: true, target: name, content: `Mock output from ${name}` };
+    const record = this.launched.find(l => l.address === name || l.opts?.name === name || l.name === name);
+    const isAuthor = (record?.opts?.name || record?.name || name).includes('auth');
+    const content = isAuthor ? 'Mock proposal content for author' : `Mock output for ${record?.opts?.name || record?.name || name}`;
+    return { success: true, target: name, content };
   }
 
   dismiss(name) {
@@ -60,7 +112,7 @@ test('CouncilOrchestrator runs council mode and cleans up terminals', async () =
   assert.equal(mockHerdr.launched.length, 3);
   assert.equal(mockHerdr.waited.length, 3);
   assert.equal(mockHerdr.dismissed.length, 3);
-  assert.match(res.report, /Full Council Deliberation/);
+  assert.match(res.report, /Council Deliberation Report/);
 });
 
 test('CouncilOrchestrator runs review mode', async () => {
@@ -80,58 +132,28 @@ test('CouncilOrchestrator runs review mode', async () => {
   assert.equal(mockHerdr.dismissed.length, 3);
 });
 
-test('CouncilOrchestrator runs debate mode', async () => {
-  const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
-
-  const res = await orchestrator.runMode({
-    mode: 'debate',
-    task: 'REST vs gRPC for internal services',
-    agents: ['claude', 'codex', 'antigravity'],
-    keepTerminals: false
-  });
-
-  assert.equal(res.success, true);
-  assert.equal(mockHerdr.launched.length, 3);
-  assert.match(res.report, /Structured Debate & Verdict Report/);
+test('CouncilOrchestrator rejects experimental debate mode', async () => {
+  const orchestrator = new CouncilOrchestrator({ herdr: new MockHerdrClient() });
+  await assert.rejects(
+    async () => orchestrator.runMode({ mode: 'debate', task: 'REST vs gRPC for internal services' }),
+    /Mode 'debate' is experimental and disabled/
+  );
 });
 
-test('CouncilOrchestrator runs parallel mode', async () => {
-  const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
-
-  const res = await orchestrator.runMode({
-    mode: 'parallel',
-    task: 'Investigate performance',
-    subtasks: ['Profile CPU', 'Profile Memory', 'Profile I/O'],
-    agents: ['claude', 'codex', 'antigravity'],
-    keepTerminals: false
-  });
-
-  assert.equal(res.success, true);
-  assert.equal(mockHerdr.launched.length, 3);
-  assert.match(res.report, /Parallel Fan-Out Report/);
+test('CouncilOrchestrator rejects experimental parallel mode', async () => {
+  const orchestrator = new CouncilOrchestrator({ herdr: new MockHerdrClient() });
+  await assert.rejects(
+    async () => orchestrator.runMode({ mode: 'parallel', task: 'Investigate performance', subtasks: ['Profile CPU'] }),
+    /Mode 'parallel' is experimental and disabled/
+  );
 });
 
-test('CouncilOrchestrator runs pipeline mode', async () => {
-  const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
-
-  const res = await orchestrator.runMode({
-    mode: 'pipeline',
-    task: 'Build payment webhook',
-    stages: [
-      { name: 'Schema', role: 'author' },
-      { name: 'Handler', role: 'author' },
-      { name: 'Tests', role: 'reviewer' }
-    ],
-    agents: ['claude', 'codex'],
-    keepTerminals: false
-  });
-
-  assert.equal(res.success, true);
-  assert.equal(mockHerdr.launched.length, 3);
-  assert.match(res.report, /Sequential Pipeline Execution Report/);
+test('CouncilOrchestrator rejects experimental pipeline mode', async () => {
+  const orchestrator = new CouncilOrchestrator({ herdr: new MockHerdrClient() });
+  await assert.rejects(
+    async () => orchestrator.runMode({ mode: 'pipeline', task: 'Build payment webhook' }),
+    /Mode 'pipeline' is experimental and disabled/
+  );
 });
 
 test('CouncilOrchestrator runs delegate mode', async () => {
@@ -147,20 +169,19 @@ test('CouncilOrchestrator runs delegate mode', async () => {
 
   assert.equal(res.success, true);
   assert.equal(res.agent, 'codex');
-  assert.match(res.output, /Mock output from delegate-codex/);
+  assert.match(res.output, /Mock output for delegate-codex/);
   assert.equal(mockHerdr.dismissed.length, 1);
 });
 
 test('CouncilOrchestrator detects and respects directly cast ballots without marker fallback', async () => {
-  const { rmSync } = await import('node:fs');
-  const { join } = await import('node:path');
-
   const mockHerdr = new MockHerdrClient();
   const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
   const testSid = `test-direct-ballot-${Date.now().toString(36)}`;
   const sDir = orchestrator.workspace.resolveSessionDir(testSid);
 
-  // Directly cast a ballot prior to the voting stage
+  // Directly cast a ballot prior to the voting stage for council-skeptic
+  const expectedSha = orchestrator.workspace.sha256('Mock proposal content for author');
+
   orchestrator.workspace.castBallot(sDir, {
     round: 1,
     voter: 'council-skeptic',
@@ -168,7 +189,8 @@ test('CouncilOrchestrator detects and respects directly cast ballots without mar
     agent: 'codex',
     vote: 'reject',
     score: 2,
-    rationale: 'Direct ballot: fatal race condition in storage engine'
+    rationale: 'Direct ballot: fatal race condition in storage engine',
+    targetArtifactSha256: expectedSha
   });
 
   const progressEvents = [];

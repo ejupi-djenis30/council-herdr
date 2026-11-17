@@ -90,3 +90,7 @@ The next priority is supervising existing Herdr agents, matching the user's actu
 3. **Review concrete work.** Freeze a bounded diff or proposal, identify its revision, collect independent findings with file/line references, and produce an actionable list of fixes and owners. Acceptance: a real change is improved by the review and unresolved dissent stays visible.
 
 Useful reports and recoverable execution take precedence over additional voting rounds, retention policies, more modes, or unverified host packaging.
+
+## Closing handoff
+
+After Antigravity's implementation and Junie's frozen acceptance tests (`b7afe33`), the owner took the final runtime/report/metadata fixes and integration commit. Antigravity is now read-only reviewer; Junie performs the independent audit of that stable commit. No implementation edits, extra feature scope or further AI smoke launches are assigned during this final audit. The owner's final suite passed 81/81; the real Codex delegation and terminal-lifetime checks passed separately, with their evidence limits recorded in the independent review.
