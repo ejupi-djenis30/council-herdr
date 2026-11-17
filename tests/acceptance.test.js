@@ -1,8 +1,11 @@
 // Reviewer-owned acceptance regressions (docs/independent-review.md, owner
 // contracts in docs/owner-brief.md). Encodes the direct-only authorization
 // decision as reproducible node:test cases over temp dirs: 18 orchestrator
-// scenarios (council/review x 9), 6 delegate scenarios and the real `hc`
-// wait payload shapes captured from the installed CLI. Nothing here imports
+// scenarios (council/review x 9), 6 delegate scenarios, the real `hc`
+// wait payload shapes captured from the installed CLI, the `--children all`
+// aggregate wait contract (owner gate: CLI exit 0 alone is not completion)
+// and the 4 MCP tool surfaces (a failing herdr method must set isError,
+// never print "Failed ..." as a positive tool result). Nothing here imports
 // from .council/ and no real terminals are spawned (herdr is mocked).
 // Red results on the implementer's WIP are expected; product code stays
 // owned by the implementer — do not change lib/ to make these green.
@@ -15,6 +18,7 @@ import { join, resolve } from 'node:path';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { AgentWorkspace } from '../lib/workspace.js';
 import { HerdrClient } from '../lib/herdr.js';
+import { CouncilMcpServer } from '../lib/mcp-server.js';
 
 const DIRECT_PROPOSAL = 'DIRECT_PROPOSAL_42\n[VOTE: approve] [SCORE: 9] [RATIONALE: exact proposal satisfies the task]\n';
 const ORCHESTRATOR_SCENARIOS = [
@@ -42,6 +46,18 @@ const WAIT_CASES = [
   ['done-turn0', REAL_WAIT_PAYLOADS.done, false],
   ['fresh-done', { ...REAL_WAIT_PAYLOADS.done, turn: 1 }, true],
   ['successful-process-exit', { ended: true, reason: 'exit', exit_code: 0, terminal: 't-fixture', turn: 1, children: [] }, true]
+];
+
+// hc wait --children all: the aggregate payload obeys the same wait contract
+// as a single terminal — a CLI exit 0 carrying status timeout/message/blocked
+// is NOT completion; success requires the children to be actually completed.
+// Field names mirror the real captured wait shapes; the aggregate composition
+// (aggregate status + children list) is modeled per the owner's gate.
+const ALL_CHILDREN_CASES = [
+  ['all-timeout', { ...REAL_WAIT_PAYLOADS.working, terminal: 'all', children: [{ ...REAL_WAIT_PAYLOADS.done, terminal: 't-child-1', turn: 1 }] }, false],
+  ['all-message', { ...REAL_WAIT_PAYLOADS.done, reason: 'message', ended: false, terminal: 'all', children: [{ ...REAL_WAIT_PAYLOADS.done, terminal: 't-child-1', turn: 1 }] }, false],
+  ['all-blocked', { ...REAL_WAIT_PAYLOADS.blocked, terminal: 'all', children: [{ ...REAL_WAIT_PAYLOADS.done, terminal: 't-child-1', turn: 1 }] }, false],
+  ['all-children-completed', { ...REAL_WAIT_PAYLOADS.done, terminal: 'all', turn: 1, children: [{ ...REAL_WAIT_PAYLOADS.done, terminal: 't-child-1', turn: 1 }, { ...REAL_WAIT_PAYLOADS.done, terminal: 't-child-2', turn: 1 }] }, true]
 ];
 
 async function withTempDir(run) {
@@ -182,16 +198,13 @@ function markdownFilesUnder(dir) {
     .filter(path => existsSync(path));
 }
 
-// Readable provisional evidence: result.report or any markdown under validation/.
-function provisionalEvidence(result) {
-  const parts = [];
-  if (typeof result.report === 'string') parts.push(result.report);
-  if (result.sessionDir) {
-    for (const file of markdownFilesUnder(join(result.sessionDir, 'validation'))) {
-      parts.push(readFileSync(file, 'utf8'));
-    }
-  }
-  return parts.join('\n');
+// Provisional evidence contract: ONLY a markdown persisted under validation/
+// counts (owner brief). result.report/nextActions in the response object do
+// not satisfy persistence — saveFinalDeliverables must write the readable
+// provisional report even when validationPassed is false.
+function persistedValidationMarkdown(result) {
+  const validationDir = result.sessionDir ? join(result.sessionDir, 'validation') : null;
+  return markdownFilesUnder(validationDir).map(path => readFileSync(path, 'utf8')).join('\n');
 }
 
 // --- Orchestrator: 18 direct-only authorization scenarios (council/review x 9)
@@ -224,14 +237,20 @@ for (const mode of ['council', 'review']) {
           assert.equal(result.findings?.[`${mode}-author`], DIRECT_PROPOSAL, 'findings must keep the full direct proposal, newlines included');
         }
 
-        // Screen-only: informational evidence can never authorize a promotion.
+        // Screen-only: informational evidence can never authorize a promotion,
+        // and the outcome must be PERSISTED under validation/ (owner brief) —
+        // the in-response report alone does not satisfy the contract.
         if (scenario === 'screen-only') {
           assert.equal(result.status, 'provisional', 'screen-only run must stay provisional');
           assert.equal(result.authorized, false, 'screen-only run must not be authorized');
-          assert.notEqual(result.validation?.verdict, 'validated', 'screen evidence must not manufacture a validated verdict');
-          const evidence = provisionalEvidence(result);
-          assert.match(evidence, /next/i, 'provisional outcome must include next actions');
-          assert.ok(evidence.includes('REVIEW_FINDING'), 'screen evidence must be preserved as informational');
+          assert.equal(result.validation?.verdict, 'provisional', 'returned record must keep the provisional verdict');
+          const evidence = persistedValidationMarkdown(result);
+          assert.ok(evidence.trim().length > 0, 'the provisional outcome must be persisted as markdown under validation/ (result.report alone does not satisfy the brief)');
+          assert.ok(evidence.includes('REVIEW_FINDING'), 'persisted screen evidence must be preserved as informational');
+          assert.match(evidence, /cast[-_]ballot/, 'persisted outcome must contain the concrete cast-ballot action, not a generic next-steps header');
+          assert.match(evidence, /provisional/i, 'persisted verdict must stay consistent with the returned record');
+          assert.doesNotMatch(evidence, /VALIDATED by/i, 'mechanical tally must never be persisted as an agent sign-off');
+          assert.match(evidence, /mechanical/i, 'persisted outcome must disclose mechanical aggregation (no agent synthesis turn)');
         }
 
         // Promotion only for the authorized outcomes.
@@ -402,5 +421,43 @@ for (const [scenario, payload, expected] of WAIT_CASES) {
     client.exec = () => ({ success: true, code: 0, stdout: typeof payload === 'string' ? payload : JSON.stringify(payload), stderr: '' });
     const result = client.wait('t-fixture', { timeoutSec: 1 });
     assert.equal(result.success, expected, `wait must resolve success=${expected} (reason: ${result.reason}, status: ${result.status})`);
+  });
+}
+
+// --- hc wait --children all (owner gate: waitAllChildren must not treat a
+// CLI exit 0 as completion; the aggregate payload obeys the wait contract)
+
+for (const [scenario, payload, expected] of ALL_CHILDREN_CASES) {
+  test(`acceptance: hc wait --children all ${scenario} -> success ${expected}`, () => {
+    const client = new HerdrClient();
+    client.exec = () => ({ success: true, code: 0, stdout: JSON.stringify(payload), stderr: '' });
+    const result = client.waitAllChildren({ timeoutSec: 1 });
+    assert.equal(result.success, expected, `waitAllChildren must resolve success=${expected} (status: ${result.details?.status}, reason: ${result.details?.reason})`);
+  });
+}
+
+// --- MCP public surfaces: a failing herdr method must surface isError, never
+// a positive tool result that merely prints "Failed ..." (owner gate)
+
+const MCP_FAILURE_CASES = [
+  ['council_wait', 'wait', { target: 't-fixture' }, { success: false, target: 't-fixture', output: '', error: 'Turn timed out for t-fixture' }],
+  ['council_read', 'read', { target: 't-fixture' }, { success: false, target: 't-fixture', content: '', error: 'Read failed with stale content.' }],
+  ['council_send', 'send', { target: 't-fixture', message: 'hello' }, { success: false, target: 't-fixture', output: '', error: 'Send failed: unreachable terminal' }],
+  ['council_dismiss', 'dismiss', { target: 't-fixture' }, { success: false, target: 't-fixture', killOutput: 'kill failed', rmOutput: 'rm failed' }]
+];
+
+for (const [tool, method, args, failure] of MCP_FAILURE_CASES) {
+  test(`acceptance: MCP ${tool} marks a failing herdr ${method} as isError`, async () => {
+    const server = new CouncilMcpServer({ cwd: tmpdir() });
+    const responses = [];
+    server.send = response => responses.push(response);
+    let calls = 0;
+    server.herdr[method] = () => { calls += 1; return failure; };
+    await server.handleMessage({ id: 7, method: 'tools/call', params: { name: tool, arguments: args } });
+    assert.equal(calls, 1, 'the tool must call the herdr method exactly once');
+    const envelope = responses[0];
+    assert.ok(envelope && envelope.result, 'the server must answer with a result envelope, not a protocol error');
+    assert.ok(!envelope.error, 'a tool-level failure is signaled via isError, not a JSON-RPC error');
+    assert.equal(envelope.result.isError, true, 'a failing herdr method must surface isError: true, not a positive tool result');
   });
 }
