@@ -68,26 +68,32 @@ function screenTextFor(scenario, index, marker) {
   return `${index === 0 ? 'SCREEN_PROPOSAL' : 'REVIEW_FINDING'}\n[VOTE: ${marker}] [SCORE: 9] [RATIONALE: exact proposal was inspected]`;
 }
 
-// Real hc wait contracts as HerdrClient.wait outputs: startup must be waited
-// out, not failed (owner's live Codex smoke test). Last entry repeats.
+// Real hc wait contracts as HerdrClient.wait outputs, per the owner's real event
+// stream (.council/owner-review/hc-real-events.txt): status and turn are separate;
+// hc wait blocks while working, so the first task stays at turn 0 and done lands
+// at turn 1. A real timeout is a failure, so there is no synthetic middle timeout
+// entry. Startup must be waited out, not failed; only a fresh done (turn >= 1)
+// completes. Last entry repeats.
 const STARTUP_WAIT_PLAN = [
   { success: false, ended: true, reason: 'status', status: 'idle', turn: 0, children: [] },
-  { success: false, ended: false, reason: 'timeout', status: 'working', turn: 1 },
-  { success: true, ended: true, reason: 'status', status: 'done', turn: 2 }
+  { success: true, ended: true, reason: 'status', status: 'done', turn: 1 }
 ];
 const MESSAGE_THEN_DONE_PLAN = [
-  { success: false, ended: false, reason: 'message', status: 'working', turn: 1 },
-  { success: true, ended: true, reason: 'status', status: 'done', turn: 2 }
+  { success: false, ended: false, reason: 'message', status: 'working', turn: 0 },
+  { success: true, ended: true, reason: 'status', status: 'done', turn: 1 }
 ];
 
 // Herdr mock implementing the owner's orchestrator fixture semantics for one scenario.
 // options.waitPlan feeds every target a sequence of wait results to model startup
-// progression; get() then reports live/turn 0 so no false done can be read from it.
+// progression; get() then reports working at turn 0 so no false done can be read from it.
 function orchestratorHerdr(cwd, mode, scenario, options = {}) {
   const { names, roles } = participants(mode);
   const marker = scenario === 'all-reject' ? 'reject' : 'approve';
   const waitPlan = options.waitPlan || null;
   const waitPolls = {};
+  const firstWait = {};
+  const lastWait = {};
+  const cleanupBeforeDone = [];
   const launched = [];
   const dismissed = [];
   const locate = target => launched.find(record => record.address === target || record.opts.name === target);
@@ -128,14 +134,17 @@ function orchestratorHerdr(cwd, mode, scenario, options = {}) {
     },
     get(target) {
       if (waitPlan) {
-        return { success: true, details: { address: target, state: 'live', turn: 0, status: { state: 'live' } } };
+        return { success: true, details: { address: target, state: 'live', turn: 0, status: { state: 'working' } } };
       }
       return { success: true, details: { address: target, state: 'live', reported: true, turn: 1, status: { state: 'done' } } };
     },
     wait(target) {
       waitPolls[target] = (waitPolls[target] || 0) + 1;
       if (waitPlan) {
-        return { terminal: target, ...waitPlan[Math.min(waitPolls[target] - 1, waitPlan.length - 1)] };
+        const result = { terminal: target, ...waitPlan[Math.min(waitPolls[target] - 1, waitPlan.length - 1)] };
+        if (waitPolls[target] === 1) firstWait[target] = result;
+        lastWait[target] = result;
+        return result;
       }
       const record = locate(target);
       if (scenario === 'reviewer-timeout' && record && record.index > 0) {
@@ -153,11 +162,12 @@ function orchestratorHerdr(cwd, mode, scenario, options = {}) {
       };
     },
     dismiss(target) {
+      if (waitPlan && lastWait[target] && lastWait[target].status !== 'done') cleanupBeforeDone.push(target);
       dismissed.push(target);
       return { success: true };
     }
   };
-  return { herdr, launched, dismissed, waitPolls };
+  return { herdr, launched, dismissed, waitPolls, firstWait, lastWait, cleanupBeforeDone };
 }
 
 function promotedReport(sessionDir) {
@@ -238,6 +248,9 @@ function delegateHerdr(scenario, options = {}) {
   const dismissed = [];
   const waitPlan = options.waitPlan || null;
   const waitPolls = {};
+  const firstWait = {};
+  const lastWait = {};
+  const cleanupBeforeDone = [];
   const herdr = {
     launchAgent(opts) {
       return {
@@ -253,14 +266,17 @@ function delegateHerdr(scenario, options = {}) {
     },
     get(target) {
       if (waitPlan) {
-        return { success: true, details: { address: target, state: 'live', turn: 0, status: { state: 'live' } } };
+        return { success: true, details: { address: target, state: 'live', turn: 0, status: { state: 'working' } } };
       }
       return { success: true, details: { address: target, state: 'live', turn: 1, status: { state: 'done' } } };
     },
     wait(target) {
       waitPolls[target] = (waitPolls[target] || 0) + 1;
       if (waitPlan) {
-        return { target, ...waitPlan[Math.min(waitPolls[target] - 1, waitPlan.length - 1)] };
+        const result = { target, ...waitPlan[Math.min(waitPolls[target] - 1, waitPlan.length - 1)] };
+        if (waitPolls[target] === 1) firstWait[target] = result;
+        lastWait[target] = result;
+        return result;
       }
       if (scenario === 'timeout' || scenario === 'blocked') {
         return {
@@ -284,11 +300,12 @@ function delegateHerdr(scenario, options = {}) {
       };
     },
     dismiss(target) {
+      if (waitPlan && lastWait[target] && lastWait[target].status !== 'done') cleanupBeforeDone.push(target);
       dismissed.push(target);
       return { success: true };
     }
   };
-  return { herdr, dismissed, waitPolls, address };
+  return { herdr, dismissed, waitPolls, firstWait, lastWait, cleanupBeforeDone, address };
 }
 
 for (const scenario of DELEGATE_SCENARIOS) {
@@ -317,7 +334,7 @@ for (const scenario of DELEGATE_SCENARIOS) {
 
 test('acceptance: council waits out agent startup (idle turn 0 -> working -> done) within the deadline', async () => {
   await withTempDir(async cwd => {
-    const { herdr, waitPolls } = orchestratorHerdr(cwd, 'council', 'healthy', { waitPlan: STARTUP_WAIT_PLAN });
+    const { herdr, waitPolls, firstWait, lastWait, cleanupBeforeDone } = orchestratorHerdr(cwd, 'council', 'healthy', { waitPlan: STARTUP_WAIT_PLAN });
     const result = await new CouncilOrchestrator({ cwd, herdr }).runMode({
       mode: 'council',
       task: 'Assess this exact proposal.',
@@ -325,14 +342,20 @@ test('acceptance: council waits out agent startup (idle turn 0 -> working -> don
       timeoutSec: 15
     });
     assert.equal(result.success, true, `a startup reaching done must succeed (status: ${result.status})`);
-    assert.ok(Math.max(0, ...Object.values(waitPolls)) >= 3, 'orchestrator must re-poll wait instead of failing on the first idle report');
+    assert.ok(Object.keys(waitPolls).length > 0 && Math.min(...Object.values(waitPolls)) >= 2, 'orchestrator must poll wait again for the fresh done instead of failing on the first idle report');
+    for (const target of Object.keys(firstWait)) {
+      assert.equal(firstWait[target].success, false, 'raw wait at startup is incomplete');
+      assert.equal(lastWait[target].status, 'done', 'the workflow must continue until wait reports done');
+      assert.ok(lastWait[target].turn >= 1, 'completion must be a fresh done, not the stale done at turn 0');
+    }
+    assert.deepEqual(cleanupBeforeDone, [], 'no agent may be cleaned up before its wait reports done');
     assert.equal(promotedReport(result.sessionDir), true, 'the completed startup run promotes its report');
   });
 });
 
 test('acceptance: review waits out a message turn before done within the deadline', async () => {
   await withTempDir(async cwd => {
-    const { herdr, waitPolls } = orchestratorHerdr(cwd, 'review', 'healthy', { waitPlan: MESSAGE_THEN_DONE_PLAN });
+    const { herdr, waitPolls, firstWait, lastWait, cleanupBeforeDone } = orchestratorHerdr(cwd, 'review', 'healthy', { waitPlan: MESSAGE_THEN_DONE_PLAN });
     const result = await new CouncilOrchestrator({ cwd, herdr }).runMode({
       mode: 'review',
       task: 'Assess this exact proposal.',
@@ -340,13 +363,19 @@ test('acceptance: review waits out a message turn before done within the deadlin
       timeoutSec: 15
     });
     assert.equal(result.success, true, `a message -> done startup must succeed (status: ${result.status})`);
-    assert.ok(Math.max(0, ...Object.values(waitPolls)) >= 2, 'orchestrator must re-poll wait after a message event');
+    assert.ok(Object.keys(waitPolls).length > 0 && Math.min(...Object.values(waitPolls)) >= 2, 'orchestrator must poll wait again after a message event');
+    for (const target of Object.keys(firstWait)) {
+      assert.equal(firstWait[target].success, false, 'raw wait after a message event is still incomplete');
+      assert.equal(lastWait[target].status, 'done', 'the workflow must continue until wait reports done');
+      assert.ok(lastWait[target].turn >= 1, 'completion must be a fresh done, not the stale done at turn 0');
+    }
+    assert.deepEqual(cleanupBeforeDone, [], 'no agent may be cleaned up before its wait reports done');
   });
 });
 
 test('acceptance: delegate waits out agent startup (idle turn 0 -> working -> done) within the deadline', async () => {
   await withTempDir(async cwd => {
-    const { herdr, dismissed, address, waitPolls } = delegateHerdr('healthy', { waitPlan: STARTUP_WAIT_PLAN });
+    const { herdr, dismissed, address, waitPolls, firstWait, lastWait, cleanupBeforeDone } = delegateHerdr('healthy', { waitPlan: STARTUP_WAIT_PLAN });
     const result = await new CouncilOrchestrator({ cwd, herdr }).runDelegate({
       agent: 'codex',
       task: 'Return the actual specialist result.',
@@ -354,7 +383,13 @@ test('acceptance: delegate waits out agent startup (idle turn 0 -> working -> do
       timeoutSec: 15
     });
     assert.equal(result.success, true, `a delegate startup reaching done must succeed (status: ${result.status})`);
-    assert.ok(Math.max(0, ...Object.values(waitPolls)) >= 3, 'delegate must re-poll wait instead of failing on the first idle report');
+    assert.ok(Object.keys(waitPolls).length > 0 && Math.min(...Object.values(waitPolls)) >= 2, 'delegate must poll wait again for the fresh done instead of failing on the first idle report');
+    for (const target of Object.keys(firstWait)) {
+      assert.equal(firstWait[target].success, false, 'raw wait at startup is incomplete');
+      assert.equal(lastWait[target].status, 'done', 'the delegate must continue until wait reports done');
+      assert.ok(lastWait[target].turn >= 1, 'completion must be a fresh done, not the stale done at turn 0');
+    }
+    assert.deepEqual(cleanupBeforeDone, [], 'no agent may be cleaned up before its wait reports done');
     assert.deepEqual(dismissed, [address], 'delegate dismisses its own agent only after completion');
   });
 });
