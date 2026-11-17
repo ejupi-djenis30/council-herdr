@@ -313,10 +313,39 @@ test('AgentWorkspace resolves session directories from ID or path', () => {
     const resolvedFromId = ws.resolveSessionDir('my-session');
     assert.equal(resolvedFromId, join(tmp, '.agent_workspace', 'my-session'));
 
-    const existingDir = join(tmp, 'custom-session');
-    mkdirSync(existingDir, { recursive: true });
-    const resolvedFromPath = ws.resolveSessionDir(existingDir);
-    assert.equal(resolvedFromPath, resolve(existingDir));
+    // Plain ID without separators never collides with cwd folder of same name
+    const cwdColDir = join(process.cwd(), 'test-cwd-col');
+    try {
+      mkdirSync(cwdColDir, { recursive: true });
+      assert.equal(ws.resolveSessionDir('test-cwd-col'), join(tmp, '.agent_workspace', 'test-cwd-col'));
+    } finally {
+      try { rmSync(cwdColDir, { recursive: true, force: true }); } catch {}
+    }
+
+    // Explicit path with separator resolves directly
+    const explicitRelPath = './custom-dir';
+    assert.equal(ws.resolveSessionDir(explicitRelPath), resolve(explicitRelPath));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AgentWorkspace castBallot validates vote enum and normalizes round', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'council-vote-val-'));
+  try {
+    const ws = new AgentWorkspace(tmp);
+    const { sessionDir } = ws.initSession({ sessionId: 'val-test', mode: 'council', task: 'Task' });
+
+    // Invalid vote throws
+    assert.throws(
+      () => ws.castBallot(sessionDir, { voter: 'v1', vote: 'banana' }),
+      /Must be one of: approve, reject, amend/
+    );
+
+    // Valid votes with mixed case are normalized
+    const res = ws.castBallot(sessionDir, { voter: 'v2', vote: '  APPROVE  ', round: '1.9' });
+    assert.equal(res.ballot.vote, 'approve');
+    assert.equal(res.ballot.round, 1);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
