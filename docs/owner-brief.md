@@ -64,3 +64,15 @@ The owner independently ran the existing suite at `5672d53`: **37/37 pass**. A s
 Reproduction and raw results are in the ignored local review folder `.council/owner-review/`. These findings supersede the blanket release sign-off in the historical combined review.
 
 Owner integration fixtures were also collected from the installed `hc`, using owned Node helpers reporting OSC 7501 state. Actual wait payloads showed `idle` and `blocked` with `ended: true`, `working` with `reason: timeout` and `ended: false`, and an initial `done` at turn 0 without any executed task. Neither exit code 0, `ended: true`, nor an uncorrelated status word proves completion. All fixture terminals were removed after collection. Raw payloads: `.council/owner-review/hc-real-wait.json`.
+
+## Owner decision: screen evidence cannot authorize
+
+Independent probes confirmed that a quoted author's vote can be attributed to a reviewer, even overriding the reviewer's later explicit rejection. Screen scraping cannot establish ballot provenance.
+
+- Only valid direct ballots bound to the session, expected voter, round and exact proposal digest can authorize promotion, after that participant's turn completes successfully.
+- Screen output and parsed markers remain informational. They do not contribute to the authorizing quorum. Preserve their text and dissent without claiming agent endorsement.
+- If a workflow finishes with screen evidence but insufficient direct ballots, return a readable provisional report with next actions: `success: false`, `status: provisional`, `authorized: false`. Save it under `validation/`, not as an approved report under `reports/`. Keep CLI/MCP failure signaling consistent with the existing result contract.
+- Read-only agents can always return useful screen output. They must not be asked to circumvent read-only permissions to create files. Direct submission through an available permitted channel can authorize; otherwise the provisional result is honest and useful.
+- Do not build quote/fence heuristics to turn screen text into authorization. A checksum proves content consistency, not authorship.
+
+The owner's workflow probes are being updated accordingly: positive cases use explicit direct ballots, while a new screen-only case must remain provisional. Negative execution cases also carry direct approvals so an execution failure cannot be hidden behind a separate missing-quorum failure.
