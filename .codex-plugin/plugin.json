@@ -1,0 +1,10 @@
+{
+  "name": "council",
+  "version": "2.0.0",
+  "description": "Herdr-native multi-agent Council plugin for OpenAI Codex.",
+  "author": "Ejupi-Labs",
+  "license": "MIT",
+  "skills": [
+    "skills/council"
+  ]
+}

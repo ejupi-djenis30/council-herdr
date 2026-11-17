@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "council": {
+      "command": "node",
+      "args": ["${workspaceFolder}/bin/council.js", "mcp"]
+    }
+  }
+}

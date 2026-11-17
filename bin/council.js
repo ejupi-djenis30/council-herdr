@@ -1,0 +1,234 @@
+#!/usr/bin/env node
+import { HerdrClient } from '../lib/herdr.js';
+import { CouncilOrchestrator } from '../lib/modes.js';
+import { CouncilMcpServer } from '../lib/mcp-server.js';
+
+function printHelp() {
+  console.log(`
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v2.0.0)
+
+USAGE:
+  council <command> [options]
+
+COMMANDS:
+  mcp                           Start Council MCP stdio server for AI agent hosts
+  doctor                        Check environment health (Herdr, hc, agent CLIs)
+  status                        List live Herdr terminals and council status
+  convene [options]             Run a multi-agent collaboration workflow
+  delegate [options]            Delegate a single subtask to an agent in Herdr
+  wait <target>                 Wait for a terminal turn to finish (or 'all')
+  read <target> [--lines <n>]   Read screen history from a terminal
+  send <target> <message>       Send input/instruction to a terminal
+  dismiss <targets...>          Kill and remove terminal(s) from Herdr
+
+CONVENE OPTIONS:
+  --mode <name>                 Mode: council (default), review, debate, parallel, pipeline
+  --task <string>               The task or question to deliberate on
+  --context <string>            Background context or file content
+  --criteria <string>           Acceptance or decision criteria
+  --agents <a,b,c>              Comma-separated agent names (default: claude,codex,antigravity)
+  --permission <read|write>     File permissions: read (default, plan mode) or write
+  --timeout <sec>               Timeout in seconds per agent turn (default: 180)
+  --keep                        Keep Herdr terminals open after completion
+
+DELEGATE OPTIONS:
+  --agent <name>                Target agent: claude, codex, antigravity, junie
+  --task <string>               Instruction for the agent
+  --permission <read|write>     File permissions (default: read)
+
+EXAMPLES:
+  council doctor
+  council convene --mode council --task "Design a resilient telemetry pipeline"
+  council convene --mode review --task "Review src/auth.js" --permission read
+  council delegate --agent codex --task "Write unit tests for parser"
+  council mcp
+`);
+}
+
+function parseArgs(args) {
+  const parsed = { _: [] };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith('--')) {
+      const key = arg.slice(2);
+      if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
+        parsed[key] = args[i + 1];
+        i++;
+      } else {
+        parsed[key] = true;
+      }
+    } else {
+      parsed._.push(arg);
+    }
+  }
+  return parsed;
+}
+
+async function main() {
+  const rawArgs = process.argv.slice(2);
+  const command = rawArgs[0] || 'help';
+  const flags = parseArgs(rawArgs.slice(1));
+
+  const herdr = new HerdrClient();
+  const orchestrator = new CouncilOrchestrator({ herdr });
+
+  switch (command.toLowerCase()) {
+    case 'mcp': {
+      const server = new CouncilMcpServer();
+      server.start();
+      break;
+    }
+
+    case 'doctor': {
+      console.log('--- Council Environment Health Check ---');
+      const doc = herdr.doctor();
+      console.log(`Herdr Core CLI (hc): ${doc.herdrInstalled ? `Available (${doc.hcVersion})` : 'NOT FOUND (Install herdr-core)'}`);
+      console.log(`Current Session:     ${doc.inHerdr ? `Inside Herdr terminal (${doc.terminalId})` : 'Outside Herdr (standalone)'}`);
+      console.log('\nSupported Agent CLIs:');
+      for (const [name, info] of Object.entries(doc.agents)) {
+        console.log(`  - ${name.padEnd(12)}: ${info.available ? `Ready (${info.path})` : 'Not on PATH'}`);
+      }
+      break;
+    }
+
+    case 'status': {
+      const res = herdr.list();
+      if (!res.success) {
+        console.error(`Error querying Herdr: ${res.error}`);
+        process.exit(1);
+      }
+      console.log('Active Herdr Terminals:');
+      console.log(typeof res.terminals === 'string' ? res.terminals : JSON.stringify(res.terminals, null, 2));
+      break;
+    }
+
+    case 'convene': {
+      const task = flags.task || flags._.join(' ');
+      if (!task) {
+        console.error('Error: --task is required for convene.');
+        process.exit(1);
+      }
+      const agents = flags.agents ? flags.agents.split(',').map(s => s.trim()) : ['claude', 'codex', 'antigravity'];
+      const mode = flags.mode || 'council';
+      const permission = flags.permission || 'read';
+      const timeoutSec = flags.timeout ? Number(flags.timeout) : 180;
+      const keepTerminals = Boolean(flags.keep);
+
+      console.log(`[Council] Convening in ${mode.toUpperCase()} mode with agents: ${agents.join(', ')}...`);
+      const result = await orchestrator.runMode({
+        mode,
+        task,
+        context: flags.context || '',
+        criteria: flags.criteria || '',
+        agents,
+        permission,
+        timeoutSec,
+        keepTerminals,
+        onProgress: ev => {
+          if (ev.stage === 'launch') console.log(`  -> Spawning ${ev.name} (${ev.agent})...`);
+          if (ev.stage === 'waiting_initial') console.log(`  -> Waiting for deliberations...`);
+          if (ev.stage === 'cleanup') console.log(`  -> Cleaning up terminals...`);
+        }
+      });
+
+      console.log('\n' + result.report);
+      break;
+    }
+
+    case 'delegate': {
+      const task = flags.task || flags._.join(' ');
+      const agent = flags.agent || 'claude';
+      if (!task) {
+        console.error('Error: --task is required for delegate.');
+        process.exit(1);
+      }
+
+      console.log(`[Council] Delegating to ${agent}...`);
+      const result = await orchestrator.runDelegate({
+        agent,
+        task,
+        context: flags.context || '',
+        permission: flags.permission || 'read',
+        timeoutSec: flags.timeout ? Number(flags.timeout) : 180,
+        keepTerminals: Boolean(flags.keep)
+      });
+
+      console.log('\n--- Output from ' + agent + ' ---');
+      console.log(result.output);
+      break;
+    }
+
+    case 'wait': {
+      const target = flags._[0] || 'all';
+      console.log(`Waiting on ${target}...`);
+      const res = target === 'all' ? herdr.waitAllChildren() : herdr.wait(target);
+      if (res.success) {
+        console.log('Turn completed.');
+        if (res.output) console.log(res.output);
+      } else {
+        console.error(`Wait failed: ${res.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+
+    case 'read': {
+      const target = flags._[0];
+      if (!target) {
+        console.error('Error: Terminal target name required.');
+        process.exit(1);
+      }
+      const lines = flags.lines ? Number(flags.lines) : 100;
+      const res = herdr.read(target, lines);
+      if (res.success) {
+        console.log(res.content);
+      } else {
+        console.error(`Read failed: ${res.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+
+    case 'send': {
+      const target = flags._[0];
+      const message = flags._.slice(1).join(' ') || flags.message;
+      if (!target || !message) {
+        console.error('Usage: council send <target> <message>');
+        process.exit(1);
+      }
+      const res = herdr.send(target, message);
+      if (res.success) {
+        console.log(`Message delivered to ${target}.`);
+      } else {
+        console.error(`Send failed: ${res.error}`);
+        process.exit(1);
+      }
+      break;
+    }
+
+    case 'dismiss': {
+      const targets = flags._;
+      if (targets.length === 0) {
+        console.error('Usage: council dismiss <target1> [target2...]');
+        process.exit(1);
+      }
+      for (const t of targets) {
+        const res = herdr.dismiss(t);
+        console.log(`Dismissed ${t}: ${res.success ? 'OK' : 'Failed'}`);
+      }
+      break;
+    }
+
+    case 'help':
+    case '--help':
+    case '-h':
+    default:
+      printHelp();
+      break;
+  }
+}
+
+main().catch(err => {
+  console.error(`Fatal Council Error: ${err.message}`);
+  process.exit(1);
+});

@@ -1,0 +1,8 @@
+{
+  "name": "council",
+  "version": "2.0.0",
+  "description": "Coordinate multi-agent Council workflows (council, review, debate, parallel, pipeline) across Claude Code, Codex, Antigravity, and Junie via Herdr.",
+  "author": "Ejupi-Labs",
+  "repository": "https://github.com/Ejupi-Labs/council",
+  "homepage": "https://github.com/Ejupi-Labs/council#readme"
+}

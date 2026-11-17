@@ -1,0 +1,32 @@
+{
+  "name": "council",
+  "version": "2.0.0",
+  "description": "Herdr-native multi-agent Council plugin for Claude Code, Codex, Antigravity, Junie, and all AI agents.",
+  "type": "module",
+  "main": "bin/council.js",
+  "bin": {
+    "council": "bin/council.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "doctor": "node bin/council.js doctor",
+    "status": "node bin/council.js status",
+    "mcp": "node bin/council.js mcp"
+  },
+  "keywords": [
+    "herdr",
+    "multi-agent",
+    "council",
+    "claude",
+    "codex",
+    "antigravity",
+    "junie",
+    "mcp",
+    "ai-collaboration"
+  ],
+  "author": "Ejupi-Labs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
