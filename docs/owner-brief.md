@@ -1,0 +1,66 @@
+# Council: product ownership and acceptance
+
+Owner: Codex (`t10k`). Implementer: Antigravity (`t106`). Independent reviewer: Junie (`t10c`).
+Baseline reviewed: `5672d53`, 2026-11-17.
+
+## Product outcome
+
+Council must make a real Herdr workflow easier: give a bounded task to visible agents, exchange actual work, review it against the user's constraints, and return an evidence-backed result with clear next actions. Herdr owns terminal execution and visibility; Council adds task briefs, handoffs, review, and durable session results.
+
+The first acceptance milestone is a reliable read-only council/review/delegate flow. Do not expand modes, retention, election machinery, or host integrations until this works. Existing modes must report failures honestly.
+
+## Review findings that block acceptance
+
+1. `lib/modes.js` ignores wait/read outcomes. A timeout, startup idle, blocked agent, failed read, or missing output can be treated as a completed submission and then cleaned up.
+2. `parseBallotFromOutput` invents approve/amend ballots and high scores for text without explicit votes. Current mocks affirm this behavior. Missing votes must remain missing.
+3. Failed tally becomes `conditional`; `validateChoice` does not check quorum/approval and allows promotion. Even three explicit rejections can produce a successful report.
+4. Council launches all reviewers before the author proposal exists. Workspace paths in briefs say `draft`, but the orchestrator stores `deliberation`. Direct artifacts are ignored in favor of terminal screens. A reviewer must receive the exact proposal and digest being evaluated.
+5. The final ruling/synthesis is static text attributed to a representative who never performed a synthesis turn. Do not claim human/agent validation that did not occur. An honest mechanical aggregation is an acceptable first milestone if clearly identified.
+6. Direct ballot files are parsed without validating schema, voter, session, round, score, or target digest. Corrupt ballots contribute to quorum, and their exclusion from the approval denominator can turn one approve plus two corrupt files into a passing result. Invalid/mismatched ballots must not authorize promotion.
+7. Launches use fixed terminal names and discard the returned address/first-message state. Concurrent sessions and recovery need actual owned terminal addresses. Cleanup must never target an unrelated terminal or erase a blocked/incomplete agent needed for recovery.
+
+## Implementation scope: Antigravity
+
+Own code and regression tests in `lib/`, `bin/`, `tests/`, plus factual README/skill updates. Keep changes cohesive and avoid broad rewrites. Tell Junie and Codex the commit/hash and exact limitations when ready. Do not edit this brief or Junie's review report.
+
+Acceptance requirements:
+
+- Track launch address, task delivery, turn/status, and wait reason from actual `hc` JSON. A successful CLI exit is not evidence that the task finished. Handle timeout/message/idle-before-task/blocked/error conservatively; preserve incomplete terminals and return an actionable status. No force, permission bypass, core restart, or unrelated-terminal cleanup.
+- Obtain an actual author submission before launching reviewers, hand off its content/path and SHA, and use the same artifact location in prompts and persistence. Prefer valid direct output; label any screen fallback honestly. Read-only agents must have a usable response channel without asking them to bypass their permission mode.
+- Only explicit, valid ballots count. Reject or record missing/malformed/mismatched votes. A failed quorum or failed approval cannot be promoted as conditional success. Dissent must remain visible. A checksum proves file consistency, not authorship or endorsement.
+- Make `success`, report wording, saved verdict, CLI exit status and MCP `isError` agree about unsuccessful execution. A policy rejection can be a completed workflow, but must not look approved.
+- Do not attribute a synthetic ruling to an agent. Either run an actual bounded synthesis turn over the submissions or describe the result as an orchestrator aggregation with no representative sign-off.
+- Add meaningful regressions for the cases above. Run slow commands under `hc run --bg`, inspect the results, and report evidence.
+- No new AI agents without an explicit follow-up assignment from Codex. Plain test helpers are allowed. Coordinate through Codex; Junie stays read-only on product code.
+
+## Independent review scope: Junie
+
+Audit baseline first, then Antigravity's changes. Own only `docs/independent-review.md` and scratch probes outside tracked product files. Do not edit implementation or existing tests. Send concrete reproductions and severity to Codex (`hc send t10k`) and Antigravity (`hc send t106`).
+
+Probe timeout/blocked/startup/message wait responses, read failures, all-reject ballots, missing markers, malformed direct ballots, wrong voter/session/round/SHA, reviewer handoff, direct artifact precedence, and cleanup ownership. Read actual `hc` launch/wait JSON using bounded shell helpers in Herdr so mocks reflect the installed CLI. No new AI agents; no manipulation of unrelated terminals. Run your own verification after the implementation is committed. A green suite alone is not an acceptance decision.
+
+## Definition of done for this milestone
+
+1. Independent reproductions fail safely rather than manufacturing success.
+2. Regression suite passes with realistic Herdr protocol fixtures.
+3. A bounded integration check uses real `hc` launch/get/wait/read and verifies task completion plus cleanup of owned helpers.
+4. A real agent smoke check is assigned only after the above passes; its report must contain actual task-specific work.
+5. Documentation distinguishes tested functionality from planned/unverified host support. Replace the blanket `RATIFIED / LGTM` claim in the earlier combined review with its historical scope and current limitations.
+
+Backlog after acceptance: existing-terminal participation, resumable sessions, round revisions, and explicit parallel/pipeline input surfaces. These are not grounds to postpone the reliability fixes.
+
+## Owner verification of the baseline
+
+The owner independently ran the existing suite at `5672d53`: **37/37 pass**. A separate bounded probe then reproduced all of the following:
+
+| Input | Observed baseline result | Required result |
+| --- | --- | --- |
+| No explicit ballot from any participant | Two invented approvals, validated, promoted | Missing votes, no approval |
+| Three explicit reject ballots | Conditional success, report promoted | Rejected, no promotion |
+| Failed wait | Validated, all participant terminals dismissed | Incomplete, preserve recovery |
+| Blocked wait | Validated, all participant terminals dismissed | Blocked, preserve recovery |
+| One approve and two corrupt ballot files | Quorum met, approval rate 100%, passed | Invalid ballots excluded from valid quorum, no approval |
+
+Reproduction and raw results are in the ignored local review folder `.council/owner-review/`. These findings supersede the blanket release sign-off in the historical combined review.
+
+Owner integration fixtures were also collected from the installed `hc`, using owned Node helpers reporting OSC 7501 state. Actual wait payloads showed `idle` and `blocked` with `ended: true`, `working` with `reason: timeout` and `ended: false`, and an initial `done` at turn 0 without any executed task. Neither exit code 0, `ended: true`, nor an uncorrelated status word proves completion. All fixture terminals were removed after collection. Raw payloads: `.council/owner-review/hc-real-wait.json`.
