@@ -1,8 +1,14 @@
 {
   "name": "council",
-  "version": "2.0.0",
-  "description": "Coordinate multi-agent Council workflows (council, review, debate, parallel, pipeline) across Claude Code, Codex, Antigravity, and Junie via Herdr.",
-  "author": "Ejupi-Labs",
-  "repository": "https://github.com/ejupi-djenis30/council-herdr",
-  "homepage": "https://github.com/ejupi-djenis30/council-herdr#readme"
+  "owner": { "name": "Ejupi-Labs" },
+  "metadata": {
+    "description": "Council workflows for delegation and review through Herdr."
+  },
+  "plugins": [
+    {
+      "name": "council",
+      "source": "./",
+      "description": "Herdr-native delegation, proposal handoffs, and independent review."
+    }
+  ]
 }

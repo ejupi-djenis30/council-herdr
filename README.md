@@ -80,6 +80,8 @@ Use `council_start`, `council_session_status` and `council_result` for asynchron
 
 The repository includes host manifests/configuration examples for Claude Code, Codex and Antigravity, plus a reusable skill for Junie and other hosts. These files do not establish automatic discovery or live compatibility with every application. The verified live-agent check used Codex through Herdr; MCP protocol/error behavior is tested separately.
 
+The Claude Code marketplace exposes `council@council`. Its MCP entry uses `${CLAUDE_PLUGIN_ROOT}` to find the bundled runner from outside the checkout. For Codex sessions outside a Council checkout, configure the stdio server with the absolute path to `bin/council.js` and the target project's working directory as described above.
+
 ## Verification
 
 Run `npm test`. The independent suites cover proposal handoffs, direct ballots, provisional evidence, terminal ownership, delivery, reconnect and startup timing. The async CLI and MCP smoke tests used a plain Node program in a real Herdr terminal. The earlier reliability milestone also exercised a live read-only Codex task. [Async delegation review](docs/next-increment-review.md) · [Reliability review](docs/independent-review.md)

@@ -3,7 +3,7 @@
   "name": "council",
   "version": "2.0.0",
   "description": "Herdr-native multi-agent Council plugin coordinating Claude Code, Codex, Antigravity, Junie, and all AI agents with bounded peer review, debate, and consensus.",
-  "author": "Ejupi-Labs",
+  "author": { "name": "Ejupi-Labs" },
   "license": "MIT",
   "keywords": [
     "herdr",
