@@ -2,6 +2,7 @@
 import { HerdrClient } from '../lib/herdr.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
+import { JobManager } from '../lib/jobs.js';
 
 function printHelp() {
   console.log(`
@@ -86,8 +87,48 @@ async function main() {
 
   const herdr = new HerdrClient();
   const orchestrator = new CouncilOrchestrator({ herdr });
+  const jobManager = new JobManager({ herdr, cwd: process.cwd() });
 
   switch (command.toLowerCase()) {
+    case 'start': {
+      const mode = flags.mode || 'delegate';
+      const task = flags.task || flags._.join(' ');
+      if (!task) {
+        console.error('Error: --task is required for start.');
+        process.exit(1);
+      }
+      const res = await jobManager.startJob({
+        mode,
+        task,
+        agent: flags.agent || 'codex',
+        adopt: flags.adopt || null,
+        sessionId: flags.session || null,
+        permission: flags.permission || 'read',
+        timeoutSec: flags.timeout ? Number(flags.timeout) : 180,
+        keepTerminals: Boolean(flags.keep)
+      });
+      if (!res.success) {
+        console.error(`Start failed: ${res.error}`);
+        process.exit(1);
+      }
+      console.log(JSON.stringify(res, null, 2));
+      break;
+    }
+
+    case 'result': {
+      const sessionId = flags.session || flags._[0];
+      if (!sessionId) {
+        console.error('Error: --session <id> is required for result.');
+        process.exit(1);
+      }
+      const res = await jobManager.getResult(sessionId);
+      console.log(JSON.stringify(res, null, 2));
+      if (!res.success) {
+        process.exit(1);
+      }
+      break;
+    }
+
     case 'mcp': {
       const server = new CouncilMcpServer();
       server.start();
@@ -107,6 +148,15 @@ async function main() {
     }
 
     case 'status': {
+      if (flags.session) {
+        const res = await jobManager.getStatus(flags.session);
+        if (!res.success) {
+          console.error(`Status error: ${res.error}`);
+          process.exit(1);
+        }
+        console.log(JSON.stringify(res, null, 2));
+        break;
+      }
       const res = herdr.list();
       if (!res.success) {
         console.error(`Error querying Herdr: ${res.error}`);
