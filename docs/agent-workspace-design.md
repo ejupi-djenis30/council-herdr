@@ -34,4 +34,4 @@ Writes use temporary files and rename with retries for common Windows locking er
 
 Each participant has its own output location. The orchestrator owns shared metadata, tally and result promotion. Track terminal addresses independently from artifact role names, retain incomplete agents beyond orchestrator exit and clean up only completed terminals created by the workflow.
 
-A provisional workflow preserves a readable report and next actions under `validation/`; it does not create an approved report under `reports/`. Future adoption of user-owned Herdr terminals and resumable/nonblocking sessions are separate product work.
+A provisional workflow preserves a readable report and next actions under `validation/` and requires a passing validation before promotion to `reports/`. Asynchronous delegation uses a separate versioned `job.json` record under the session directory. The worker records delivery, completion and the terminal's collected output for retrieval with `result`. [Async delegation usage](../README.md#delegate-in-an-existing-herdr-terminal)

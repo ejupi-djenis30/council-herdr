@@ -14,4 +14,4 @@ Read [docs/owner-brief.md](docs/owner-brief.md) for acceptance criteria and file
 
 Use `npm test` and `node bin/council.js doctor`. Inside Herdr, run long commands under `hc run --bg` and wait with `hc wait`. Distinguish mocked regressions, live transport checks and real-agent checks in review claims.
 
-Reuse of selected existing agents and a nonblocking session API are the next increment, after reliability acceptance.
+For asynchronous delegation, use `start`, `status --session` and `result --session` or the corresponding MCP tools. Treat the job's deadline and delivery record as durable. Reconnecting to an existing job must preserve worker progress and avoid sending the task again.

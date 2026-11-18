@@ -104,3 +104,11 @@ Next assignment is design only: reuse explicitly selected existing Herdr termina
 ## Next increment authorized — 2026-11-17
 
 Both independent designs have been reviewed. The [next-increment brief](next-increment-brief.md) supersedes the design-only hold and authorizes a bounded asynchronous delegate path: explicit borrowed address or new participant, durable delivery attempts, a separate Herdr worker, and start/status/result. Antigravity resumes implementation in its assigned product files; Junie owns the new jobs acceptance file and new review document. Existing 81 tests stay unchanged. Async council/review and late-ballot re-tally remain backlog. Acceptance of the reliability milestone does not constitute acceptance of this new work.
+
+## Async delegation acceptance — 2026-11-18
+
+The owner accepts implementation commit `4f356619117518611d7a17f06306ed89b6866783` for local asynchronous delegation with one new or explicitly adopted participant. Junie's independent audit passed all 60 acceptance cases, including the eight regressions that blocked `a8ec720`. The full suite passed all 146 tests in the owner and independent runs. [Independent audit and tests](next-increment-review.md)
+
+The owner verified the real CLI and MCP paths through Herdr on Windows with Node.js 24.14.1 and `hc 0.1.21`. In each check, a worker survived the start client's exit, reconnect reused the same job, and the borrowed terminal completed consecutive jobs from turn 12 through turns 13 and 14. Its original settings stayed intact and the saved results were retrievable from another process. A plain Node program supplied the terminal's responses. Separate process probes passed for a lost dispatch response, worker contention, and abrupt worker termination.
+
+Council reserves an address through the deadline when delivery is uncertain. A subsequent task requires an explicit start and a fresh readiness check. An orphaned lock from a crashed worker remains available for inspection. The scope for this milestone is a single asynchronous delegation. Combining multiple existing agents in one council or review session remains a separate increment.

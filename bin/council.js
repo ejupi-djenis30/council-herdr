@@ -14,7 +14,9 @@ USAGE:
 COMMANDS:
   mcp                           Start Council MCP stdio server for AI agent hosts
   doctor                        Check environment health (Herdr, hc, agent CLIs)
-  status                        List live Herdr terminals and council status
+  status [--session <id>]        List live terminals or inspect an async job
+  start [options]                Start one asynchronous delegate job
+  result --session <id>          Read the saved result or pending state
   convene [options]             Run a multi-agent collaboration workflow
   delegate [options]            Delegate a single subtask to an agent in Herdr
   wait <target>                 Wait for a terminal turn to finish (or 'all')
@@ -51,11 +53,23 @@ DELEGATE OPTIONS:
   --task <string>               Instruction for the agent
   --permission <read|write>     File permissions (default: read)
 
+ASYNC START OPTIONS:
+  --task <string>               Instruction for the agent
+  --mode delegate               Workflow mode (default: delegate)
+  --agent <name>                Agent for a new terminal (default: codex)
+  --adopt <address>              Use a ready existing Herdr terminal
+  --session <id>                Use a stable ID to reconnect with the same options
+  --timeout <sec>               Job deadline in seconds (default: 180)
+  --permission <read|write>     New agent permissions (default: read)
+  --keep                        Retain a newly launched terminal after completion
+
 EXAMPLES:
   council doctor
   council convene --mode council --task "Design a resilient telemetry pipeline"
   council convene --mode review --task "Review src/auth.js" --permission read
   council delegate --agent codex --task "Write unit tests for parser"
+  council start --adopt t123 --session parser-review --task "Inspect parser edge cases"
+  council result --session parser-review
   council cast-ballot --session council-123 --voter council-skeptic --vote amend --score 7 --rationale "Needs retry backoff"
   council mcp
 `);

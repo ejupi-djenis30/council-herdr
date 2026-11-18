@@ -2,17 +2,17 @@
 
 Council adds bounded delegation, proposal handoffs, independent review and durable results to Herdr. Herdr runs the visible, interactive terminals; Council organizes their work.
 
-The reliability milestone passed local verification and independent review on commit `c31bc90`: 81/81 tests plus separate live Herdr/Codex evidence with its declared hash limits. See [acceptance and priorities](docs/owner-brief.md) and [the independent review](docs/independent-review.md).
+Asynchronous delegation passed local verification and independent review on implementation commit `4f35661`. The 146 tests include the 81 reliability tests accepted on `c31bc90`. Live Herdr checks covered CLI and MCP reconnect, worker lifetime, and repeated use of an existing terminal. [Acceptance and priorities](docs/owner-brief.md) · [Independent async delegation review](docs/next-increment-review.md)
 
 ## Available workflows
 
 | Mode | Behavior |
 | --- | --- |
-| `delegate` | One specialist receives a bounded task; Council waits for its actual turn and collects the result. |
+| `delegate` | One specialist receives a bounded task. Run it synchronously with `delegate` or inspect it while it runs with `start`, `status` and `result`. |
 | `council` | An author produces a proposal; a skeptic and simplifier receive that exact proposal and its SHA-256 digest. |
 | `review` | An author produces a proposal; a reviewer and simplifier inspect it before the voting tally. |
 
-`debate`, `parallel` and `pipeline` are experimental and disabled. Council currently launches new participants. Reusing existing Herdr terminals and a nonblocking start/status/result API are the next priorities.
+`debate`, `parallel` and `pipeline` are experimental and disabled. Asynchronous jobs support one participant in `delegate` mode.
 
 ## Run it
 
@@ -35,6 +35,22 @@ hc read parser-review
 ```
 
 `doctor` checks executable availability, not authentication or every host integration. Default agents are Claude, Codex and Antigravity; `--agents codex,junie,antigravity` selects another panel. Use `--permission write` only for an authorized editing task. `--timeout` is the turn budget in seconds; `--keep` retains completed participants for inspection.
+
+## Delegate in an existing Herdr terminal
+
+Pick a ready agent from `hc ls` and replace `t123` with its address. Run these commands from the project directory.
+
+```powershell
+node C:/path/to/Council/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect src/parser.js and report concrete edge cases" --timeout 180
+node C:/path/to/Council/bin/council.js status --session parser-review
+node C:/path/to/Council/bin/council.js result --session parser-review
+```
+
+`start` returns a session ID while a worker runs the task in Herdr. Check progress with `status`, inspect the terminal with `hc read t123`, and retrieve its saved output with `result`. A pending result has `ready: false`. To launch a new agent for the job, replace `--adopt t123` with `--agent codex`.
+
+Repeat the same `start` with the same session ID and task options from the same directory to reconnect. An adopted terminal keeps its permissions and stays available in Herdr. Council leaves its lifetime and settings under its original owner's control.
+
+If delivery is uncertain, inspect the participant address and worker address from `status` with `hc get` and `hc read`. A new job on the same terminal requires an explicit start after the deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
 
 ## Results and approvals
 
@@ -60,12 +76,12 @@ Submit from the same target project, or pass the explicit session directory. A b
 
 Start the stdio server with `node /absolute/path/to/Council/bin/council.js mcp`. Configure the host to launch it in the intended project directory; the server's working directory determines the target project and session location.
 
-Tools: `council_convene`, `council_delegate`, `council_cast_ballot`, `council_status`, `council_wait`, `council_read`, `council_send`, `council_dismiss`. Workflow calls wait for results; nonblocking sessions are not implemented yet. Herdr remains available for inspection and steering while a call runs.
+Use `council_start`, `council_session_status` and `council_result` for asynchronous delegation. Blocking workflows use `council_convene` or `council_delegate`. Other tools include `council_cast_ballot`, `council_status`, `council_wait`, `council_read`, `council_send` and `council_dismiss`.
 
 The repository includes host manifests/configuration examples for Claude Code, Codex and Antigravity, plus a reusable skill for Junie and other hosts. These files do not establish automatic discovery or live compatibility with every application. The verified live-agent check used Codex through Herdr; MCP protocol/error behavior is tested separately.
 
 ## Verification
 
-Run `npm test`. Independent regressions cover failed waits/reads, missing delivery and addresses, exact proposal handoffs, direct-only authorization, provisional evidence, owned cleanup and startup timing. Live Herdr checks and a bounded Codex read-only task are recorded in [the review](docs/independent-review.md); mocked tests are not live-agent proof.
+Run `npm test`. The independent suites cover proposal handoffs, direct ballots, provisional evidence, terminal ownership, delivery, reconnect and startup timing. The async CLI and MCP smoke tests used a plain Node program in a real Herdr terminal. The earlier reliability milestone also exercised a live read-only Codex task. [Async delegation review](docs/next-increment-review.md) · [Reliability review](docs/independent-review.md)
 
 MIT - Ejupi-Labs.

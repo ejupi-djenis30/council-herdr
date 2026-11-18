@@ -7,7 +7,7 @@ description: Delegate bounded tasks and review concrete proposals through visibl
 
 Use Council when a bounded specialist task or independent review improves the work. Herdr runs terminals; Council adds briefs, handoffs and session artifacts.
 
-Supported modes: `delegate`, `council`, `review`. `debate`, `parallel` and `pipeline` are disabled experimental modes. Existing-terminal adoption and nonblocking start/status/result are not implemented yet.
+Supported modes are `delegate`, `council` and `review`. The experimental modes `debate`, `parallel` and `pipeline` are disabled. Use async `delegate` to run a single task in a new or explicitly selected existing Herdr terminal.
 
 ## Start
 
@@ -30,6 +30,18 @@ hc read parser-review
 ```
 
 Do not launch a duplicate after timeout. Inspect the session and reported addresses first. Do not restart Herdr or force input through a blocked prompt.
+
+## Adopt a terminal for one task
+
+Choose a ready terminal by address and run from the target project. Use the same session ID and task options when reconnecting.
+
+```powershell
+node C:/path/to/Council/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect parser edge cases"
+node C:/path/to/Council/bin/council.js status --session parser-review
+node C:/path/to/Council/bin/council.js result --session parser-review
+```
+
+The MCP tools are `council_start`, `council_session_status` and `council_result`. Inspect the participant's terminal while the worker runs and retrieve the saved output when ready. Adopted agents retain their existing permissions. If delivery is uncertain, inspect the terminal and the worker before starting another task.
 
 ## Submission and approval
 
