@@ -35,7 +35,7 @@ The placeholder digest must be replaced with the actual SHA-256 supplied in the 
 Use the MCP tool `council_cast_ballot` or the CLI from the target project:
 
 ```powershell
-node C:/path/to/Council/bin/council.js cast-ballot --session <session-id-or-directory> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Bound the connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
+node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-or-directory> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Bound the connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
 ```
 
 When submitting from a different working directory, use the explicit session directory. Plain session IDs resolve under that process's `.agent_workspace/`; a directory name collision in the current project does not change that resolution. Casting after a workflow returns does not automatically rerun validation or promotion. Multi-round revision/resumption is not implemented by this command.

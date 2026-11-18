@@ -1,4 +1,4 @@
-# Council
+# council-herdr
 
 Council adds bounded delegation, proposal handoffs, independent review and durable results to Herdr. Herdr runs the visible, interactive terminals; Council organizes their work.
 
@@ -21,15 +21,15 @@ Requirements: Node.js 20 or newer, `hc` on the parent process's PATH, and a sele
 Run from the project directory the agents should inspect. Replace the executable path with the absolute path to this checkout:
 
 ```powershell
-node C:/path/to/Council/bin/council.js doctor
-node C:/path/to/Council/bin/council.js delegate --agent codex --task "Inspect src/parser.js and report concrete edge cases" --permission read
-node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
+node C:/path/to/council-herdr/bin/council.js doctor
+node C:/path/to/council-herdr/bin/council.js delegate --agent codex --task "Inspect src/parser.js and report concrete edge cases" --permission read
+node C:/path/to/council-herdr/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
 ```
 
 Inside Herdr, read `hc --skill` and run long commands in named background terminals:
 
 ```powershell
-hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal"
+hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/council-herdr/bin/council.js convene --mode review --task "Review the parser proposal"
 hc wait parser-review
 hc read parser-review
 ```
@@ -41,9 +41,9 @@ hc read parser-review
 Pick a ready agent from `hc ls` and replace `t123` with its address. Run these commands from the project directory.
 
 ```powershell
-node C:/path/to/Council/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect src/parser.js and report concrete edge cases" --timeout 180
-node C:/path/to/Council/bin/council.js status --session parser-review
-node C:/path/to/Council/bin/council.js result --session parser-review
+node C:/path/to/council-herdr/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect src/parser.js and report concrete edge cases" --timeout 180
+node C:/path/to/council-herdr/bin/council.js status --session parser-review
+node C:/path/to/council-herdr/bin/council.js result --session parser-review
 ```
 
 `start` returns a session ID while a worker runs the task in Herdr. Check progress with `status`, inspect the terminal with `hc read t123`, and retrieve its saved output with `result`. A pending result has `ready: false`. To launch a new agent for the job, replace `--adopt t123` with `--agent codex`.
@@ -67,14 +67,14 @@ Read-only agents can return their final answer normally. A sandbox may lack `hc`
 For an explicit vote, use the proposal digest supplied in the review brief:
 
 ```powershell
-node C:/path/to/Council/bin/council.js cast-ballot --session <session-id-or-path> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Add a bounded connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
+node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-or-path> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Add a bounded connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
 ```
 
 Submit from the same target project, or pass the explicit session directory. A ballot written after a workflow returns does not automatically rerun or promote it. See [voting and validation](docs/voting-and-validation.md).
 
 ## MCP and host packaging
 
-Start the stdio server with `node /absolute/path/to/Council/bin/council.js mcp`. Configure the host to launch it in the intended project directory; the server's working directory determines the target project and session location.
+Start the stdio server with `node /absolute/path/to/council-herdr/bin/council.js mcp`. Configure the host to launch it in the intended project directory; the server's working directory determines the target project and session location.
 
 Use `council_start`, `council_session_status` and `council_result` for asynchronous delegation. Blocking workflows use `council_convene` or `council_delegate`. Other tools include `council_cast_ballot`, `council_status`, `council_wait`, `council_read`, `council_send` and `council_dismiss`.
 

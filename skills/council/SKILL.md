@@ -17,14 +17,14 @@ Supported modes are `delegate`, `council` and `review`. The experimental modes `
 4. Otherwise invoke the bundled CLI by absolute path from that project:
 
 ```powershell
-node C:/path/to/Council/bin/council.js delegate --agent codex --task "Inspect parser edge cases" --permission read
-node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
+node C:/path/to/council-herdr/bin/council.js delegate --agent codex --task "Inspect parser edge cases" --permission read
+node C:/path/to/council-herdr/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
 ```
 
 Inside Herdr, run a long workflow in a named background terminal and use `hc wait`:
 
 ```powershell
-hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/Council/bin/council.js convene --mode review --task "Review the parser proposal"
+hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/council-herdr/bin/council.js convene --mode review --task "Review the parser proposal"
 hc wait parser-review
 hc read parser-review
 ```
@@ -36,9 +36,9 @@ Do not launch a duplicate after timeout. Inspect the session and reported addres
 Choose a ready terminal by address and run from the target project. Use the same session ID and task options when reconnecting.
 
 ```powershell
-node C:/path/to/Council/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect parser edge cases"
-node C:/path/to/Council/bin/council.js status --session parser-review
-node C:/path/to/Council/bin/council.js result --session parser-review
+node C:/path/to/council-herdr/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect parser edge cases"
+node C:/path/to/council-herdr/bin/council.js status --session parser-review
+node C:/path/to/council-herdr/bin/council.js result --session parser-review
 ```
 
 The MCP tools are `council_start`, `council_session_status` and `council_result`. Inspect the participant's terminal while the worker runs and retrieve the saved output when ready. Adopted agents retain their existing permissions. If delivery is uncertain, inspect the terminal and the worker before starting another task.
@@ -52,7 +52,7 @@ Only explicit direct ballots bound to the session, expected voter, round and pro
 If a permitted direct channel exists, use `council_cast_ballot` or:
 
 ```powershell
-node C:/path/to/Council/bin/council.js cast-ballot --session <session-id-or-directory> --voter <assigned-voter> --role <assigned-role> --agent <agent> --vote <approve|reject|amend> --score <1-10> --rationale "<reason>" --target-sha <proposal-sha256>
+node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-or-directory> --voter <assigned-voter> --role <assigned-role> --agent <agent> --vote <approve|reject|amend> --score <1-10> --rationale "<reason>" --target-sha <proposal-sha256>
 ```
 
 Use the assigned voter and the digest from the brief. From another directory, pass the explicit session path. A later ballot does not automatically rerun a finished workflow. If `hc` or direct writes are unavailable, finish the normal final answer; do not search unrelated directories or broaden permissions to force submission.

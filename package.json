@@ -1,5 +1,5 @@
 {
-  "name": "council",
+  "name": "council-herdr",
   "version": "2.0.0",
   "description": "Herdr-native multi-agent Council plugin for Claude Code, Codex, Antigravity, Junie, and all AI agents.",
   "type": "module",
