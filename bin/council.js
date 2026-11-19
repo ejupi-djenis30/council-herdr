@@ -3,6 +3,7 @@ import { HerdrClient } from '../lib/herdr.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
 import { JobManager } from '../lib/jobs.js';
+import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
 
 function printHelp() {
   console.log(`
@@ -24,6 +25,7 @@ COMMANDS:
   send <target> <message>       Send input/instruction to a terminal
   dismiss <targets...>          Kill and remove terminal(s) from Herdr
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
+  poll help                     Manage advisory project polls and submit responses
 
 CONVENE OPTIONS:
   --mode <name>                 Mode: council (default), review, delegate
@@ -97,6 +99,11 @@ function parseArgs(args) {
 async function main() {
   const rawArgs = process.argv.slice(2);
   const command = rawArgs[0] || 'help';
+  if (command.toLowerCase() === 'poll') {
+    const result = runPollCommand(rawArgs.slice(1));
+    console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+    return;
+  }
   const flags = parseArgs(rawArgs.slice(1));
 
   const herdr = new HerdrClient();

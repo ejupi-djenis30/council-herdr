@@ -57,6 +57,10 @@ node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-o
 
 Use the assigned voter and the digest from the brief. From another directory, pass the explicit session path. A later ballot does not automatically rerun a finished workflow. If `hc` or direct writes are unavailable, finish the normal final answer; do not search unrelated directories or broaden permissions to force submission.
 
+## Respond to an advisory poll
+
+Use the poll ID and project folder from the invitation. Read its options and context through `council_poll_read`, or use `poll show <poll-id>` with the Council CLI from that project. Submit one listed option ID or a free response if available. Include the trade-off or reason in `note`. Use your own Herdr terminal address as the voter ID. The CLI can infer it from `HC_TERMINAL_ID`. Submit via `council_poll_vote` or `poll vote <poll-id> --option <option-id> --note "<reason>"`. Use `--answer` for a free response. A later submission under the same voter ID updates the response while the poll is open. Use your normal final answer when your permissions prevent submission.
+
 ## Inspect and report
 
 - Read, steer and wait through Council tools or `hc` using actual terminal addresses, not assumed role names.

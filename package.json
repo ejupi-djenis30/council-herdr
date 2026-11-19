@@ -1,14 +1,38 @@
 {
   "name": "council-herdr",
   "version": "2.0.0",
-  "description": "Herdr-native multi-agent Council plugin for Claude Code, Codex, Antigravity, Junie, and all AI agents.",
+  "description": "Native Herdr Desktop polls and review results, with Council delegation through CLI and MCP.",
   "type": "module",
   "main": "bin/council.js",
   "bin": {
     "council": "bin/council.js"
   },
+  "files": [
+    "bin/",
+    "lib/",
+    "templates/",
+    "skills/",
+    "commands/",
+    "rules/",
+    "docs/",
+    "herdr/install.js",
+    "herdr/bridge.js",
+    "herdr/RECIPE.md",
+    "herdr/keys.json",
+    "herdr/preview.png",
+    "herdr/screenshots/",
+    "herdr/mods/council/*.js",
+    "herdr/mods/council/mod.json",
+    "herdr/mods/council/runtime/*.mjs",
+    "plugin.json",
+    "mcp.json",
+    "mcp_config.json",
+    ".mcp.json",
+    ".claude-plugin/",
+    ".codex-plugin/"
+  ],
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test",
     "doctor": "node bin/council.js doctor",
     "status": "node bin/council.js status",
     "mcp": "node bin/council.js mcp"

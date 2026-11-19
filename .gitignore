@@ -4,3 +4,6 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+herdr/mods/*/gpui-kit.d.ts
+herdr/mods/*/herdr.d.ts
+herdr/mods/*/jsconfig.json

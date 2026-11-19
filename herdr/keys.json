@@ -1,0 +1,5 @@
+{
+  "global": {
+    "shift-f8": "mod.open:council"
+  }
+}

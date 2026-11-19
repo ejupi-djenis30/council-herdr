@@ -1,8 +1,58 @@
-# council-herdr
+# Council for Herdr
 
-Council adds bounded delegation, proposal handoffs, independent review and durable results to Herdr. Herdr runs the visible, interactive terminals; Council organizes their work.
+Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Council is a native Herdr Desktop mod with a CLI and MCP server for delegation and formal reviews.
 
-Asynchronous delegation passed local verification and independent review on implementation commit `4f35661`. The 146 tests include the 81 reliability tests accepted on `c31bc90`. Live Herdr checks covered CLI and MCP reconnect, worker lifetime, and repeated use of an existing terminal. [Acceptance and priorities](docs/owner-brief.md) · [Independent async delegation review](docs/next-increment-review.md)
+[Install](#install) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
+
+![Council in Herdr Desktop showing a rollout poll, its vote breakdown, and agent responses](herdr/preview.png)
+
+| Track participation | Inspect formal reviews |
+| --- | --- |
+| [![Tracked Herdr agents with responded and pending states](herdr/screenshots/participants.png)](herdr/screenshots/participants.png) | [![A provisional Council review with incomplete quorum and an amendment](herdr/screenshots/review.png)](herdr/screenshots/review.png) |
+
+## Install
+
+Use Herdr Desktop and Node.js 20 or newer. Node.js 24 is recommended. For the optional shortcut, open Herdr once before running the installer.
+
+```bash
+git clone https://github.com/ejupi-djenis30/council-herdr.git
+cd council-herdr
+node herdr/install.js --shortcut
+```
+
+Open a local space and press **Shift+F8** if the binding was added. You can also run `herdr-app do mod.open --name council`. The installed folder contains the poll runtime and works independently of the checkout.
+
+- **Update** an installation managed by the installer with `node herdr/install.js --upgrade`. The old build is archived under the Herdr app home's `council-backups/`. An installation with local edits requires a manual backup before replacing it.
+- **Install from the gallery bundle** by copying `herdr/mods/council/` into the app home's `mods/` directory after reviewing its contents. The bundle uses `node` from Herdr's environment. Set `{"node":"/absolute/path/to/node"}` in the installed mod's `config.json` if Herdr needs an explicit executable. See the [recipe and key snippet](herdr/RECIPE.md).
+- **Use a custom app home** by passing `--app-home <path>` or setting `HERDR_APP_HOME`. To remove Council, move its folder out of `mods/` and remove the shortcut entry if you added it. Polls and reviews are stored in their project folders.
+
+## Run a poll
+
+1. Select **New poll** and choose listed options, free responses, or both.
+2. Open **Participants** to track agents in the active space. **Copy invite** contains instructions for the selected agent. Paste it into their conversation.
+3. Follow live responses in **Results**. You can add options while the poll is open, see replies from agents outside the roster, and jump to a live terminal from the participant list.
+4. Close the poll with an optional next step. **Copy decision** captures the tally, reasons, and missing responses for the next person or agent.
+
+Use the search field and open or closed filters to find earlier polls. The **Reviews** tab projects saved formal Council verdicts, quorum, missing or invalid ballots, and dissent. Advisory polls are separate from the formal approval workflow.
+
+### Respond from an agent
+
+With Council MCP configured for the same project, use `council_poll_read` and `council_poll_vote`. To use the [bundled poll CLI](herdr/RECIPE.md#built-from), run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands:
+
+```powershell
+node C:/path/to/council-herdr/bin/council.js poll list
+node C:/path/to/council-herdr/bin/council.js poll show <poll-id>
+node C:/path/to/council-herdr/bin/council.js poll vote <poll-id> --option option-1 --note "The diff identifies the exact revision"
+node C:/path/to/council-herdr/bin/council.js poll help
+```
+
+Use `--answer "…"` for a free response when enabled. The CLI uses `HC_TERMINAL_ID` when available. Supply `--voter` (or MCP `voter`) for a stable ID when the process starts outside that terminal. Each ID can update its response until close. Advisory IDs are local labels. A read-only agent can return its recommendation in its current conversation.
+
+Use `poll track <poll-id> --voter <id> --label "Reviewer"` and `poll untrack <poll-id> --voter <id>` to manage the roster from the CLI while a poll is open.
+
+### Data and permissions
+
+The panel runs the bundled Node helper from the local Herdr space's folder. It reads Council records under `.agent_workspace/` and writes advisory events under `.agent_workspace/.polls/`. Poll writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses no network services. Invites and handoffs use the local clipboard.
 
 ## Available workflows
 
@@ -84,6 +134,12 @@ The Claude Code marketplace exposes `council@council`. Its MCP entry uses `${CLA
 
 ## Verification
 
-Run `npm test`. The independent suites cover proposal handoffs, direct ballots, provisional evidence, terminal ownership, delivery, reconnect and startup timing. The async CLI and MCP smoke tests used a plain Node program in a real Herdr terminal. The earlier reliability milestone also exercised a live read-only Codex task. [Async delegation review](docs/next-increment-review.md) · [Reliability review](docs/independent-review.md)
+Run `npm test`, `node bin/council.js doctor`, and `herdr-app check herdr/mods/council`. The repository workflow runs the Node tests on Windows, macOS and Linux. Desktop visuals and the isolated gallery install were checked on Windows with Herdr Desktop 0.1.16. Screenshots use sample polls and terminal fixtures.
 
-MIT - Ejupi-Labs.
+The independent suites cover proposal handoffs, direct ballots, provisional evidence, terminal ownership, delivery, reconnect and startup timing. Earlier live checks used terminal fixtures for asynchronous CLI and MCP reconnect. The reliability milestone also exercised a live read-only Codex task. [Owner acceptance](docs/owner-brief.md) · [Async delegation review](docs/next-increment-review.md) · [Reliability review](docs/independent-review.md)
+
+## Gallery package
+
+The `herdr/` directory contains the native mod, recipe, preview and optional shortcut snippet. To list a published build in Community, GitHub must serve that folder from a public repository with the `herdr-mod` topic. [Herdr Community Gallery instructions](https://herdr.dev/gallery/?type=mods)
+
+[MIT License](LICENSE) · [Changelog](CHANGELOG.md)
