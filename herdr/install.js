@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { isDirectory } from './mods/council/runtime/store-files.mjs';
+import { prepareMenu } from './install-menu.js';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const source = join(repo, 'herdr', 'mods', 'council');
@@ -22,9 +23,10 @@ const legacy = {
   'poll-view.js': 'd43e5ceb1269ced3636102c710eacced220b7c2f1d45aa83287ad8ab1c5925bd'
 };
 const files = [
-  'mod.json', 'components.js', 'poll-text.js', 'poll-view.js', 'main.js',
-  'runtime/council.mjs', 'runtime/desktop.mjs', 'runtime/poll-command.mjs',
-  'runtime/polls.mjs', 'runtime/store-files.mjs'
+  'mod.json', 'components.js', 'delegation-view.js', 'navigation.js', 'poll-text.js', 'poll-view.js', 'main.js',
+  'runtime/council.mjs', 'runtime/delegations.mjs', 'runtime/desktop.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs',
+  'runtime/polls.mjs', 'runtime/store-files.mjs',
+  ...readdirSync(join(source, 'icons')).filter(name => name.endsWith('.svg')).map(name => `icons/${name}`)
 ];
 
 function json(path) {
@@ -37,8 +39,8 @@ function hash(path) {
 
 function filesInMod(folder) {
   return readdirSync(folder, { withFileTypes: true }).flatMap(entry => {
-    if (entry.name === 'runtime' && entry.isDirectory()) {
-      return readdirSync(join(folder, 'runtime')).map(name => `runtime/${name}`);
+    if (['runtime', 'icons'].includes(entry.name) && entry.isDirectory()) {
+      return readdirSync(join(folder, entry.name)).map(name => `${entry.name}/${name}`);
     }
     return generated.has(entry.name) || entry.name === receiptName ? [] : [entry.name];
   });
@@ -81,6 +83,7 @@ function install(appHome, upgrade) {
   try {
     const prepared = join(staging, 'council');
     mkdirSync(join(prepared, 'runtime'), { recursive: true });
+    mkdirSync(join(prepared, 'icons'));
     for (const file of files) copyFileSync(join(source, file), join(prepared, file));
     writeFileSync(join(prepared, 'config.json'), JSON.stringify({ node: process.execPath }, null, 2));
     const checksums = Object.fromEntries([...files, 'config.json'].map(file => [file, hash(join(prepared, file))]));
@@ -139,18 +142,26 @@ function addShortcut(appHome) {
 try {
   const { values } = parseArgs({
     options: {
-      'app-home': { type: 'string' }, shortcut: { type: 'boolean' },
+      'app-home': { type: 'string' }, shortcut: { type: 'boolean' }, menu: { type: 'boolean' }, layout: { type: 'string' },
       upgrade: { type: 'boolean' }, help: { type: 'boolean', short: 'h' }
     }
   });
   if (values.help) {
-    console.log('Usage: node herdr/install.js [--shortcut] [--upgrade] [--app-home <directory>]');
+    console.log('Usage: node herdr/install.js [--menu [--layout <name>]] [--shortcut] [--upgrade] [--app-home <directory>]');
     process.exit(0);
   }
+  if (values.layout !== undefined && !values.menu) throw new Error('--layout requires --menu.');
   const appHome = resolve(values['app-home'] || process.env.HERDR_APP_HOME || join(homedir(), '.config', 'herdr-app'));
+  const addMenu = values.menu ? prepareMenu(appHome, values.layout) : null;
   const { destination, backup } = install(appHome, values.upgrade);
   console.log(`Installed Council at ${destination}`);
   if (backup) console.log(`Previous installation archived at ${backup}`);
+  if (addMenu) {
+    const menu = addMenu();
+    console.log(`Council menu added to layout "${menu.name}".`);
+    if (menu.backup) console.log(`Previous layout archived at ${menu.backup}`);
+    if (menu.clone) console.log(`Select "${menu.name}" in Herdr's layout picker or run: herdr-app do layout.switch --name ${menu.name}`);
+  }
   if (values.shortcut) {
     try {
       addShortcut(appHome);

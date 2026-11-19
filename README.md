@@ -1,30 +1,33 @@
 # Council for Herdr
 
-Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Council is a native Herdr Desktop mod with a CLI and MCP server for delegation and formal reviews.
+<img src="herdr/mods/council/icons/logo.svg" width="48" height="48" alt="" align="right">
+
+Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Open **Council** in the Herdr sidebar to jump to polls, delegations, or formal reviews.
 
 [Install](#install) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
 
 ![Council in Herdr Desktop showing a rollout poll, its vote breakdown, and agent responses](herdr/preview.png)
 
-| Track participation | Inspect formal reviews |
-| --- | --- |
-| [![Tracked Herdr agents with responded and pending states](herdr/screenshots/participants.png)](herdr/screenshots/participants.png) | [![A provisional Council review with incomplete quorum and an amendment](herdr/screenshots/review.png)](herdr/screenshots/review.png) |
+| Open from the sidebar | Track participation | Follow delegations | Inspect formal reviews |
+| --- | --- | --- | --- |
+| [![Council menu in the Herdr sidebar](herdr/screenshots/menu.png)](herdr/screenshots/menu.png) | [![Tracked Herdr agents with responded and pending states](herdr/screenshots/participants.png)](herdr/screenshots/participants.png) | [![A completed delegation with acknowledged delivery and a saved terminal capture](herdr/screenshots/delegations.png)](herdr/screenshots/delegations.png) | [![A provisional Council review with incomplete quorum and an amendment](herdr/screenshots/review.png)](herdr/screenshots/review.png) |
 
 ## Install
 
-Use Herdr Desktop and Node.js 20 or newer. Node.js 24 is recommended. For the optional shortcut, open Herdr once before running the installer.
+Open Herdr Desktop once to initialize your layouts. Council needs Node.js 20 or newer.
 
 ```bash
 git clone https://github.com/ejupi-djenis30/council-herdr.git
 cd council-herdr
-node herdr/install.js --shortcut
+node herdr/install.js --menu --shortcut
 ```
 
-Open a local space and press **Shift+F8** if the binding was added. You can also run `herdr-app do mod.open --name council`. The installed folder contains the poll runtime and works independently of the checkout.
+Open a local space and select **Council** under the Herdr logo. The menu opens **Polls**, **Delegations**, or **Reviews** directly. The optional **Shift+F8** binding and `herdr-app do mod.open --name council` also open Council.
 
-- **Update** an installation managed by the installer with `node herdr/install.js --upgrade`. The old build is archived under the Herdr app home's `council-backups/`. An installation with local edits requires a manual backup before replacing it.
-- **Install from the gallery bundle** by copying `herdr/mods/council/` into the app home's `mods/` directory after reviewing its contents. The bundle uses `node` from Herdr's environment. Set `{"node":"/absolute/path/to/node"}` in the installed mod's `config.json` if Herdr needs an explicit executable. See the [recipe and key snippet](herdr/RECIPE.md).
-- **Use a custom app home** by passing `--app-home <path>` or setting `HERDR_APP_HOME`. To remove Council, move its folder out of `mods/` and remove the shortcut entry if you added it. Polls and reviews are stored in their project folders.
+- **Choose a layout.** The installer adds the menu to the active personal layout and archives the old file. For a layout shipped with Herdr, select the new `council-<name>` layout in Herdr using the name printed by the installer. Use `--menu --layout <name>` to target a different layout.
+- **Update** a managed installation with `node herdr/install.js --upgrade --menu`. The old build is archived under the Herdr app home's `council-backups/`. An installation with local edits requires a manual backup before replacing it.
+- **Install from the gallery bundle** by copying `herdr/mods/council/` into the app home's `mods/` directory. The installed mod works independently of the checkout and uses `node` from Herdr's environment. See the [recipe](herdr/RECIPE.md) for manual menu setup and configuration.
+- **Use a custom app home** by passing `--app-home <path>` or setting `HERDR_APP_HOME`. To remove Council, remove the menu block and shortcut from your Herdr configuration before moving the mod out of `mods/`. Polls, delegations, and reviews live in their project folders.
 
 ## Run a poll
 
@@ -97,6 +100,8 @@ node C:/path/to/council-herdr/bin/council.js result --session parser-review
 ```
 
 `start` returns a session ID while a worker runs the task in Herdr. Check progress with `status`, inspect the terminal with `hc read t123`, and retrieve its saved output with `result`. A pending result has `ready: false`. To launch a new agent for the job, replace `--adopt t123` with `--agent codex`.
+
+Open **Delegations** in the Council panel to follow those same sessions in the active project. Filter by **Active**, **Needs attention**, or **Ready**, see delivery and deadline separately from the outcome, and open the participant's terminal when it is visible in that space. The result card shows saved terminal output and can copy an excerpt or the capture file path. The panel reads records without resending tasks.
 
 Repeat the same `start` with the same session ID and task options from the same directory to reconnect. An adopted terminal keeps its permissions and stays available in Herdr. Council leaves its lifetime and settings under its original owner's control.
 

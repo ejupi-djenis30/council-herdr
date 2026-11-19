@@ -1,9 +1,11 @@
 import { View, div } from 'gpui-kit';
 import { h_flex, v_flex, InputState } from 'gpui-base';
 import { agents, appHome, checking, closeOverlay, exec, notify, props, readTextFile, run, spaces, theme } from 'herdr';
-import { brandMark, button, columns, field, input, label, panel, progress, reviewStatus, sectionTab, statusPill } from './components.js';
+import { brandMark, button, cardHeading, columns, field, glyph, iconTile, input, label, panel, progress, reviewStatus, sectionTab, statusPill } from './components.js';
 import { countLabel, decisionSummary, invitation, pollStatus } from './poll-text.js';
 import { pollParticipants, pollResults } from './poll-view.js';
+import { delegationStatus, delegationView } from './delegation-view.js';
+import { launcher, menu, sections } from './navigation.js';
 
 const modes = [
   ['choice', 'Options'],
@@ -21,9 +23,21 @@ function spaceAgents(space) {
 
 export default class Council extends View {
   init(_props, cx) {
-    this.tab = 'polls';
+    const options = props();
+    this.role = options?.role;
+    if (this.role === 'launcher') {
+      this.compact = false;
+      return;
+    }
+    if (this.role === 'menu') {
+      this.menuIndex = 0;
+      this.menuFocus = cx.focus_handle();
+      this.menuFocus.focus();
+      return;
+    }
+    this.tab = sections.find(section => section.id === options?.initialTab)?.id ?? 'polls';
     this.pollSection = 'results';
-    this.pollFilter = 'all';
+    this.listFilter = 'all';
     this.wide = false;
     this.folder = null;
     this.selected = null;
@@ -38,7 +52,7 @@ export default class Council extends View {
     this.saving = false;
 
     if (checking()) return;
-    this.search = InputState.new({ placeholder: 'Search by question or ID' });
+    this.search = InputState.new({ placeholder: 'Search by title or ID' });
     this.search.on('change', (_e, cx) => cx.notify());
     cx.spawn(async cx => {
       try {
@@ -103,7 +117,7 @@ export default class Council extends View {
 
   clearFilters() {
     this.search?.set_value('');
-    this.pollFilter = 'all';
+    this.listFilter = 'all';
   }
 
   refresh(cx) {
@@ -225,10 +239,10 @@ export default class Council extends View {
           state.release();
           cx.notify();
         }, 'normal', this.saving).h(34)))))
-        .child(h_flex().child(button(t, 'draft-option', '+ Add option', (_e, cx) => {
+        .child(h_flex().child(button(t, 'draft-option', 'Add option', (_e, cx) => {
           this.addDraftOption();
           cx.notify();
-        }, 'normal', this.saving || form.options.length >= 20)));
+        }, 'normal', this.saving || form.options.length >= 20, 'add')));
     }
     return fields.child(h_flex().gap(6).justify_end()
       .child(button(t, 'cancel-create', 'Cancel', (_e, cx) => { this.clearForm(); this.error = ''; cx.notify(); }, 'normal', this.saving))
@@ -309,20 +323,20 @@ export default class Council extends View {
           choice: mine?.optionId || (poll.mode === 'open' || mine?.answer ? 'free' : null)
         });
         cx.notify();
-      }, 'primary', this.saving)).child(button(t, 'copy-invite', 'Copy invite', (_e, cx) => this.copyInvite(cx, poll)))
+      }, 'primary', this.saving, 'check')).child(button(t, 'copy-invite', 'Copy invite', (_e, cx) => this.copyInvite(cx, poll), 'normal', false, 'copy'))
         .when(poll.mode !== 'open' && poll.options.length < 20, row => row.child(
-          button(t, 'add-option', '+ Option', (_e, cx) => { this.setForm('option', { value: '' }); cx.notify(); }, 'normal', this.saving)))
+          button(t, 'add-option', 'Add option', (_e, cx) => { this.setForm('option', { value: '' }); cx.notify(); }, 'normal', this.saving, 'add')))
         .child(button(t, 'close', 'Close poll', (_e, cx) => { this.setForm('close', { value: '' }); cx.notify(); }, 'normal', this.saving));
     }
     actions.child(button(t, 'copy-summary', poll.outcome ? 'Copy decision' : 'Copy results', (_e, cx) =>
-      this.copy(cx, decisionSummary(poll, this.folder), 'Results copied.'), poll.closedAt ? 'primary' : 'normal'));
+      this.copy(cx, decisionSummary(poll, this.folder), 'Results copied.'), poll.closedAt ? 'primary' : 'normal', false, 'copy'));
 
     const switchView = h_flex().gap(6)
       .child(button(t, 'poll-results', 'Results', (_e, cx) => this.selectPollSection(cx, 'results'),
-        this.pollSection === 'results' ? 'active' : 'normal', this.saving))
+        this.pollSection === 'results' ? 'active' : 'normal', this.saving, 'polls'))
       .child(button(t, 'poll-participants', expected && this.pollSection === 'results' ? `Participants · ${received}/${expected}` : 'Participants',
         (_e, cx) => this.selectPollSection(cx, 'participants'),
-        this.pollSection === 'participants' ? 'active' : 'normal', this.saving));
+        this.pollSection === 'participants' ? 'active' : 'normal', this.saving, 'people'));
 
     const content = this.pollSection === 'participants'
       ? pollParticipants(t, poll, spaceAgents(space), this.saving, {
@@ -338,12 +352,12 @@ export default class Council extends View {
   renderReview(t, review) {
     const { tally, validation } = review;
     const card = panel(t)
-      .child(label(reviewStatus(review.status), 11, review.status === 'approved' ? t.done : t.muted).font_semibold())
+      .child(h_flex().child(statusPill(t, reviewStatus(review.status), review.status === 'approved' ? t.done : t.muted)))
       .child(label(review.task, 17, t.foreground).font_semibold());
     if (!tally) return card.child(label('A saved verdict is required to show formal results.', 12, t.muted));
     const missing = Math.max(0, tally.expectedCount - tally.validCastCount - tally.invalidCount);
     const results = panel(t)
-      .child(label('Direct ballots', 13, t.foreground).font_semibold())
+      .child(cardHeading(t, 'Direct ballots', 'reviews'))
       .child(label(`${tally.validCastCount}/${tally.expectedCount} valid · ${tally.quorumMet ? 'Quorum met' : 'Quorum unmet'}`, 12, t.muted))
       .child(progress(t, 'Approve', tally.approveCount, tally.expectedCount, t.done))
       .child(progress(t, 'Amend', tally.amendCount, tally.expectedCount, t.working))
@@ -353,9 +367,9 @@ export default class Council extends View {
     if (validation?.rationale) card.child(label(validation.rationale, 12, t.muted));
     for (const condition of validation?.conditions ?? []) card.child(label(`• ${condition}`, 12, t.foreground));
     if (validation?.verifiedSha256) card.child(h_flex().child(button(t, 'copy-sha', 'Copy proposal SHA', (_e, cx) =>
-      this.copy(cx, validation.verifiedSha256, 'Proposal SHA copied.'))));
+      this.copy(cx, validation.verifiedSha256, 'Proposal SHA copied.'), 'normal', false, 'copy')));
     if (review.reportPath) card.child(h_flex().child(button(t, 'copy-report', 'Copy report path', (_e, cx) =>
-      this.copy(cx, review.reportPath, 'Report path copied.'))));
+      this.copy(cx, review.reportPath, 'Report path copied.'), 'normal', false, 'copy')));
     for (const ballot of tally.sortedBallots ?? []) {
       const dissent = tally.dissent?.find(item => item.voter === ballot.voter);
       results.child(v_flex().gap(3).pt(7).border_t_1().border_color(t.border)
@@ -370,27 +384,38 @@ export default class Council extends View {
 
   renderList(t) {
     const isPolls = this.tab === 'polls';
+    const isDelegations = this.tab === 'delegations';
     const items = this.data?.[this.tab] ?? [];
     if (!items.length) {
-      return panel(t).child(label(isPolls ? 'No polls yet' : 'No reviews yet', 14, t.foreground).font_semibold())
-        .child(label(isPolls
-          ? 'Open a poll to gather choices or free responses from the agents in this project.'
-          : 'Saved Council and review sessions for this project appear here.', 12, t.muted));
+      const empty = {
+        polls: 'Open a poll to gather choices or free responses from the agents in this project.',
+        delegations: 'Start an asynchronous delegation in this project with the Council CLI or MCP. Follow its delivery and result here.',
+        reviews: 'Saved Council and review sessions for this project appear here.'
+      };
+      return panel(t).py(20).child(h_flex().gap(11).items_center()
+        .child(iconTile(t, this.tab, 38))
+        .child(v_flex().flex_1().min_w_0().gap(4)
+          .child(label(`No ${this.tab} yet`, 14, t.foreground).font_semibold())
+          .child(label(empty[this.tab], 12, t.muted))));
     }
 
     const query = this.search?.value().trim().toLowerCase() ?? '';
     const visible = items.filter(item => {
       const matchesQuery = item.question.toLowerCase().includes(query) || item.id.toLowerCase().includes(query);
-      const matchesStatus = !isPolls || this.pollFilter === 'all' || (item.closedAt ? 'closed' : 'open') === this.pollFilter;
+      const group = isPolls ? (item.closedAt ? 'closed' : 'open')
+        : isDelegations ? delegationStatus(t, item.status).group : null;
+      const matchesStatus = this.listFilter === 'all' || group === this.listFilter;
       return matchesQuery && matchesStatus;
     });
-    const body = v_flex().w_full().min_w_0().gap(8).child(input(t, this.search));
-    if (isPolls) {
-      body.child(h_flex().gap(6).children([['all', 'All'], ['open', 'Open'], ['closed', 'Closed']].map(([id, title]) =>
+    const body = v_flex().w_full().min_w_0().gap(8).child(input(t, this.search, 'search'));
+    const filters = isPolls ? [['open', 'Open'], ['closed', 'Closed']]
+      : isDelegations ? [['active', 'Active'], ['attention', 'Needs attention'], ['ready', 'Ready']] : [];
+    if (filters.length) {
+      body.child(h_flex().gap(6).flex_wrap().children([['all', 'All'], ...filters].map(([id, title]) =>
         button(t, `filter-${id}`, title, (_e, cx) => {
-          this.pollFilter = id;
+          this.listFilter = id;
           cx.notify();
-        }, this.pollFilter === id ? 'active' : 'normal'))));
+        }, this.listFilter === id ? 'active' : 'normal'))));
     }
     if (!visible.length) return body.child(panel(t)
       .child(label('No matches', 14, t.foreground).font_semibold())
@@ -401,60 +426,90 @@ export default class Council extends View {
 
     return body.children(visible.map(item => {
       const { expected, received } = item.participation ?? {};
-      const status = isPolls ? pollStatus(item) : reviewStatus(item.status);
-      const metadata = !isPolls ? item.mode : expected
-        ? `${received}/${expected} tracked replied · ${countLabel(item.responseCount, 'response')}`
-        : countLabel(item.responseCount, 'response');
-      return panel(t).id(item.id).cursor_pointer().hover(s => s.bg(t.raised))
+      const status = isDelegations ? delegationStatus(t, item.status) : {
+        title: isPolls ? pollStatus(item) : reviewStatus(item.status),
+        color: (isPolls ? !item.closedAt : item.status === 'approved') ? t.done : t.muted
+      };
+      const metadata = isDelegations ? [item.agent ?? (item.ownership === 'borrowed' ? 'Existing terminal' : null), item.address].filter(Boolean).join(' · ')
+        : !isPolls ? item.mode : expected
+          ? `${received}/${expected} tracked replied · ${countLabel(item.responseCount, 'response')}`
+          : countLabel(item.responseCount, 'response');
+      return h_flex().id(item.id).w_full().min_w_0().gap(10).px(12).py(11).rounded(9).items_center()
+        .border_1().border_color(t.border).bg(t.surface).cursor_pointer()
+        .hover(s => s.bg(t.raised).border_color(t.input))
+        .on_mouse_down('left', (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.navigate(cx, this.tab, item.id))
-        .child(h_flex().justify_between().items_center().gap(6)
-          .child(statusPill(t, status, (isPolls ? !item.closedAt : item.status === 'approved') ? t.done : t.muted))
-          .child(label(metadata, 11, t.muted)))
-        .child(label(item.question, 15, t.foreground).font_medium());
+        .child(iconTile(t, this.tab))
+        .child(v_flex().min_w_0().flex_1().gap(5)
+          .child(label(item.question, 14, t.foreground).font_semibold())
+          .child(h_flex().items_center().gap(7).flex_wrap()
+            .child(statusPill(t, status.title, status.color))
+            .when(Boolean(metadata), node => node.child(label(metadata, 11, t.muted)))))
+        .child(glyph('right', 14).text_color(t.muted));
     }));
   }
 
   renderContent(t, space) {
     if (this.configError) return label(this.configError, 13, t.blocked);
     if (!space?.folder) return panel(t).child(label('Open a Herdr space with a project folder.', 13, t.muted));
-    if (space.machine) return panel(t).child(label('Council polls and reviews are available in local spaces.', 13, t.muted));
+    if (space.machine) return panel(t).child(label('Council is available in local spaces.', 13, t.muted));
     if (space.folder !== this.folder || (!this.data && !this.readError)) return label('Loading project…', 12, t.muted);
     if (!this.data && this.readError) return div();
     if (this.form?.kind === 'create') return this.renderCreate(t);
     if (this.selected) {
-      const detail = this.tab === 'polls' ? this.data?.poll : this.data?.review;
+      const detail = this.data?.[this.tab.slice(0, -1)];
       if (!detail) return label('This item is unavailable.', 12, t.muted);
-      return this.tab === 'polls' ? this.renderPoll(t, detail, space) : this.renderReview(t, detail);
+      if (this.tab === 'polls') return this.renderPoll(t, detail, space);
+      if (this.tab === 'reviews') return this.renderReview(t, detail);
+      return delegationView(t, detail, {
+        wide: this.wide,
+        terminal: spaceAgents(space).find(agent => agent.address === detail.address),
+        focus: (cx, address) => this.focusAgent(cx, address),
+        copy: (cx, value, title) => this.copy(cx, value, title)
+      });
     }
     return this.renderList(t);
   }
 
   render() {
     const t = theme();
+    if (this.role === 'launcher') return launcher(t, this.compact, (size, cx) => {
+      const compact = size.width < 115;
+      if (this.compact === compact) return;
+      this.compact = compact;
+      cx.notify();
+    });
+    if (this.role === 'menu') return menu(t, this.menuFocus, this.menuIndex, (cx, step) => {
+      this.menuIndex = (this.menuIndex + step + sections.length) % sections.length;
+      cx.notify();
+    });
     const space = localSpace();
     const overlay = props()?.overlay;
     const current = Boolean(this.config && !this.configError && space?.folder &&
       !space.machine && space.folder === this.folder);
-    const tabs = h_flex().gap(6).children([['polls', 'Polls'], ['reviews', 'Reviews']].map(([id, title]) =>
-      sectionTab(t, id, title, this.tab === id, (_e, cx) => this.navigate(cx, id), this.saving)));
-    const header = v_flex().flex_shrink_0().gap(12).p(14).border_b_1().border_color(t.border)
+    const tabs = h_flex().w_full().gap(4).p(3).rounded(9).border_1().border_color(t.border).bg(t.background)
+      .children(sections.map(({ id, title }) =>
+        sectionTab(t, id, title, this.tab === id, (_e, cx) => {
+          if (this.tab !== id) this.navigate(cx, id);
+        }, this.saving)));
+    const header = v_flex().flex_shrink_0().gap(12).p(14).bg(t.surface).border_b_1().border_color(t.border)
       .child(h_flex().gap(10).items_center()
-        .child(brandMark(t))
-        .child(v_flex().flex_1().min_w_0().gap(1)
-          .child(label('Council', 18, t.foreground).font_semibold())
-          .when(Boolean(space?.folder), node => node.child(label(space.name || space.folder, 11, t.muted).truncate())))
+        .child(brandMark(40))
+        .child(v_flex().flex_1().min_w_0().gap(2)
+          .child(label('Council', 19, t.foreground).font_semibold())
+          .when(Boolean(space?.folder), node => node.child(label(space.name || space.folder, 12, t.muted).truncate())))
         .when(current && this.tab === 'polls' && !this.selected && !this.form, node =>
-          node.child(button(t, 'new', '+ New poll', (_e, cx) => this.startCreate(cx), 'primary')))
+          node.child(button(t, 'new', 'New poll', (_e, cx) => this.startCreate(cx), 'primary', false, 'add')))
+        .when(current && Boolean(this.selected), node =>
+          node.child(button(t, 'back', `All ${this.tab}`,
+            (_e, cx) => this.navigate(cx, this.tab), 'normal', this.saving, 'back')))
         .when(Boolean(overlay), node =>
-          node.child(button(t, 'dismiss-panel', 'Close panel', () => closeOverlay(overlay)))))
+          node.child(button(t, 'dismiss-panel', '', () => closeOverlay(overlay), 'normal', false, 'close')
+            .w(30).px(0).tooltip('Close Council'))))
       .child(tabs);
     const body = v_flex().id(`content-${this.tab}-${this.selected ?? 'list'}-${this.form?.kind ?? this.pollSection}`)
       .flex_1().min_h(0).w_full().gap(10).p(14).overflow_y_scrollbar()
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation());
-    if (current && this.selected) {
-      body.child(h_flex().child(button(t, 'back', this.tab === 'polls' ? '‹ All polls' : '‹ All reviews',
-        (_e, cx) => this.navigate(cx, this.tab))));
-    }
     if ((current || !this.config) && this.error) body.child(label(this.error, 12, t.blocked));
     if (current && this.readError) {
       body.child(h_flex().gap(8).items_center()

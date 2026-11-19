@@ -1,4 +1,4 @@
-import { div } from 'gpui-kit';
+import { div, image, svg } from 'gpui-kit';
 import { h_flex, v_flex, Input } from 'gpui-base';
 
 export function label(value, size = 13, color) {
@@ -6,10 +6,29 @@ export function label(value, size = 13, color) {
     .when(Boolean(color), node => node.text_color(color));
 }
 
-export function button(t, id, title, click, variant = 'normal', disabled = false) {
+export function glyph(name, size = 15) {
+  return svg(`mods/council/icons/${name}.svg`).size(size).flex_shrink_0();
+}
+
+export function brandMark(size = 36) {
+  return image('mods/council/icons/logo.svg').size(size).flex_shrink_0();
+}
+
+export function iconTile(t, name, size = 34) {
+  return h_flex().size(size).flex_shrink_0().rounded(8).bg(t.selected)
+    .text_color(t.accent).items_center().justify_center().child(glyph(name, 17));
+}
+
+export function cardHeading(t, title, icon) {
+  return h_flex().gap(7).items_center()
+    .child(glyph(icon, 15).text_color(t.accent))
+    .child(label(title, 14, t.foreground).font_semibold());
+}
+
+export function button(t, id, title, click, variant = 'normal', disabled = false, icon) {
   const primary = variant === 'primary';
   const active = variant === 'active';
-  return h_flex().id(id).h(30).px(9).rounded(6).items_center().justify_center()
+  return h_flex().id(id).h(30).px(9).gap(5).rounded(6).items_center().justify_center()
     .text_size(12).font_medium().border_1()
     .border_color(active ? t.accent : primary ? t.solid : t.border)
     .bg(primary ? t.solid : active ? t.selected : t.surface)
@@ -17,7 +36,8 @@ export function button(t, id, title, click, variant = 'normal', disabled = false
     .when(disabled, node => node.opacity(0.5))
     .when(!disabled, node => node.cursor_pointer().hover(s => s.bg(primary ? t.accent : t.raised))
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation()).on_click(click))
-    .child(title);
+    .when(Boolean(icon), node => node.child(glyph(icon, 14)))
+    .when(Boolean(title), node => node.child(title));
 }
 
 export function panel(t) {
@@ -26,17 +46,13 @@ export function panel(t) {
 }
 
 export function sectionTab(t, id, title, selected, click, disabled = false) {
-  return v_flex().id(id).h(35).items_center().justify_center().px(12).rounded(6)
-    .border_1().border_color(selected ? t.input : t.border).bg(selected ? t.selected : t.surface)
+  return h_flex().id(id).flex_1().min_w_0().h(34).gap(7).items_center().justify_center().px(5).rounded(7)
+    .when(selected, node => node.bg(t.selected))
     .text_color(selected ? t.foreground : t.muted).text_size(12).font_semibold()
     .when(!disabled, node => node.cursor_pointer().hover(s => s.bg(t.raised))
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation()).on_click(click))
-    .child(title);
-}
-
-export function brandMark(t) {
-  return h_flex().w(30).h(30).rounded(7).bg(t.selected).gap(3).justify_center().items_end().pb(8)
-    .children([6, 10, 14].map(height => div().w(3).h(height).rounded(1).bg(t.accent)));
+    .child(glyph(id, 16).text_color(selected ? t.accent : t.muted))
+    .child(div().min_w_0().truncate().child(title));
 }
 
 export function columns(wide, primary, secondary, primaryWidth = 270) {
@@ -47,9 +63,12 @@ export function columns(wide, primary, secondary, primaryWidth = 270) {
     .child(div().min_w_0().flex_1().child(secondary));
 }
 
-export function input(t, state) {
-  return Input.new(state).w_full().min_w_0().h(34).px(9).rounded(6).border_1()
-    .border_color(t.input).bg(t.background).text_size(13).text_color(t.foreground);
+export function input(t, state, icon) {
+  const control = Input.new(state).w_full().min_w_0().h(34).px(9).text_size(13).text_color(t.foreground);
+  if (!icon) return control.rounded(6).border_1().border_color(t.input).bg(t.background);
+  return h_flex().w_full().min_w_0().items_center().pl(10).rounded(6).border_1()
+    .border_color(t.input).bg(t.background)
+    .child(glyph(icon, 15).text_color(t.muted)).child(control.flex_1());
 }
 
 export function field(t, name, state) {
@@ -73,8 +92,8 @@ export function progress(t, title, count, total, color = t.accent) {
     .child(h_flex().w_full().gap(8).justify_between()
       .child(label(title, 12, t.foreground).flex_1())
       .child(label(`${count}  ·  ${percent}%`, 11, t.muted).flex_shrink_0()))
-    .child(div().h(6).w_full().rounded(3).bg(t.raised).overflow_hidden()
-      .when(width > 0, node => node.child(div().h_full().w(`${width}%`).rounded(3).bg(color))));
+    .child(div().h(8).w_full().rounded(4).bg(t.raised).overflow_hidden()
+      .when(width > 0, node => node.child(div().h_full().w(`${width}%`).rounded(4).bg(color))));
 }
 
 export function reviewStatus(status) {

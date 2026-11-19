@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { readDelegation } from './delegations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 
@@ -50,14 +51,14 @@ function readReview(base, id, selected) {
   return { summary, detail };
 }
 
-function reviews(cwd, selected) {
+function sessions(cwd, selected, collection, item, readRecord) {
   const base = join(cwd, '.agent_workspace');
-  if (!isDirectory(base)) return { reviews: [], review: null, errors: [] };
+  if (!isDirectory(base)) return { [collection]: [], [item]: null, errors: [] };
   if (selected != null) {
     if (typeof selected !== 'string' || !selected || selected.startsWith('.') || /[\\/:\u0000-\u001f]/.test(selected)) {
-      throw new Error('Invalid review ID.');
+      throw new Error(`Invalid ${item} ID.`);
     }
-    return { review: readReview(base, selected, true)?.detail ?? null };
+    return { [item]: readRecord(base, selected, true)?.detail ?? null };
   }
   const entries = readdirSync(base, { withFileTypes: true });
 
@@ -66,7 +67,7 @@ function reviews(cwd, selected) {
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     try {
-      const result = readReview(base, entry.name, false);
+      const result = readRecord(base, entry.name, false);
       if (!result) continue;
       summaries.push(result.summary);
     } catch (error) {
@@ -74,7 +75,7 @@ function reviews(cwd, selected) {
     }
   }
   summaries.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  return { reviews: summaries, errors };
+  return { [collection]: summaries, errors };
 }
 
 export function desktopRequest(cwd, action, args) {
@@ -84,7 +85,8 @@ export function desktopRequest(cwd, action, args) {
       if (args.id) return { poll: store.show(args.id) };
       return store.list();
     }
-    case 'reviews': return reviews(cwd, args.id);
+    case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readReview);
+    case 'delegations': return sessions(cwd, args.id, 'delegations', 'delegation', readDelegation);
     case 'create': return store.create(args);
     case 'add-option': return store.addOption(args.id, args.label);
     case 'track': return store.track(args.id, args);

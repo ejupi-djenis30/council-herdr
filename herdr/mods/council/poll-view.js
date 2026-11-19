@@ -1,6 +1,6 @@
 import { div } from 'gpui-kit';
 import { h_flex, v_flex } from 'gpui-base';
-import { button, columns, label, panel, progress, statusDot, statusPill } from './components.js';
+import { button, cardHeading, columns, label, panel, progress, statusDot, statusPill } from './components.js';
 import { countLabel, responseValue } from './poll-text.js';
 
 const liveStatuses = { working: 'Working', blocked: 'Needs you', done: 'Done', idle: 'Idle' };
@@ -29,7 +29,7 @@ export function pollParticipants(t, poll, liveAgents, saving, actions, wide) {
   const inlineActions = wide && !showCandidates;
   const tracked = panel(t)
     .child(h_flex().items_center().justify_between().gap(8)
-      .child(label('Tracked agents', 14, t.foreground).font_semibold())
+      .child(cardHeading(t, 'Tracked agents', 'people'))
       .when(participation.expected > 0, node => node.child(
         statusPill(t, `${participation.received}/${participation.expected} responded`, t.accent))));
 
@@ -43,9 +43,9 @@ export function pollParticipants(t, poll, liveAgents, saving, actions, wide) {
       responded ? t.done : poll.closedAt ? t.muted : t.working);
     const controls = h_flex().gap(5).flex_wrap()
       .when(Boolean(live), row => row.child(button(t, `focus-${participant.voter}`, 'Open terminal',
-        (_e, cx) => actions.focus(cx, participant.voter))))
+        (_e, cx) => actions.focus(cx, participant.voter), 'normal', false, 'terminal')))
       .when(!poll.closedAt, row => row
-        .child(button(t, `invite-${participant.voter}`, 'Copy invite', (_e, cx) => actions.invite(cx, participant)))
+        .child(button(t, `invite-${participant.voter}`, 'Copy invite', (_e, cx) => actions.invite(cx, participant), 'normal', false, 'copy'))
         .child(button(t, `untrack-${participant.voter}`, 'Untrack',
           (_e, cx) => actions.untrack(cx, participant.voter), 'normal', saving)));
     const heading = h_flex().items_center().gap(9).min_w_0().flex_1()
@@ -56,15 +56,15 @@ export function pollParticipants(t, poll, liveAgents, saving, actions, wide) {
   }
   if (!showCandidates) return tracked;
 
-  const candidates = panel(t).child(label('Agents in this space', 14, t.foreground).font_semibold());
+  const candidates = panel(t).child(cardHeading(t, 'Agents in this space', 'people'));
   if (!available.length) candidates.child(label('Agents with a Herdr status appear here when they are running in this space.', 12, t.muted));
   for (const agent of available) {
     const name = agentLabel(agent);
     candidates.child(h_flex().w_full().items_center().gap(8).pt(8).border_t_1().border_color(t.border)
       .child(participantHeading(t, name, agent.address, agent))
-      .child(button(t, `track-${agent.address}`, '+ Track', (_e, cx) => actions.track(cx, {
+      .child(button(t, `track-${agent.address}`, 'Track', (_e, cx) => actions.track(cx, {
         voter: agent.address, label: name.slice(0, 120)
-      }), 'normal', saving)));
+      }), 'normal', saving, 'add')));
   }
   return wide ? columns(true, candidates, tracked, 252) : columns(false, tracked, candidates);
 }
@@ -72,13 +72,13 @@ export function pollParticipants(t, poll, liveAgents, saving, actions, wide) {
 export function pollResults(t, poll, wide) {
   let tally;
   if (poll.options.length) {
-    tally = panel(t).gap(12).child(label('Vote breakdown', 14, t.foreground).font_semibold());
+    tally = panel(t).gap(12).child(cardHeading(t, 'Vote breakdown', 'polls'));
     for (const option of poll.options) tally.child(progress(t, option.label, option.count, poll.responseCount));
     if (poll.mode === 'mixed') tally.child(progress(t, 'Free responses', poll.freeCount, poll.responseCount, t.ansi5));
   }
   const responses = panel(t)
     .child(h_flex().justify_between().items_center().gap(8)
-      .child(label('Responses', 14, t.foreground).font_semibold())
+      .child(cardHeading(t, 'Responses', 'people'))
       .child(label(countLabel(poll.responseCount, 'response'), 11, t.muted)));
   const participants = new Map(poll.participants.map(participant => [participant.voter, participant.label]));
   if (!poll.responses.length) responses.child(label(poll.closedAt
