@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 2.0.1
+
+- Distinguish expired deadlines, blocked agents, and uncertain delivery in the CLI, MCP, and Herdr Desktop. Show how to inspect the existing terminal and delivery record.
+- Keep waiting for a borrowed agent when a Herdr message interrupts the wait, within the original deadline.
+- Resolve borrowed terminal names to their canonical address for delivery and completion checks.
+- Record the app reported by Herdr for borrowed terminals and show it with saved delegations.
+- Reject completion records without an acknowledged delivery in the CLI and MCP, matching Desktop.
+
+## 2.0.0
 
 - Add a native Council sidebar menu, an original mark, and consistent icons for navigation, vote results, and collaboration actions.
 - Follow async delegation delivery, deadlines, errors, and terminal captures in a native Delegations tab.

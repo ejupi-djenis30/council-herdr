@@ -8,6 +8,7 @@ const statuses = {
   completed: ['Result ready', 'done', 'ready'],
   uncertain: ['Delivery uncertain', 'blocked', 'attention'],
   timed_out: ['Deadline expired', 'blocked', 'attention'],
+  blocked: ['Agent blocked', 'blocked', 'attention'],
   dispatch_failed: ['Dispatch failed', 'blocked', 'attention'],
   failed: ['Failed', 'blocked', 'attention'],
   invalid: ['Record incomplete', 'blocked', 'attention']
@@ -40,13 +41,11 @@ function evidence(t, job, actions) {
   const card = panel(t).child(cardHeading(t, 'Terminal capture', 'terminal'));
   if (job.output === null) {
     const recovery = {
-      uncertain: 'Inspect the existing terminal and its delivery record before submitting the task again.',
-      timed_out: 'The recorded deadline elapsed before Council saved a result. Check the terminal for progress.',
       dispatch_failed: 'The worker did not claim this job. Inspect the recorded dispatch error.',
       failed: 'Use the recorded error and the terminal to diagnose this attempt.',
       invalid: 'Check the session record with the Council CLI before relying on this result.'
     }[job.status];
-    return card.child(label(recovery ?? 'The terminal capture appears here when Council saves the result.', 13, t.muted));
+    return card.child(label(job.nextAction ?? recovery ?? 'The terminal capture appears here when Council saves the result.', 13, t.muted));
   }
 
   const controls = h_flex().gap(6).flex_wrap()

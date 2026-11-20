@@ -105,7 +105,11 @@ Open **Delegations** in the Council panel to follow those same sessions in the a
 
 Repeat the same `start` with the same session ID and task options from the same directory to reconnect. An adopted terminal keeps its permissions and stays available in Herdr. Council leaves its lifetime and settings under its original owner's control.
 
-If delivery is uncertain, inspect the participant address and worker address from `status` with `hc get` and `hc read`. A new job on the same terminal requires an explicit start after the deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
+Set `--timeout <seconds>` to cover the entire job, including worker startup and capture. The default is 180 seconds. For a longer bounded review, for example, use `--timeout 600` when starting the job.
+
+The CLI and MCP `status` and `result` responses distinguish `timed_out`, `blocked`, and `uncertain` in the `outcome` field. The Desktop Delegations tab shows the same outcomes and recovery guidance. A timed-out job may leave its agent working. Inspect the participant and worker addresses from `status` with `hc get` and `hc read` before starting another job. A new job after uncertain delivery requires an explicit start after the original deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
+
+For an adopted terminal, `participant.reportedApp` records the app Herdr reported at adoption when available. Use that field to identify the app for a borrowed job. `participant.agent` records the launch-agent setting.
 
 ## Results and approvals
 

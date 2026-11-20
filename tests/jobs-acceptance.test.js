@@ -29,8 +29,8 @@ async function inTemp(run) {
   }
 }
 
-function snapshot({ address = ADDRESS, turn = 12, status = 'idle', reported = true, state = 'live' } = {}) {
-  return { success: true, details: { address, state, reported, turn, status: { state: status }, die_with_parent: true, cwd: 'original', keep: false } };
+function snapshot({ address = ADDRESS, turn = 12, status = 'idle', app, reported = true, state = 'live' } = {}) {
+  return { success: true, details: { address, state, reported, turn, status: { state: status, app }, die_with_parent: true, cwd: 'original', keep: false } };
 }
 
 function waitResult({ address = ADDRESS, status = 'done', turn = 13, reason = 'status', ended = true, exitCode = null } = {}) {
@@ -111,6 +111,35 @@ test('borrowed baseline 12 and acknowledged done 13 yield persisted output once 
   const priorStatusCalls = f.calls.length;
   await f.manager.getStatus(f.options.sessionId);
   assert.ok(f.calls.slice(priorStatusCalls).every(call => call.method === 'get'), 'status must not send, wait, launch or clean up');
+}));
+
+test('borrowed turn still completes after a Herdr message interrupts the first wait', async () => inTemp(async root => {
+  const f = setup(root);
+  const waitForDone = f.herdr.wait;
+  f.herdr.wait = (...args) => {
+    if (count(f.calls, 'wait') > 0) return waitForDone(...args);
+    f.calls.push({ method: 'wait', args });
+    return waitResult({ status: 'working', turn: 12, reason: 'message', ended: false });
+  };
+  assert.equal((await start(f)).success, true);
+  assert.equal((await runWorker(f)).success, true);
+  assert.equal(count(f.calls, 'send'), 1);
+  assert.equal(count(f.calls, 'wait'), 2);
+  assert.equal(count(f.calls, 'read'), 1);
+  assert.equal((await f.manager.getResult(f.options.sessionId)).output, OUTPUT);
+}));
+
+test('adoption sends and verifies completion using the resolved terminal address', async () => inTemp(async root => {
+  const f = setup(root, { initial: snapshot({ app: 'claude-code' }) });
+  const started = await start(f, { adopt: 'reviewer' });
+  assert.equal(started.participant.address, 'reviewer');
+  assert.equal(started.participant.canonicalAddress, ADDRESS);
+  assert.equal(started.participant.reportedApp, 'claude-code');
+  assert.equal((await runWorker(f)).success, true);
+  assert.equal((await f.manager.getResult(f.options.sessionId)).participant.reportedApp, 'claude-code');
+  for (const action of ['send', 'wait', 'read']) {
+    assert.equal(f.calls.find(call => call.method === action).args[0], ADDRESS);
+  }
 }));
 
 for (const [label, wait] of [

@@ -43,6 +43,8 @@ node C:/path/to/council-herdr/bin/council.js result --session parser-review
 
 The MCP tools are `council_start`, `council_session_status` and `council_result`. Inspect the participant's terminal while the worker runs and retrieve the saved output when ready. Adopted agents retain their existing permissions. If delivery is uncertain, inspect the terminal and the worker before starting another task.
 
+Set `--timeout` or MCP `timeoutSec` to cover the entire job when the default of 180 seconds is too short. Read the `outcome` and `nextAction` fields after a blocked turn, uncertain delivery, or deadline expiry. A deadline can end Council collection while the agent continues working in Herdr.
+
 ## Submission and approval
 
 The author finishes before reviewers start. Reviewers receive the exact proposal and its SHA-256 digest. Write artifacts only through a permitted channel. A read-only agent can return a final response on screen.

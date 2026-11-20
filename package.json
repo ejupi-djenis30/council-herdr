@@ -1,6 +1,6 @@
 {
   "name": "council-herdr",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Native Herdr Desktop polls and review results, with Council delegation through CLI and MCP.",
   "type": "module",
   "main": "bin/council.js",

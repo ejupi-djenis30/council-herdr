@@ -66,6 +66,36 @@ test('desktop and CLI honor the dispatch sidecar and ignore it after acknowledge
   assert.equal(read(cwd, 'dispatch').error, null);
 });
 
+test('saved timeouts, blocked turns and uncertain delivery have distinct CLI and desktop outcomes', async t => {
+  const cwd = project(t);
+  const cli = new JobManager({ cwd });
+  for (const [outcome, deliveryState, waitDetails, guidance] of [
+    ['timed_out', 'acknowledged', { reason: 'timeout', status: 'working' }, /may still be working/],
+    ['blocked', 'acknowledged', { reason: 'status', status: 'blocked' }, /resolve any prompt/],
+    ['uncertain', 'uncertain', null, /before submitting the task again/]
+  ]) {
+    const id = outcome.replaceAll('_', '-');
+    const dir = record(cwd, id, { state: 'failed', deliveryState, waitDetails });
+    const path = join(dir, 'job.json');
+    const before = readFileSync(path);
+    const status = await cli.getStatus(id);
+    const result = await cli.getResult(id);
+    const view = read(cwd, id);
+    assert.equal(status.state, 'failed');
+    assert.equal(status.outcome, outcome);
+    assert.deepEqual(status.waitDetails, waitDetails);
+    assert.equal(result.outcome, outcome);
+    assert.equal(result.deliveryState, deliveryState);
+    assert.equal(result.success, false);
+    assert.equal(view.status, outcome);
+    assert.equal(view.output, null);
+    assert.match(view.nextAction, guidance);
+    assert.equal(status.nextAction, view.nextAction);
+    assert.equal(result.nextAction, view.nextAction);
+    assert.deepEqual(readFileSync(path), before);
+  }
+});
+
 test('delegation view reads saved output without rewriting the job or following a stored path', async t => {
   const cwd = project(t);
   const output = 'Parser recovery captured.\n'.repeat(600);
@@ -92,8 +122,9 @@ test('delegation view reads saved output without rewriting the job or following 
   assert.deepEqual(readFileSync(jobPath), before);
 });
 
-test('a completion marker without a saved result never becomes ready', t => {
+test('desktop and CLI reject completion without a saved result and confirmed delivery', async t => {
   const cwd = project(t);
+  const cli = new JobManager({ cwd });
   record(cwd, 'broken', { state: 'completed', deliveryState: 'acknowledged' });
   const broken = read(cwd, 'broken');
   assert.equal(broken.status, 'invalid');
@@ -101,4 +132,15 @@ test('a completion marker without a saved result never becomes ready', t => {
   assert.equal(broken.output, null);
   record(cwd, 'unacknowledged', { state: 'completed', result: { output: 'Uncorrelated capture' } });
   assert.equal(read(cwd, 'unacknowledged').status, 'invalid');
+  const result = await cli.getResult('unacknowledged');
+  assert.equal(result.success, false);
+  assert.match(result.error, /missing acknowledged delivery/);
+});
+
+test('desktop identifies a borrowed agent using the app reported by Herdr', t => {
+  const cwd = project(t);
+  record(cwd, 'reported-app', {
+    participant: { ownership: 'borrowed', address: 't20', agent: 'codex', reportedApp: 'claude-code' }
+  });
+  assert.equal(read(cwd, 'reported-app').agent, 'claude-code');
 });

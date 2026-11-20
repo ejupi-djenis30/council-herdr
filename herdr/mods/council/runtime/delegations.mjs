@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { isJobRecord, jobExpired, jobRecordProblem } from './job-record.mjs';
+import { isJobRecord, jobExpired, jobInterruption, jobRecordProblem, jobRecovery } from './job-record.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 
 const SNAPSHOT_LIMIT = 16 * 1024 * 1024;
@@ -21,12 +21,10 @@ function dispatchError(dir) {
 
 function stateOf(job, problem, expired) {
   if (problem) return problem.dispatchFailed ? 'dispatch_failed' : 'invalid';
-  if (job.state === 'completed') {
-    return job.deliveryState === 'acknowledged' ? 'completed' : 'invalid';
-  }
-  if (job.deliveryState === 'uncertain' || job.state === 'uncertain') return 'uncertain';
+  if (job.state === 'completed') return 'completed';
+  const interruption = jobInterruption(job, expired);
+  if (interruption) return interruption;
   if (job.state === 'failed') return 'failed';
-  if (expired) return 'timed_out';
   if (job.state === 'deliberating' && job.deliveryState === 'acknowledged') return 'deliberating';
   if (job.state === 'starting' && job.deliveryState === 'planned') return 'starting';
   if (job.state === 'starting' && job.deliveryState === 'attempting') return 'attempting';
@@ -69,7 +67,7 @@ export function readDelegation(base, id, selected) {
     createdAt: field(job.createdAt),
     updatedAt: field(job.updatedAt),
     status,
-    agent: ownership === 'owned' ? field(participant?.agent) ?? field(job.agent) : null,
+    agent: ownership === 'owned' ? field(participant?.agent) ?? field(job.agent) : field(participant?.reportedApp),
     ownership,
     address: field(participant?.canonicalAddress) ?? field(participant?.address)
   };
@@ -91,6 +89,7 @@ export function readDelegation(base, id, selected) {
     },
     error: field(problem?.error) ?? field(job.error) ??
       (status === 'invalid' ? 'The saved state and delivery record are inconsistent.' : null),
+    nextAction: jobRecovery(status, job.deliveryState),
     output: output?.slice(0, OUTPUT_LIMIT) ?? null,
     outputTruncated: Boolean(output && output.length > OUTPUT_LIMIT),
     outputPath: output !== null ? recordedOutputPath(dir) : null
