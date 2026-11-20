@@ -10,7 +10,7 @@ import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
 
 function printHelp() {
   console.log(`
-Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.0.0)
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.1.0)
 
 USAGE:
   council <command> [options]

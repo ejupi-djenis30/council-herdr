@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.0
+
+- Select which agents to invite when opening a Desktop poll or debate, with zero recipients selected by default.
+- Persist invitation queues before dispatch and resume pending deliveries within the original deadline. Show uncertain sends for manual inspection.
+
 ## 3.0.0
 
 - Require an agent to register its current Council skill through Council MCP before it receives a delegation, a review brief, or a poll or debate invitation. An agent can report missing setup, and Desktop shows which invitations are waiting for alignment.

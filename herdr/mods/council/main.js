@@ -30,14 +30,29 @@ function projectName(folder) {
 }
 
 function spaceRecipients(space) {
-  const started = new Map(terminals().map(terminal => [terminal.address, terminal.created_ms]));
-  return agents().filter(agent => agent.space === space?.id).map(agent => ({
-    address: agent.address, label: agent.program?.name ?? agent.address, createdAt: started.get(agent.address)
-  }));
+  const byAddress = new Map(terminals().map(terminal => [terminal.address, terminal]));
+  const folders = new Map(panes().map(pane => [pane.terminal, pane.cwd]));
+  return agents().filter(agent => agent.space === space?.id).map(agent => {
+    const terminal = byAddress.get(agent.address);
+    return {
+      address: agent.address, label: agent.program?.name ?? agent.address, createdAt: terminal?.created_ms,
+      folder: terminal?.cwd || folders.get(agent.address) || space.folder, status: agent.status
+    };
+  });
+}
+
+const recipientStatuses = { idle: 'Idle', working: 'Working', blocked: 'Needs input', done: 'Done', error: 'Error' };
+
+function recipientKey({ address, createdAt }) {
+  return `${address}:${createdAt}`;
+}
+
+function eligibleRecipient(recipient) {
+  return Number.isSafeInteger(recipient.createdAt) && recipient.createdAt > 0;
 }
 
 const inviteStates = {
-  queued: 'Waiting for terminal', sending: 'Checking terminal', uncertain: 'Delivery uncertain',
+  queued: 'Waiting for terminal', sending: 'Sending invitation', uncertain: 'Delivery uncertain · Check terminal',
   alignment_required: 'Waiting for Council alignment', not_aligned: 'Council skill or integration missing',
   unavailable: 'Terminal unavailable', expired: 'Delivery window elapsed', cancelled: 'Invitation cancelled'
 };
@@ -70,6 +85,8 @@ export default class Council extends View {
     this.listFilter = 'all';
     this.wide = false;
     this.folder = null;
+    this.spaceId = null;
+    this.recovering = false;
     this.allSpaces = false;
     this.selected = null;
     this.form = null;
@@ -97,7 +114,9 @@ export default class Council extends View {
         }
         this.config = { node: config.node ?? 'node', entry: `${root}/runtime/council.mjs` };
         this.refresh(cx);
+        this.resumeInvitations(cx);
         cx.timer.every(5000, cx => this.refresh(cx));
+        cx.timer.every(10000, cx => this.resumeInvitations(cx));
       } catch (error) {
         this.configError = error.message;
         cx.notify();
@@ -157,8 +176,9 @@ export default class Council extends View {
   refresh(cx) {
     const space = localSpace();
     const folder = space?.machine ? null : space?.folder || null;
-    if (folder !== this.folder) {
+    if (folder !== this.folder || space?.id !== this.spaceId) {
       this.folder = folder;
+      this.spaceId = space?.id;
       this.clearFilters();
       this.navigate(cx, this.tab);
       return;
@@ -189,13 +209,44 @@ export default class Council extends View {
     });
   }
 
+  async launchInvitations(folder, id) {
+    const name = `council-invite-${id.replace(/-/g, '').slice(-17)}`;
+    const args = ['run', '--bg', '--json', '--no-parent', '--no-notify', '--outlive-parent', '--rm',
+      '--name', name, '--cwd', folder, '--', this.config.node, this.config.entry, 'invite', id];
+    const result = await hc(args);
+    if (result.code !== 0 || !JSON.parse(result.stdout)?.address) {
+      throw new Error(result.stderr.trim() || 'Herdr did not return a worker address.');
+    }
+  }
+
+  resumeInvitations(cx) {
+    const space = localSpace();
+    if (!this.config || !space?.folder || space.machine || this.recovering || this.saving) return;
+    this.recovering = true;
+    cx.spawn(async () => {
+      try {
+        const { ids } = await this.request(space.folder, 'pending-invitations', { space: space.id });
+        for (const id of ids) {
+          if (localSpace()?.id !== space.id) break;
+          // A running worker or a temporary dispatch error will be reconciled on the next pass.
+          try { await this.launchInvitations(space.folder, id); } catch {}
+        }
+      } catch {
+        // A failed scan leaves the persisted queue available to the next pass.
+      } finally {
+        this.recovering = false;
+      }
+    });
+  }
+
   save(cx, action, payload) {
     const space = localSpace();
-    if (!this.folder || space?.machine || space?.folder !== this.folder || this.saving) return;
+    if (!this.folder || space?.machine || space?.id !== this.spaceId || space.folder !== this.folder || this.saving) return;
     const folder = this.selected?.project ?? this.folder;
     const creation = ['create', 'debate-create'].includes(action);
     const section = action.startsWith('debate-') ? 'debate' : 'poll';
-    const recipients = creation ? spaceRecipients(space) : [];
+    const recipients = creation ? this.selectedRecipients() : [];
+    const request = creation ? { ...payload, space: space.id, recipients } : payload;
     this.saving = true;
     this.loading = false;
     const epoch = ++this.epoch;
@@ -203,16 +254,13 @@ export default class Council extends View {
     cx.notify();
     cx.spawn(async cx => {
       try {
-        const record = await this.request(folder, action, action === 'create' ? { ...payload, participants: recipients } : payload);
+        const record = await this.request(folder, action, request);
         let deliveryError = '';
         if (recipients.length) {
           try {
-            const command = ['run', '--bg', '--json', '--no-parent', '--no-notify', '--outlive-parent', '--rm', '--cwd', folder,
-              '--', this.config.node, this.config.entry, 'invite', JSON.stringify({ id: record.id, space: space.id, recipients })];
-            const result = await hc(command);
-            if (result.code !== 0 || !JSON.parse(result.stdout)?.address) throw new Error(result.stderr.trim());
+            await this.launchInvitations(folder, record.id);
           } catch (error) {
-            deliveryError = `The ${section} opened. Herdr could not start the invitation worker. ${error.message}`;
+            deliveryError = `The ${section} opened and invitations were saved. Herdr will retry starting the worker. ${error.message}`;
           }
         }
         if (epoch !== this.epoch) return;
@@ -270,16 +318,52 @@ export default class Council extends View {
   }
 
   startCreate(cx) {
-    this.error = '';
-    if (this.tab === 'debates') {
-      this.setForm('create-debate', { question: '', context: '' });
-      cx.notify();
-      return;
+    const debate = this.tab === 'debates';
+    this.setForm(debate ? 'create-debate' : 'create', { question: '', context: '' }, {
+      recipients: new Map(), mode: 'choice', options: []
+    });
+    if (!debate) {
+      this.addDraftOption();
+      this.addDraftOption();
     }
-    this.setForm('create', { question: '', context: '' }, { mode: 'choice', options: [] });
-    this.addDraftOption();
-    this.addDraftOption();
     cx.notify();
+  }
+
+  selectedRecipients() {
+    return [...this.form.recipients.values()].map(({ address, label, createdAt }) => ({ address, label, createdAt }));
+  }
+
+  recipientPicker(t, space, limit) {
+    const selection = this.form.recipients;
+    const live = new Map(spaceRecipients(space).map(person => [recipientKey(person), person]));
+    const people = new Map(live);
+    for (const [key, person] of selection) {
+      if (!people.has(key)) people.set(key, person);
+    }
+    const selected = selection.size;
+    const picker = v_flex().w_full().gap(7).pt(9).border_t_1().border_color(t.border)
+      .child(h_flex().items_center().justify_between().gap(8)
+        .child(cardHeading(t, 'Invite agents', 'people'))
+        .child(label(selected === 0 ? 'No invitations' : `${selected} selected`, 11, t.muted)));
+    if (!people.size) return picker.child(label('No live agents in this space.', 12, t.muted));
+    for (const [key, person] of people) {
+      const chosen = selection.has(key);
+      const available = live.has(key) && eligibleRecipient(person);
+      const addressSelected = [...selection.values()].some(target => target.address === person.address);
+      const status = available ? recipientStatuses[person.status] ?? person.status : 'Unavailable';
+      picker.child(h_flex().w_full().gap(8).items_center().px(8).py(6).rounded(6).bg(t.background)
+        .child(v_flex().flex_1().min_w_0().gap(3)
+          .child(label(`${person.label} · ${person.address}`, 12, t.foreground).font_medium())
+          .child(label(projectName(person.folder), 11, t.muted).truncate().tooltip(person.folder)))
+        .child(statusPill(t, status, available ? t[person.status] ?? t.muted : t.muted))
+        .child(button(t, `recipient-${key}`, chosen ? 'Selected' : 'Select', (_e, cx) => {
+          if (chosen) selection.delete(key);
+          else selection.set(key, person);
+          cx.notify();
+        }, chosen ? 'active' : 'normal', this.saving || (!chosen && (!available || addressSelected || selected >= limit)),
+        chosen ? 'check' : 'add').w(88)));
+    }
+    return picker;
   }
 
   addDraftOption() {
@@ -291,13 +375,10 @@ export default class Council extends View {
   renderCreate(t, space) {
     const form = this.form;
     const debate = form.kind === 'create-debate';
-    const recipients = spaceRecipients(space).length;
     const fields = panel(t)
       .child(label(debate ? 'New debate' : 'New poll', 16, t.foreground).font_semibold())
       .child(field(t, debate ? 'Topic' : 'Question', form.question))
-      .child(field(t, debate ? 'Opening message (optional)' : 'Context (optional)', form.context))
-      .child(label(recipients ? `Automatically invites ${countLabel(recipients, 'agent')} in this space.`
-        : 'There are no running agents in this space.', 12, t.muted));
+      .child(field(t, debate ? 'Opening message (optional)' : 'Context (optional)', form.context));
     if (!debate) fields.child(label('Response format', 11, t.muted))
       .child(h_flex().gap(5).flex_wrap().children(modes.map(([mode, title]) =>
         button(t, `mode-${mode}`, title, (_e, cx) => {
@@ -318,7 +399,7 @@ export default class Council extends View {
           cx.notify();
         }, 'normal', this.saving || form.options.length >= 20, 'add')));
     }
-    return fields.child(h_flex().gap(6).justify_end()
+    return fields.child(this.recipientPicker(t, space, debate ? Infinity : 32)).child(h_flex().gap(6).justify_end()
       .child(button(t, 'cancel-create', 'Cancel', (_e, cx) => { this.clearForm(); this.error = ''; cx.notify(); }, 'normal', this.saving))
       .child(button(t, 'create', debate ? 'Start debate' : 'Open poll', (_e, cx) => this.save(cx, debate ? 'debate-create' : 'create', {
         question: form.question.value(),

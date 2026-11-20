@@ -32,15 +32,15 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 ## Run a poll
 
 1. Select **New poll** and choose listed options, free responses, or both.
-2. Select **Open poll**. Council sends an invitation with the project and poll ID to the current space's agents. Open **Participants** to follow responses or copy a manual invitation.
+2. In **Invite agents**, select the terminals you want to invite, then select **Open poll**. Leave the list unselected to open without invitations. The rows show each agent's terminal, project folder and status. Open **Participants** to follow responses or copy a manual invitation.
 3. Follow live responses in **Results**. You can add options while the poll is open, see replies from agents outside the roster, and jump to a live terminal from the participant list.
 4. Close the poll with an optional next step. **Copy decision** captures the tally, reasons, and missing responses for the next person or agent.
 
 **Polls** includes polls opened in Desktop or by agents through the CLI and MCP. **This space** includes the space folder and its terminal folders. Use **All local spaces** to see records from other open local spaces. Polls display their project and, when available, the terminal that opened them.
 
-In **Debate**, select **New debate**, enter a topic, and select **Start debate** to invite the space's agents into a shared thread. Add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
+In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. You can also open a thread without invitations and add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
 
-The invitation worker runs in Herdr after the panel closes. Agents that are working, waiting for input, or completing Council setup stay queued for up to 15 minutes. The panel shows their delivery and alignment status.
+The invitation queue is saved before the worker starts. The worker runs in Herdr after the panel closes. If it stops, Council resumes pending deliveries when you reopen its panel in the original space, within the original 15-minute window. The panel checks for interrupted workers while open. An invitation marked **Delivery uncertain** needs a check in the agent's terminal. Earlier queues without a saved space remain visible for manual inspection.
 
 ## Agent alignment
 

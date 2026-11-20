@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { readDelegation } from './delegations.mjs';
 import { createDebate, replyToDebate, roomMessages, roomSchema } from './debate-room.mjs';
 import { discussionMessages, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
-import { readInvitations } from './invitations.mjs';
+import { pendingInvitationIds, planInvitations, prepareInvitations, readInvitations } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 
@@ -102,10 +102,18 @@ function projectRequest(cwd, action, args) {
     case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readCouncilSession);
     case 'debates': return sessions(cwd, args.id, 'debates', 'debate', (base, id, selected) => readCouncilSession(base, id, selected, true, cwd));
     case 'delegations': return sessions(cwd, args.id, 'delegations', 'delegation', readDelegation);
-    case 'create': return store.create({ ...args, createdBy: 'operator' }, { fromPanel: true });
+    case 'pending-invitations': return { ids: pendingInvitationIds(cwd, args.space) };
+    case 'create':
     case 'debate-create': {
-      const room = createDebate(cwd, args);
-      return projectRequest(cwd, 'debates', { id: room.sessionId }).debate;
+      const plan = planInvitations(args.space, args.recipients);
+      const beforePublish = plan ? id => prepareInvitations(cwd, id, plan) : undefined;
+      if (action === 'debate-create') {
+        const room = createDebate(cwd, args, { beforePublish });
+        return projectRequest(cwd, 'debates', { id: room.sessionId }).debate;
+      }
+      const participants = args.recipients === undefined ? args.participants : plan?.targets ?? [];
+      const poll = store.create({ ...args, participants, createdBy: 'operator' }, { fromPanel: true, beforePublish });
+      return { ...poll, invitations: plan?.targets ?? null };
     }
     case 'debate-reply':
       replyToDebate(cwd, args.id, { author: 'operator', body: args.text }, { fromPanel: true });

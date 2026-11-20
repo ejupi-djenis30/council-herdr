@@ -19,7 +19,7 @@ function json(path) {
   return value === null ? null : JSON.parse(value);
 }
 
-export function createDebate(cwd, { question, context = '' }) {
+export function createDebate(cwd, { question, context = '' }, { beforePublish } = {}) {
   const title = requiredText(question, 'Debate topic', 240);
   const brief = context ? requiredText(context, 'Opening message', 2000) : '';
   const root = join(cwd, '.agent_workspace');
@@ -32,6 +32,7 @@ export function createDebate(cwd, { question, context = '' }) {
     $schema: roomSchema, sessionId: id, mode: 'debate', question: title, context: brief,
     createdAt: new Date().toISOString(), createdBy: 'operator'
   };
+  beforePublish?.(id);
   writeFileSync(join(dir, 'session.json'), JSON.stringify(room), { flag: 'wx' });
   return room;
 }

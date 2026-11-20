@@ -173,7 +173,7 @@ export class PollStore {
     return results(record.poll);
   }
 
-  create({ question, context, mode = 'choice', options = [], createdBy, participants }, { fromPanel = false } = {}) {
+  create({ question, context, mode = 'choice', options = [], createdBy, participants }, { fromPanel = false, beforePublish } = {}) {
     if (!MODES.includes(mode)) throw new Error('Poll mode must be choice, mixed or open.');
     if (!Array.isArray(options)) throw new Error('Options must be an array.');
     if (mode === 'open' && options.length) throw new Error('A free-response poll takes no options.');
@@ -190,6 +190,9 @@ export class PollStore {
     };
     for (const label of options) poll.options.push(makeOption(label, poll.options));
     if (fromPanel && Array.isArray(participants)) {
+      if (beforePublish && participants.length > MAX_PARTICIPANTS) {
+        throw new Error(`Select up to ${MAX_PARTICIPANTS} agents per poll.`);
+      }
       const tracked = new Map();
       for (const { address: voter, label } of participants.slice(0, MAX_PARTICIPANTS)) {
         const name = voterId(voter);
@@ -202,6 +205,7 @@ export class PollStore {
     const dir = join(this.base, poll.id);
     mkdirSync(dir);
     const event = { type: 'create', poll };
+    beforePublish?.(poll.id);
     appendEvent(dir, 1, event);
     return results(applyEvent(null, event));
   }

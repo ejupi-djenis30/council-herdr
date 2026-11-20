@@ -22,7 +22,8 @@ try {
       result = runDebateCommand(args);
       break;
     case 'invite':
-      await sendInvitations(process.cwd(), fileURLToPath(import.meta.url), JSON.parse(args[0]));
+      const request = args[0]?.startsWith('{') ? JSON.parse(args[0]) : { id: args[0] };
+      await sendInvitations(process.cwd(), fileURLToPath(import.meta.url), request);
       result = { success: true };
       break;
     case 'alignment': {
