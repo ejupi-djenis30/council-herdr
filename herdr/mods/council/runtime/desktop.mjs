@@ -1,19 +1,14 @@
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, realpathSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { readDelegation } from './delegations.mjs';
+import { createDebate, replyToDebate, roomMessages, roomSchema } from './debate-room.mjs';
+import { discussionMessages, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
+import { readInvitations } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 
-function readJson(path) {
-  const raw = readText(path, 1024 * 1024);
-  return raw === null ? null : JSON.parse(raw);
-}
-
-function readReview(base, id, selected) {
-  const dir = join(base, id);
-  if (!isDirectory(dir)) return null;
-  const session = readJson(join(dir, 'session.json'));
-  if (session?.sessionId !== id || !['council', 'review'].includes(session.mode)) return null;
+function verdictFor(dir, session) {
+  const { sessionId: id } = session;
   const createdAt = Date.parse(session.createdAt);
   const candidates = ['reports', 'validation'].flatMap(folder => {
     const results = join(dir, folder);
@@ -29,26 +24,45 @@ function readReview(base, id, selected) {
   // A reused ID may have an older report alongside its current validation.
   candidates.sort((a, b) => b.timestamp - a.timestamp ||
     Number(b.folder === 'validation') - Number(a.folder === 'validation'));
-  const saved = candidates[0];
+  return candidates[0];
+}
+
+function reviewStatus(saved) {
   const validation = saved?.verdict.validation;
   const tally = saved?.verdict.tally;
   const authorized = saved?.folder === 'reports' && validation.passed === true &&
     ['validated', 'conditional'].includes(validation.verdict) && validation.artifactIntegrity === true &&
     validation.mutationDetected === false && tally.passed === true && tally.quorumMet === true && tally.invalidCount === 0;
+  return authorized ? 'approved'
+    : ['approved', 'validated', 'conditional'].includes(validation?.verdict) ? 'unconfirmed' : validation?.verdict ?? 'pending';
+}
+
+function readCouncilSession(base, id, selected, discussion, cwd) {
+  const dir = join(base, id);
+  const session = readDiscussionSession(dir, id);
+  if (!session || (!discussion && session.mode === 'debate')) return null;
+  const saved = session.mode === 'debate' ? null : verdictFor(dir, session);
+  const interactive = session.$schema === roomSchema;
   const taskDir = join(dir, 'task');
-  const task = isDirectory(taskDir) ? readText(join(taskDir, 'task.md'), 1024 * 1024)?.trim() : null;
-  const reportPath = selected && saved ? join(dir, saved.folder, 'report.md') : null;
+  const task = interactive ? session.question : isDirectory(taskDir) ? readText(join(taskDir, 'task.md'), 1024 * 1024)?.trim() : null;
   const summary = {
     id, mode: session.mode, question: task?.slice(0, 220) || id, createdAt: session.createdAt,
-    status: authorized ? 'approved'
-      : ['approved', 'validated', 'conditional'].includes(validation?.verdict) ? 'unconfirmed' : validation?.verdict ?? 'pending'
+    status: interactive ? 'open' : session.mode === 'debate' ? 'archived' : reviewStatus(saved)
   };
-  const detail = selected ? {
-    ...summary, task: task?.slice(0, 2400) || id,
-    tally: tally ?? null, validation: validation ?? null, participants: session.participants ?? [],
-    reportPath: reportPath && isFile(reportPath) ? reportPath : null
-  } : null;
-  return { summary, detail };
+  if (!selected) return { summary, detail: null };
+  const detail = { ...summary, task: task?.slice(0, 2400) || id, participants: session.participants ?? [] };
+  if (discussion) {
+    const invitations = interactive ? readInvitations(cwd, id) : null;
+    const names = new Map(invitations?.map(target => [target.address, target.label]));
+    const messages = interactive ? roomMessages(dir, session).map(message => ({ ...message, agent: names.get(message.author) }))
+      : discussionMessages(dir, session);
+    return { summary, detail: { ...detail, interactive, messages, invitations } };
+  }
+  const reportPath = saved ? join(dir, saved.folder, 'report.md') : null;
+  return { summary, detail: { ...detail,
+    tally: saved?.verdict.tally ?? null, validation: saved?.verdict.validation ?? null,
+    ballots: readSubmittedBallots(dir, session), reportPath: reportPath && isFile(reportPath) ? reportPath : null
+  } };
 }
 
 function sessions(cwd, selected, collection, item, readRecord) {
@@ -78,16 +92,24 @@ function sessions(cwd, selected, collection, item, readRecord) {
   return { [collection]: summaries, errors };
 }
 
-export function desktopRequest(cwd, action, args) {
+function projectRequest(cwd, action, args) {
   const store = new PollStore(cwd);
   switch (action) {
     case 'polls': {
-      if (args.id) return { poll: store.show(args.id) };
+      if (args.id) return { poll: { ...store.show(args.id), invitations: readInvitations(cwd, args.id) } };
       return store.list();
     }
-    case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readReview);
+    case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readCouncilSession);
+    case 'debates': return sessions(cwd, args.id, 'debates', 'debate', (base, id, selected) => readCouncilSession(base, id, selected, true, cwd));
     case 'delegations': return sessions(cwd, args.id, 'delegations', 'delegation', readDelegation);
-    case 'create': return store.create(args);
+    case 'create': return store.create({ ...args, createdBy: 'operator' }, { fromPanel: true });
+    case 'debate-create': {
+      const room = createDebate(cwd, args);
+      return projectRequest(cwd, 'debates', { id: room.sessionId }).debate;
+    }
+    case 'debate-reply':
+      replyToDebate(cwd, args.id, { author: 'operator', body: args.text }, { fromPanel: true });
+      return projectRequest(cwd, 'debates', { id: args.id }).debate;
     case 'add-option': return store.addOption(args.id, args.label);
     case 'track': return store.track(args.id, args);
     case 'untrack': return store.untrack(args.id, args.voter);
@@ -95,4 +117,29 @@ export function desktopRequest(cwd, action, args) {
     case 'close': return store.close(args.id, args.outcome);
     default: throw new Error('Unknown Council panel action.');
   }
+}
+
+export function desktopRequest(cwd, action, args) {
+  if (!['polls', 'reviews', 'debates', 'delegations'].includes(action) || args.id != null || !Array.isArray(args.projects)) {
+    return projectRequest(cwd, action, args);
+  }
+  const items = [];
+  const errors = [];
+  const scanned = new Set();
+  for (const folder of [cwd, ...args.projects]) {
+    if (typeof folder !== 'string' || !isAbsolute(folder)) continue;
+    try {
+      const project = realpathSync.native(folder);
+      const key = process.platform === 'win32' ? project.toLowerCase() : project;
+      if (scanned.has(key)) continue;
+      scanned.add(key);
+      const result = projectRequest(project, action, {});
+      items.push(...result[action].map(item => ({ ...item, project })));
+      errors.push(...result.errors.map(error => ({ ...error, project })));
+    } catch (error) {
+      errors.push({ project: folder, error: error.message });
+    }
+  }
+  items.sort((a, b) => Boolean(a.closedAt) - Boolean(b.closedAt) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  return { [action]: items, errors };
 }

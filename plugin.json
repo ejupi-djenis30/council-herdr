@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "council",
-  "version": "2.0.1",
-  "description": "Council for Herdr with bounded delegation, independent review, and a native desktop mod for project polls and review results.",
+  "version": "3.0.0",
+  "description": "Council for Herdr with verified agent readiness, bounded delegation, independent review, and Desktop polls and debates.",
   "author": { "name": "Ejupi-Labs" },
   "license": "MIT",
   "keywords": [

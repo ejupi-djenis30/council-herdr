@@ -12,6 +12,7 @@ import { JobManager } from '../lib/jobs.js';
 import { JobWorker } from '../lib/job-worker.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
 import { HerdrClient } from '../lib/herdr.js';
+import { alignmentKey, alignmentLabel } from '../herdr/mods/council/runtime/alignment.mjs';
 
 const TASK = 'Return the independent acceptance result 42';
 const ADDRESS = 't120';
@@ -29,8 +30,11 @@ async function inTemp(run) {
   }
 }
 
-function snapshot({ address = ADDRESS, turn = 12, status = 'idle', app, reported = true, state = 'live' } = {}) {
-  return { success: true, details: { address, state, reported, turn, status: { state: status, app }, die_with_parent: true, cwd: 'original', keep: false } };
+function snapshot({ address = ADDRESS, turn = 12, status = 'idle', app = 'codex', reported = true, state = 'live', alignment = 'aligned' } = {}) {
+  const details = { address, state, reported, turn, status: { state: status, app }, created_ms: 12, pid: 42,
+    die_with_parent: true, cwd: 'original', keep: false, labels: {} };
+  if (reported && state === 'live' && alignment) details.labels[alignmentKey] = alignmentLabel(details, alignment).split('=')[1];
+  return { success: true, details };
 }
 
 function waitResult({ address = ADDRESS, status = 'done', turn = 13, reason = 'status', ended = true, exitCode = null } = {}) {
@@ -140,6 +144,24 @@ test('adoption sends and verifies completion using the resolved terminal address
   for (const action of ['send', 'wait', 'read']) {
     assert.equal(f.calls.find(call => call.method === action).args[0], ADDRESS);
   }
+}));
+
+test('a borrowed job queues only a setup notice until the terminal registers, and rechecks on delivery', async () => inTemp(async root => {
+  const f = setup(root, { initial: snapshot({ alignment: null }) });
+  const checks = [];
+  f.herdr.requestAlignment = address => checks.push(address);
+  const before = await start(f);
+  assert.equal(before.alignment, 'unconfirmed');
+  assert.deepEqual(checks, [ADDRESS]);
+  assert.equal(f.launches.length, 0);
+  assert.equal(count(f.calls, 'send'), 0);
+
+  f.herdr.get = () => snapshot();
+  assert.equal((await start(f)).success, true);
+  f.herdr.get = () => snapshot({ alignment: 'not_aligned' });
+  const outcome = await runWorker(f);
+  assert.equal(outcome.alignment, 'not_aligned');
+  assert.equal(count(f.calls, 'send'), 0);
 }));
 
 for (const [label, wait] of [

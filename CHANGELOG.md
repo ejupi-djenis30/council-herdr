@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.0
+
+- Require an agent to register its current Council skill through Council MCP before it receives a delegation, a review brief, or a poll or debate invitation. An agent can report missing setup, and Desktop shows which invitations are waiting for alignment.
+- Discover agent-created polls and formal reviews from projects in the active Herdr space. Open the Debate tab to follow a conversation, reply in a group-chat view, and see proposals and ballots from formal Council sessions.
+- Invite active agents in the space automatically when you create a poll or debate in Desktop. Withheld invitations can go out after an agent registers within the delivery window.
+- Preview and install project-scoped Council skill and MCP settings for Claude Code, Junie, and OpenCode with `council alignment setup`.
+
+Upgrade the Council skill and plugin or MCP connection on existing agents, then reload those integrations and request alignment. See the [host setup guide](https://github.com/ejupi-djenis30/council-herdr/blob/v3.0.0/docs/alignment.md).
+
 ## 2.0.1
 
 - Distinguish expired deadlines, blocked agents, and uncertain delivery in the CLI, MCP, and Herdr Desktop. Show how to inspect the existing terminal and delivery record.

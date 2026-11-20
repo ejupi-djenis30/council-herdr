@@ -3,11 +3,14 @@ import { HerdrClient } from '../lib/herdr.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
 import { JobManager } from '../lib/jobs.js';
+import { setupAlignment } from '../lib/alignment-setup.js';
+import { alignmentOf, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
+import { runDebateCommand } from '../herdr/mods/council/runtime/debate-command.mjs';
 import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
 
 function printHelp() {
   console.log(`
-Council CLI - Herdr-native Multi-Agent Collaboration Engine (v2.0.1)
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.0.0)
 
 USAGE:
   council <command> [options]
@@ -26,6 +29,10 @@ COMMANDS:
   dismiss <targets...>          Kill and remove terminal(s) from Herdr
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
   poll help                     Manage advisory project polls and submit responses
+  debate help                   Read or reply to a Council Desktop debate
+  alignment status [target]     Inspect an agent's Council alignment
+  alignment decline             Report missing Council setup from your terminal
+  alignment setup --host ... --project ...  Preview project setup. Use --apply to write it.
 
 CONVENE OPTIONS:
   --mode <name>                 Mode: council (default), review, delegate
@@ -99,8 +106,9 @@ function parseArgs(args) {
 async function main() {
   const rawArgs = process.argv.slice(2);
   const command = rawArgs[0] || 'help';
-  if (command.toLowerCase() === 'poll') {
-    const result = runPollCommand(rawArgs.slice(1));
+  if (['poll', 'debate'].includes(command.toLowerCase())) {
+    const run = command.toLowerCase() === 'poll' ? runPollCommand : runDebateCommand;
+    const result = run(rawArgs.slice(1));
     console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     return;
   }
@@ -111,6 +119,26 @@ async function main() {
   const jobManager = new JobManager({ herdr, cwd: process.cwd() });
 
   switch (command.toLowerCase()) {
+    case 'alignment': {
+      const [action, target] = flags._;
+      if (action === 'setup') {
+        console.log(JSON.stringify(setupAlignment({ host: flags.host, project: flags.project,
+          apply: flags.apply === true, replace: flags.replace === true }), null, 2));
+        break;
+      }
+      if (action === 'decline') {
+        console.log(JSON.stringify(reportAlignment(herdr, { state: 'not_aligned' })));
+        break;
+      }
+      if (action !== 'status' && action !== 'check') throw new Error('Use council alignment status, check, decline, or setup.');
+      const address = target || herdr.terminalId;
+      if (!address || (action === 'check' && !target)) throw new Error('A Herdr terminal address is required.');
+      if (action === 'check') herdr.requestAlignment(address, { refresh: true });
+      const result = herdr.get(address);
+      if (!result.success) throw new Error(result.error);
+      console.log(JSON.stringify({ address: result.details.address, state: alignmentOf(result.details) }));
+      break;
+    }
     case 'start': {
       const mode = flags.mode || 'delegate';
       const task = flags.task || flags._.join(' ');

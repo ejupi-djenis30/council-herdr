@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HerdrClient } from '../lib/herdr.js';
 
@@ -17,32 +18,42 @@ test('HerdrClient parses JSON correctly', () => {
   assert.deepEqual(client.parseJson('{"hello":"world"}'), { hello: 'world' });
 });
 
-test('HerdrClient writes brief file for multiline tasks', () => {
-  const testCwd = process.cwd();
+test('HerdrClient sends only an alignment check before releasing a real brief', t => {
+  const testCwd = mkdtempSync(join(tmpdir(), 'council-launch-'));
+  t.after(() => rmSync(testCwd, { recursive: true, force: true }));
   const client = new HerdrClient({ cwd: testCwd });
-
-  // Mock exec to avoid calling real hc during unit test
-  const originalExec = client.exec;
-  let capturedArgs = null;
-  client.exec = (args) => {
-    capturedArgs = args;
-    return { success: true, stdout: 'started', stderr: '', code: 0 };
+  const launches = [];
+  client.exec = args => {
+    launches.push(args);
+    return { success: true, stdout: JSON.stringify({ address: 't21' }) };
   };
-
+  const sends = [];
+  client.send = (...args) => {
+    sends.push(args);
+    return { success: true, output: JSON.stringify({ started: true, turn: 1 }) };
+  };
   const longTask = 'Line 1: Build the feature\nLine 2: Ensure test coverage\nLine 3: Document it';
-  const res = client.launchAgent({
+  const options = {
     name: 'test-agent',
     agent: 'claude',
     permission: 'read',
     cwd: testCwd,
     task: longTask
-  });
-
-  assert.equal(res.success, true);
+  };
   const briefPath = join(testCwd, '.agent_workspace', 'default', 'briefs', 'test-agent.md');
+  client.waitForAlignment = () => ({ state: 'not_aligned' });
+  const blocked = client.launchAgent(options);
+  assert.equal(blocked.success, false);
+  assert.equal(blocked.address, 't21');
+  assert.equal(blocked.alignment, 'not_aligned');
+  assert.equal(sends.length, 0);
+  assert.equal(existsSync(briefPath), false);
+  assert.match(launches[0].at(-1), /Council alignment check/);
+  assert.doesNotMatch(launches[0].at(-1), /Build the feature/);
+  client.waitForAlignment = () => ({ state: 'aligned', turn: 1 });
+  const res = client.launchAgent(options);
+  assert.equal(res.success, true);
+  assert.equal(res.baselineTurn, 1);
+  assert.equal(sends.length, 1);
   assert.equal(existsSync(briefPath), true, 'Brief file should be created');
-
-  // Cleanup brief file
-  try { unlinkSync(briefPath); } catch {}
-  client.exec = originalExec;
 });

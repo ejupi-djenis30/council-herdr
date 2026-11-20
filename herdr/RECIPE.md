@@ -6,19 +6,21 @@ Council is a native collaboration panel for an active Herdr workspace. Ask its a
 
 ## What you see
 
-The **Council** entry in the sidebar uses a purple conversation mark and opens a [native menu](screenshots/menu.png). Its three items take you straight to **Polls**, **Delegations**, or **Reviews**. The floating window uses Herdr's theme for its navigation, icons, charts, and status indicators. The header shows the current space and the actions available in the selected view. Lists have search and status filters where applicable. Details use side-by-side cards on wider windows and stack on narrower windows.
+The **Council** entry in the sidebar uses a purple conversation mark and opens a native menu for **Polls**, **Delegations**, **Debate**, and **Reviews**. Select **All local spaces** to include projects from other open spaces and their terminal folders. Lists show the project that produced each record. Details use side-by-side cards on wider windows and stack on narrower windows.
 
 ## How it behaves
 
 Click **Council** and choose a section with the mouse or arrow keys and Enter. Esc dismisses the menu. The optional Shift+F8 binding and the Herdr mod-open command also open Council. Drag the header to move the window. In Polls, create a poll with listed options, free responses, or both. Search by question or poll ID. Options can be added while the poll is open, and the same voter can revise a response. Closing freezes the options, responses and roster and can record the next step. Copy results or the decision to use in a handoff.
 
-In Participants, track an agent, copy an invitation scoped to its voter ID, or open its terminal. Live terminal labels are Idle, Working, Done, and Needs you. They use Herdr's idle, working, done, and blocked colors. A missing live terminal shows Terminal unavailable. Response states are Pending, Responded, and No response after closing. The poll still counts responses from outside the roster. Reviews shows saved verdicts, formal quorum, invalid or missing ballots, and dissent.
+In Participants, track an agent, copy an invitation scoped to its voter ID, or open its terminal. Live terminal labels are Idle, Working, Done, and Needs you. They use Herdr's idle, working, done, and blocked colors. A missing live terminal shows Terminal unavailable. Response states are Pending, Responded, and No response after closing. The poll still counts responses from outside the roster. Reviews shows submitted direct ballots while the session runs, followed by the saved verdict, formal quorum, invalid or missing ballots, and dissent.
+
+Open a poll or start a debate to automatically invite the current space's agents. Delivery runs in Herdr and follows agent readiness for up to 15 minutes. Check the invitation status in the open item. Debate rooms accept replies from Desktop, the bundled CLI, and MCP. Debate also follows Council and review sessions as threads, with a link to the formal tally and verdict.
 
 Delegations reads asynchronous jobs started in the project from CLI or MCP. Filter for Active, Needs attention, or Ready. A detail shows the assigned terminal, acknowledgement, remaining time, recorded wait event, and any error. The Terminal capture card appears alongside the delivery record. It can copy saved output and the path to the full capture. Opening a live terminal leaves the panel visible. An elapsed deadline or uncertain delivery is shown even when a worker has saved no result.
 
 ## Built from
 
-`mods/council/mod.json` registers the dashboard window. `navigation.js` draws the native sidebar launcher and popup. `poll-view.js` renders the tally and roster, and `poll-text.js` formats invitations and summaries. Herdr supplies the current folder from `spaces()`, the live roster from `agents()`, and navigation through `agent.focus`. Copy actions use the local clipboard and post a brief Herdr toast.
+`mods/council/mod.json` registers the dashboard window. `navigation.js` draws the native sidebar launcher and popup. `poll-view.js` renders the tally and roster, `poll-text.js` formats invitations and summaries, and `discussion-view.js` draws the debate thread. Herdr supplies project folders from `spaces()` and `panes()`, the live roster from `agents()`, and navigation through `agent.focus`.
 
 The window runs `runtime/council.mjs desktop <action>` through `herdr.exec` in the active local project directory and reads JSON from stdout. The Node helper reads Council session records and writes advisory events only under `.agent_workspace/.polls/`. Delegations reads `job.json` and its dispatch sidecar with the same result and dispatch checks as the CLI. The repository CLI and MCP import the same poll store. The bundled polling CLI also works when invoked directly from the target project directory:
 
@@ -45,7 +47,7 @@ Merge `keys.json` if Shift+F8 is free. You can also open the window with `herdr-
 
 - Use Herdr Desktop with Node.js 20 or newer. The bundled runtime works independently of the checkout. For a manual copy, Node must be on Herdr's PATH or named in the installed mod's optional `config.json` as `{"node":"/absolute/path/to/node"}`.
 - The active space must be local. Refresh runs every five seconds. The project filesystem must support hard links. Linked storage directories are rejected.
-- The mod uses the filesystem, local Node process, and clipboard. It uses no network and invites are pasted manually. Poll participation uses local voter IDs and project write access. A read-only agent can reply in its conversation. Formal reviews use Council's separate rules.
+- The mod uses the filesystem, local Node process, clipboard, and Herdr terminal delivery. Poll and debate participation uses local terminal IDs and project write access. A read-only agent can reply in its conversation. Formal reviews use Council's separate rules.
 - The editor supports up to 20 options and 32 tracked agents. The installed mod identifier is `council`.
 
 ## Done when

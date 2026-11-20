@@ -92,6 +92,7 @@ function applyEvent(poll, event) {
 function validSnapshot(poll, id) {
   return poll?.id === id && poll.schema === 'council.poll/v1' && MODES.includes(poll.mode) &&
     typeof poll.question === 'string' && typeof poll.createdAt === 'string' &&
+    (poll.createdBy === undefined || (typeof poll.createdBy === 'string' && VOTER_ID.test(poll.createdBy))) &&
     Array.isArray(poll.options) && poll.options.every(option =>
       typeof option?.id === 'string' && typeof option.label === 'string') &&
     Array.isArray(poll.participants) && poll.participants.every(participant =>
@@ -118,10 +119,11 @@ function readPoll(base, id) {
 }
 
 function summarize(poll) {
-  const { id, question, mode, createdAt, closedAt, responses, participants } = poll;
+  const { id, question, mode, createdAt, createdBy, closedAt, responses, participants } = poll;
   const voters = new Set(responses.map(response => response.voter));
   return {
     id, question, mode, createdAt, closedAt, responseCount: responses.length,
+    ...(typeof createdBy === 'string' && VOTER_ID.test(createdBy) ? { createdBy } : {}),
     participation: {
       expected: participants.length,
       received: participants.filter(participant => voters.has(participant.voter)).length
@@ -171,7 +173,7 @@ export class PollStore {
     return results(record.poll);
   }
 
-  create({ question, context, mode = 'choice', options = [] }) {
+  create({ question, context, mode = 'choice', options = [], createdBy, participants }, { fromPanel = false } = {}) {
     if (!MODES.includes(mode)) throw new Error('Poll mode must be choice, mixed or open.');
     if (!Array.isArray(options)) throw new Error('Options must be an array.');
     if (mode === 'open' && options.length) throw new Error('A free-response poll takes no options.');
@@ -183,9 +185,18 @@ export class PollStore {
       context: text(context, 'Context', 2000),
       mode,
       options: [],
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...(createdBy ? { createdBy: voterId(createdBy, fromPanel) } : {})
     };
     for (const label of options) poll.options.push(makeOption(label, poll.options));
+    if (fromPanel && Array.isArray(participants)) {
+      const tracked = new Map();
+      for (const { address: voter, label } of participants.slice(0, MAX_PARTICIPANTS)) {
+        const name = voterId(voter);
+        tracked.set(name, { voter: name, label: text(label, 'Participant label', 120) || name });
+      }
+      poll.participants = [...tracked.values()];
+    }
     isDirectory(this.workspace, { create: true });
     isDirectory(this.base, { create: true });
     const dir = join(this.base, poll.id);

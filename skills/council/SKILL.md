@@ -1,6 +1,6 @@
 ---
 name: council
-description: Delegate bounded tasks and review concrete proposals through visible Herdr agents, preserving evidence and honest completion states.
+description: Run Council delegation, reviews, polls, and debates through aligned Herdr agents. Use for Council readiness checks and participation.
 ---
 
 # Council through Herdr
@@ -8,6 +8,14 @@ description: Delegate bounded tasks and review concrete proposals through visibl
 Use Council when a bounded specialist task or independent review improves the work. Herdr runs terminals; Council adds briefs, handoffs and session artifacts.
 
 Supported modes are `delegate`, `council` and `review`. The experimental modes `debate`, `parallel` and `pipeline` are disabled. Use async `delegate` to run a single task in a new or explicitly selected existing Herdr terminal.
+
+## Council alignment
+
+An alignment check is a setup request. When this skill and the Council MCP tool are available, call `council_alignment` with `{"action":"report","state":"aligned","revision":"council/herdr-alignment-v1"}`. Finish the readiness turn after the receipt succeeds. The coordinator will send a separate assignment. If the server cannot see `HC_TERMINAL_ID`, include your own terminal `target` and the `challenge` from the notice.
+
+If either integration component is unavailable, say `Council alignment: not aligned` and stop. Report `not_aligned` through MCP if available, or run `council alignment decline` in your own Herdr terminal if permitted. The decline command only reports setup status.
+
+As coordinator, query with `council_alignment` (`action: status`, `target`) or `council alignment status <address>`. Send only the neutral readiness notice while setup is missing or unconfirmed. A terminal address, a software version, or a quoted reply alone cannot substitute for the alignment receipt. Use `council alignment check <address>` to ask for a new check. When the user authorizes setup for a project, `council alignment setup --host <claude|junie|opencode> --project <absolute-directory>` previews the skill and MCP files, and `--apply` installs them. Reload that host's integrations and request a new receipt.
 
 ## Start
 
@@ -61,6 +69,8 @@ Use the assigned voter and the digest from the brief. From another directory, pa
 
 ## Respond to an advisory poll
 
+Open a poll with `council_poll_create` or `poll create` from your Herdr project. Include the same absolute `project` in MCP poll calls when the server runs from a different directory. Council Desktop lists the poll in the space containing that project.
+
 Use the poll ID and project folder from the invitation. Read its options and context through `council_poll_read`, or use `poll show <poll-id>` with the Council CLI from that project. Submit one listed option ID or a free response if available. Include the trade-off or reason in `note`. Use your own Herdr terminal address as the voter ID. The CLI can infer it from `HC_TERMINAL_ID`. Submit via `council_poll_vote` or `poll vote <poll-id> --option <option-id> --note "<reason>"`. Use `--answer` for a free response. A later submission under the same voter ID updates the response while the poll is open. Use your normal final answer when your permissions prevent submission.
 
 ## Inspect and report
@@ -70,5 +80,9 @@ Use the poll ID and project folder from the invitation. Read its options and con
 - Cleanup only completed terminals created by the workflow. Preserve recoverable agents beyond orchestrator exit; never automatically dismiss borrowed/user terminals.
 - Present findings, dissent, authorization state and concrete next actions. Persist provisional reports under `validation/`; approved reports go to `reports/`.
 - Tally and digest checks are mechanical, not an agent synthesis, signature or endorsement.
+
+## Reply to a Desktop debate invitation
+
+Use the project path and debate ID from the invitation. Read the thread through `council_debate_read` and post a reasoned reply through `council_debate_reply`. The bundled CLI equivalents are `debate show <id>` and `debate reply <id> --text "<reply>"`. Run them from the debate project and use your own terminal address. If project permissions prevent submission, reply in your current terminal.
 
 Host files are configuration scaffolding, not proof of automatic discovery or live compatibility with an untested host.

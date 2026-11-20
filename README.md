@@ -2,7 +2,7 @@
 
 <img src="herdr/mods/council/icons/logo.svg" width="48" height="48" alt="" align="right">
 
-Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Open **Council** in the Herdr sidebar to jump to polls, delegations, or formal reviews.
+Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Open **Council** in the Herdr sidebar to find polls, delegations, debate threads, and formal reviews.
 
 [Install](#install) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
 
@@ -22,7 +22,7 @@ cd council-herdr
 node herdr/install.js --menu --shortcut
 ```
 
-Open a local space and select **Council** under the Herdr logo. The menu opens **Polls**, **Delegations**, or **Reviews** directly. The optional **Shift+F8** binding and `herdr-app do mod.open --name council` also open Council.
+Open a local space and select **Council** under the Herdr logo. The menu opens **Polls**, **Delegations**, **Debate**, or **Reviews** directly. The optional **Shift+F8** binding and `herdr-app do mod.open --name council` also open Council.
 
 - **Choose a layout.** The installer adds the menu to the active personal layout and archives the old file. For a layout shipped with Herdr, select the new `council-<name>` layout in Herdr using the name printed by the installer. Use `--menu --layout <name>` to target a different layout.
 - **Update** a managed installation with `node herdr/install.js --upgrade --menu`. The old build is archived under the Herdr app home's `council-backups/`. An installation with local edits requires a manual backup before replacing it.
@@ -32,18 +32,29 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 ## Run a poll
 
 1. Select **New poll** and choose listed options, free responses, or both.
-2. Open **Participants** to track agents in the active space. **Copy invite** contains instructions for the selected agent. Paste it into their conversation.
+2. Select **Open poll**. Council sends an invitation with the project and poll ID to the current space's agents. Open **Participants** to follow responses or copy a manual invitation.
 3. Follow live responses in **Results**. You can add options while the poll is open, see replies from agents outside the roster, and jump to a live terminal from the participant list.
 4. Close the poll with an optional next step. **Copy decision** captures the tally, reasons, and missing responses for the next person or agent.
 
-Use the search field and open or closed filters to find earlier polls. The **Reviews** tab projects saved formal Council verdicts, quorum, missing or invalid ballots, and dissent. Advisory polls are separate from the formal approval workflow.
+**Polls** includes polls opened in Desktop or by agents through the CLI and MCP. **This space** includes the space folder and its terminal folders. Use **All local spaces** to see records from other open local spaces. Polls display their project and, when available, the terminal that opened them.
 
-### Respond from an agent
+In **Debate**, select **New debate**, enter a topic, and select **Start debate** to invite the space's agents into a shared thread. Add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
 
-With Council MCP configured for the same project, use `council_poll_read` and `council_poll_vote`. To use the [bundled poll CLI](herdr/RECIPE.md#built-from), run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands:
+The invitation worker runs in Herdr after the panel closes. Agents that are working, waiting for input, or completing Council setup stay queued for up to 15 minutes. The panel shows their delivery and alignment status.
+
+## Agent alignment
+
+Agents register readiness through `council_alignment` using the current Council skill. Setup notices reach unknown agents before Council shares any task, poll ID or debate ID. Receipts apply to the current Herdr terminal and expire after eight hours. A reported setup issue stays visible in the invitation. See [Council host setup](docs/alignment.md) for configuring and refreshing a specific agent.
+
+**Debate** also shows saved Council and review proposals, replies, and submitted ballots in chronological order. The view labels terminal captures and drafts and links to the formal review. **Reviews** shows submitted direct ballots as they arrive and displays the saved tally and verdict when available.
+
+### Open or respond to a poll from an agent
+
+Use `council_poll_create`, `council_poll_read`, and `council_poll_vote` through MCP. Pass the same absolute `project` path for all three if the server starts outside the project. To use the bundled poll CLI, run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands.
 
 ```powershell
 node C:/path/to/council-herdr/bin/council.js poll list
+node C:/path/to/council-herdr/bin/council.js poll create --mode open --question "What should we review?"
 node C:/path/to/council-herdr/bin/council.js poll show <poll-id>
 node C:/path/to/council-herdr/bin/council.js poll vote <poll-id> --option option-1 --note "The diff identifies the exact revision"
 node C:/path/to/council-herdr/bin/council.js poll help
@@ -55,7 +66,7 @@ Use `poll track <poll-id> --voter <id> --label "Reviewer"` and `poll untrack <po
 
 ### Data and permissions
 
-The panel runs the bundled Node helper from the local Herdr space's folder. It reads Council records under `.agent_workspace/` and writes advisory events under `.agent_workspace/.polls/`. Poll writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses no network services. Invites and handoffs use the local clipboard.
+The panel reads Council records under `.agent_workspace/` in the local projects in scope. Poll actions write advisory events under `.agent_workspace/.polls/` in the poll's original project. Poll writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses the local clipboard for invitations and handoffs.
 
 ## Available workflows
 

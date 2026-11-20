@@ -6,6 +6,7 @@ import { brandMark, glyph, iconTile, label } from './components.js';
 export const sections = [
   { id: 'polls', title: 'Polls', description: 'Collect votes and record decisions' },
   { id: 'delegations', title: 'Delegations', description: 'Follow agent tasks and their results' },
+  { id: 'debates', title: 'Debate', description: 'Read the conversation between agents' },
   { id: 'reviews', title: 'Reviews', description: 'Inspect verdicts and direct ballots' }
 ];
 

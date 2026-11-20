@@ -38,7 +38,7 @@ export function runPollCommand(args, cwd = process.cwd()) {
   switch (action) {
     case 'list': return store.list();
     case 'show': return store.show(id);
-    case 'create': return store.create({ ...values, options: values.option });
+    case 'create': return store.create({ ...values, options: values.option, createdBy: process.env.HC_TERMINAL_ID });
     case 'add-option': return store.addOption(id, values.label);
     case 'track': return store.track(id, values);
     case 'untrack': return store.untrack(id, values.voter);

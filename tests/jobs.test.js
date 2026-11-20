@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { JobManager, computeFingerprint, validateAdoptedTerminal } from '../lib/jobs.js';
 import { JobWorker } from '../lib/job-worker.js';
 import { AgentWorkspace } from '../lib/workspace.js';
+import { alignmentKey, alignmentLabel } from '../herdr/mods/council/runtime/alignment.mjs';
 
 async function inTemp(fn) {
   const root = mkdtempSync(join(tmpdir(), 'council-jobs-unit-'));
@@ -46,7 +47,9 @@ test('validateAdoptedTerminal detects caller address self-adoption', () => {
   const herdr = {
     terminalId: caller,
     get(target) {
-      return { success: true, details: { address: target, state: 'live', reported: true, status: { state: 'idle' } } };
+      const details = { address: target, state: 'live', reported: true, status: { state: 'idle', app: 'codex' }, pid: 42, created_ms: 9001 };
+      details.labels = { [alignmentKey]: alignmentLabel(details, 'aligned').split('=')[1] };
+      return { success: true, details };
     }
   };
 
