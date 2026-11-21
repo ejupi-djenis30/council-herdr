@@ -1,19 +1,18 @@
 ---
-name: council
-description: Delegate bounded work or review a concrete proposal through visible Herdr agents.
+description: Choose an explicit Council operation in Herdr and pass its arguments.
+argument-hint: "[delegate|review|council|team|status|result|doctor|poll|debate] [arguments]"
 ---
 
-# /council
+# Council
 
-- `/council <task>`: author proposal followed by skeptic and simplifier reviews.
-- `/council review <task>`: author proposal followed by reviewer and simplifier reviews.
-- `/council delegate <agent> <task>`: one specialist task.
-- `/council status` or `/council doctor`: inspect parent-environment availability and Herdr terminals.
+User arguments: $ARGUMENTS
 
-`debate`, `parallel` and `pipeline` are disabled experimental modes. Existing terminals are not adopted automatically.
+Use the first argument as the operation and preserve the remaining arguments. Follow the `council` skill and the selected workflow's skill.
 
-Use connected `council_convene` or `council_delegate` tools, or the bundled CLI by absolute path from the intended project directory. Follow the installed `hc --skill` and run long commands under `hc run --bg`.
+- `delegate <agent> <task>`: use `council-delegate` for one specialist. Accept `--adopt <address>`, `--async`, and `--session <id>`.
+- `review <task>`: use `council-review` with `mode: review`.
+- `council <task>`: run `council_convene` with `mode: council`.
+- `team list|call|set`: use `council-team` and preserve the configured member ID.
+- `status`, `result`, `doctor`, `poll`, `debate`: use the selected operation in the requested project.
 
-Default to read permissions. Present real findings, dissent, authorization state and next actions. Screen-only results are provisional. Only valid direct ballots from completed participants authorize promotion; a mechanical tally is not an agent signature or synthesis.
-
-On timeout or blocked/delivery failure, inspect the session and reported addresses. Preserve recoverable agents, do not blindly relaunch tasks, and never automatically dismiss user terminals. See `skills/council/SKILL.md`.
+If no arguments were supplied, show this list. If the operation is missing, ambiguous, or unsupported, explain the valid choices before launching any agent. Keep explicit options and targets. Default to read access.

@@ -1,13 +1,25 @@
 ---
 name: council
-description: Run Council delegation, reviews, polls, and debates through aligned Herdr agents. Use for Council readiness checks and participation.
+description: Select a Council workflow in Herdr, respond to a Council readiness check, or participate in an assigned review, poll, or discussion.
 ---
 
 # Council through Herdr
 
-Use Council when a bounded specialist task or independent review improves the work. Herdr runs terminals; Council adds briefs, handoffs and session artifacts.
+## Choose the operation
 
-Supported modes are `delegate`, `council` and `review`. The experimental modes `debate`, `parallel` and `pipeline` are disabled. Use async `delegate` to run a single task in a new or explicitly selected existing Herdr terminal.
+The first word after the Council skill mention selects the workflow. Accept **delegate**, **review**, **council**, **team**, **status**, **result**, **doctor**, **poll**, and **debate**. An explicit operation in plain language works too. Pass the mode explicitly when the tool accepts a mode field. If the invocation only names Council or leaves the intended workflow ambiguous, show the matching choices and ask which to run before launching agents. An explicit Council readiness notice or participation assignment follows the relevant instructions below.
+
+| Invocation | Operation |
+| --- | --- |
+| `$council delegate codex "Inspect the parser"` | One specialist. Use the `council-delegate` skill for target and timing options. |
+| `$council review "Check the parser proposal"` | Formal review with an author, reviewer and simplifier. Use the `council-review` skill. |
+| `$council council "Decide the migration strategy"` | Convene an author, skeptic and simplifier with `council_convene` and `mode: council`. CLI: `council convene --mode council --task ...`. |
+| `$council team call qa "Check the migration plan" --session qa-1` | Call the configured Team role `qa`. Use the `council-team` skill. |
+| `$council status --session qa-1` / `$council result --session qa-1` | Inspect the existing job with `council_session_status` / `council_result`. CLI: `council status` / `council result` with the same session. |
+| `$council status` / `$council doctor` | Inspect Herdr terminals or the environment. Use `council_status` or the matching CLI command. |
+| `$council poll show <id>` / `$council debate show <id>` | Inspect the advisory poll or Desktop discussion in its project. Use the matching tool or CLI command. |
+
+Preserve explicit task text, target, project, session ID, permission, timeout and terminal retention. Default to read access and keep the assignment bounded. If a supplied option conflicts with the selected workflow, explain the conflict before starting. Formal modes use three ordered roles. If the user supplies an incomplete roster, ask for the missing roles before launch. Experimental multi-agent modes `debate`, `parallel` and `pipeline` are disabled. Desktop `debate show` and `debate reply` still work.
 
 ## Council alignment
 
@@ -15,14 +27,13 @@ An alignment check is a setup request. When this skill and the Council MCP tool 
 
 If either integration component is unavailable, say `Council alignment: not aligned` and stop. Report `not_aligned` through MCP if available, or run `council alignment decline` in your own Herdr terminal if permitted. The decline command only reports setup status.
 
-As coordinator, query with `council_alignment` (`action: status`, `target`) or `council alignment status <address>`. Send only the neutral readiness notice while setup is missing or unconfirmed. A terminal address, a software version, or a quoted reply alone cannot substitute for the alignment receipt. Use `council alignment check <address>` to ask for a new check. When the user authorizes setup for a project, `council alignment setup --host <claude|junie|opencode> --project <absolute-directory>` previews the skill and MCP files, and `--apply` installs them. Reload that host's integrations and request a new receipt.
+As coordinator, query with `council_alignment` (`action: status`, `target`) or `council alignment status <address>`. Send only the neutral readiness notice while setup is missing or unconfirmed. A terminal address, a software version, or a quoted reply alone cannot substitute for the alignment receipt. Use `council alignment check <address>` to ask for a new check. When the user authorizes setup, `council alignment setup --host <codex|claude|junie|opencode> --project <absolute-directory>` previews project files. Codex setup installs the skills and prints the MCP entry for configuration. Reload the host's integrations and request a new receipt.
 
 ## Start
 
 1. Verify the intended project directory, selected CLI and authentication. `doctor` checks executable availability. Read the installed `hc --skill` before delegating or running long commands.
 2. Default to `permission: read`. Use write permissions only when the user's task authorizes editing. Supply exact scope and criteria; forbid extra agents unless explicitly assigned.
-3. If connected, use `council_convene` for council/review or `council_delegate` for one specialist. The MCP server must run in the intended project directory.
-4. Otherwise invoke the bundled CLI by absolute path from that project:
+3. Use the selected operation's MCP tool when its server runs in the intended project directory or accepts an explicit project. Otherwise use `council` on PATH or run `node <absolute-checkout>/bin/council.js` from the intended project:
 
 ```powershell
 node C:/path/to/council-herdr/bin/council.js delegate --agent codex --task "Inspect parser edge cases" --permission read

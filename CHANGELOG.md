@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.3.0
+
+- Add dedicated skills for single-agent delegation, formal review, and on-demand Team roles.
+- Route explicit Council workflow and argument selections through the shared skill and Claude Code command.
+- Preview and install all Council skills for a project, including Codex.
+
 ## 3.2.0
 
 - Configure explicit project team roles, optional reporting lines and model selection in Desktop and the CLI.

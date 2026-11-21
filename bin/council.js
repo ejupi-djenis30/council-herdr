@@ -12,7 +12,7 @@ import { callTeamMember } from '../lib/team.js';
 
 function printHelp() {
   console.log(`
-Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.2.0)
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.3.0)
 
 USAGE:
   council <command> [options]
@@ -35,7 +35,8 @@ COMMANDS:
   team help                     Configure named roles and call on-demand team members
   alignment status [target]     Inspect an agent's Council alignment
   alignment decline             Report missing Council setup from your terminal
-  alignment setup --host ... --project ...  Preview project setup. Use --apply to write it.
+  alignment setup --host <codex|claude|junie|opencode> --project <path>
+                                Preview project setup. Use --apply to write it.
 
 CONVENE OPTIONS:
   --mode <name>                 Mode: council (default), review, delegate

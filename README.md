@@ -161,6 +161,21 @@ node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-o
 
 Submit from the same target project, or pass the explicit session directory. A ballot written after a workflow returns does not automatically rerun or promote it. See [voting and validation](docs/voting-and-validation.md).
 
+## Choose a workflow in your agent
+
+Invoke the named skill in Codex. In the Council checkout and plugin, choose the `council:` prefixed name when shown in the skill picker, for example `$council:council-delegate`. The examples use the unprefixed names for standalone installs.
+
+| Goal | Example |
+| --- | --- |
+| Delegate to a single specialist | `$council-delegate codex "Find parser edge cases" --permission read --timeout 120` |
+| Use an existing Herdr terminal | `$council-delegate --adopt t123 "Inspect the failing test" --session parser-check` |
+| Run the formal review workflow | `$council-review "Review the migration proposal" --agents claude,codex,junie` |
+| Convene the formal Council | `$council council "Choose the migration strategy"` |
+| Call one configured Team member | `$council-team call qa "Check rollout risks" --session rollout-qa-1` |
+| Read a saved job | `$council result --session parser-check` |
+
+Use `$council delegate ...`, `$council review ...`, or `$council team ...` if you prefer a single entry point. In Claude Code with the plugin loaded, use `/council:council delegate ...` or select the dedicated plugin skill. Invoking Council without an operation shows the choices before any agent starts. An explicit session, `--async`, or `--adopt` starts durable delegation; use status and result to follow it. [Host setup](docs/alignment.md)
+
 ## MCP and host packaging
 
 Start the stdio server with `node /absolute/path/to/council-herdr/bin/council.js mcp`. Configure the host to launch it in the intended project directory; the server's working directory determines the target project and session location.
