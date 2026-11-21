@@ -4,6 +4,7 @@ import { closeOverlay, openOverlay, props } from 'herdr';
 import { brandMark, glyph, iconTile, label } from './components.js';
 
 export const sections = [
+  { id: 'activity', title: 'Workspace', description: 'Track runs, plans, and project changes' },
   { id: 'polls', title: 'Polls', description: 'Collect votes and record decisions' },
   { id: 'delegations', title: 'Delegations', description: 'Follow agent tasks and their results' },
   { id: 'debates', title: 'Debate', description: 'Read the conversation between agents' },
@@ -14,7 +15,7 @@ export const sections = [
 function openSection(id) {
   closeOverlay(props().overlay);
   openOverlay({
-    mod: 'council', kind: 'window', key: 'council', width: 760, height: 710,
+    mod: 'council', kind: 'window', key: 'council', width: id === 'activity' ? 900 : 760, height: 750,
     props: { initialTab: id }
   });
 }

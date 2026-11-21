@@ -1,5 +1,6 @@
 import { readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { reportProgress, runRelations, workspaceActivity } from './activity.mjs';
 import { readDelegation } from './delegations.mjs';
 import { closeDebate, createDebate, readDebate, readDebateRoom, replyToDebate, roomSchema } from './debate-room.mjs';
 import { discussionMessages, proposalReference, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
@@ -113,7 +114,20 @@ function projectRequest(cwd, action, args) {
     }
     case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readCouncilSession);
     case 'debates': return sessions(cwd, args.id, 'debates', 'debate', (base, id, selected) => readCouncilSession(base, id, selected, true, cwd));
-    case 'delegations': return sessions(cwd, args.id, 'delegations', 'delegation', readDelegation);
+    case 'delegations': {
+      const result = sessions(cwd, args.id, 'delegations', 'delegation', readDelegation);
+      const job = result.delegation;
+      if (job?.teamMember || job?.teamSource) {
+        job.related = runRelations(job, sessions(cwd, null, 'delegations', 'delegation', readDelegation).delegations);
+      }
+      return result;
+    }
+    case 'activity': return args.id != null
+      ? projectRequest(cwd, 'delegations', { id: args.id })
+      : workspaceActivity(cwd, (project, section) => projectRequest(project, section, {}), args);
+    case 'activity-report':
+      reportProgress(cwd, args, 'operator');
+      return projectRequest(cwd, 'delegations', { id: args.sessionId });
     case 'pending-invitations': return { ids: pendingInvitationIds(cwd, args.space) };
     case 'create':
     case 'debate-create': {

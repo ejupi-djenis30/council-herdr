@@ -1,6 +1,6 @@
 {
   "name": "council-herdr",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Native Herdr Desktop polls and debates, with Council agent readiness checks, delegation, and review through CLI and MCP.",
   "type": "module",
   "main": "bin/council.js",
@@ -15,6 +15,7 @@
     "commands/",
     "rules/",
     "docs/",
+    "PLAN.md",
     "herdr/install.js",
     "herdr/install-menu.js",
     "herdr/bridge.js",

@@ -5,6 +5,7 @@ import { CouncilMcpServer } from '../lib/mcp-server.js';
 import { JobManager } from '../lib/jobs.js';
 import { setupAlignment } from '../lib/alignment-setup.js';
 import { alignmentOf, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
+import { runActivityCommand } from '../herdr/mods/council/runtime/activity-command.mjs';
 import { runDebateCommand } from '../herdr/mods/council/runtime/debate-command.mjs';
 import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
 import { TeamStore } from '../herdr/mods/council/runtime/team.mjs';
@@ -12,7 +13,7 @@ import { callTeamMember } from '../lib/team.js';
 
 function printHelp() {
   console.log(`
-Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.3.0)
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.4.0)
 
 USAGE:
   council <command> [options]
@@ -33,6 +34,8 @@ COMMANDS:
   poll help                     Manage advisory project polls and submit responses
   debate help                   Read or reply to a Council Desktop debate
   team help                     Configure named roles and call on-demand team members
+  activity [--session <id>]     Inspect workspace activity and the session timeline
+  activity report [options]     Record a reported progress note
   alignment status [target]     Inspect an agent's Council alignment
   alignment decline             Report missing Council setup from your terminal
   alignment setup --host <codex|claude|junie|opencode> --project <path>
@@ -109,9 +112,10 @@ function parseArgs(args) {
 
 async function main() {
   const rawArgs = process.argv.slice(2);
-  const command = rawArgs[0] || 'help';
-  if (['poll', 'debate'].includes(command.toLowerCase())) {
-    const run = command.toLowerCase() === 'poll' ? runPollCommand : runDebateCommand;
+  const command = (rawArgs[0] || 'help').toLowerCase();
+  const commands = new Map([['poll', runPollCommand], ['debate', runDebateCommand], ['activity', runActivityCommand]]);
+  if (commands.has(command)) {
+    const run = commands.get(command);
     const result = run(rawArgs.slice(1));
     console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     return;
@@ -122,7 +126,7 @@ async function main() {
   const orchestrator = new CouncilOrchestrator({ herdr });
   const jobManager = new JobManager({ herdr, cwd: process.cwd() });
 
-  switch (command.toLowerCase()) {
+  switch (command) {
     case 'team': {
       const [action = 'help', member] = flags._;
       if (action === 'help') {

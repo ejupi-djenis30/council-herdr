@@ -2,11 +2,11 @@
 
 <img src="herdr/mods/council/icons/logo.svg" width="48" height="48" alt="" align="right">
 
-Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Open **Council** in the Herdr sidebar to find polls, delegations, debate threads, and formal reviews.
+Follow the work of your agents, coordinate a handoff, and record decisions. Open **Council** in the Herdr sidebar to see workspace activity, polls, delegations, debate threads, formal reviews, and Team roles.
 
-[Install](#install) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
+[Install](#install) · [Workspace activity](#workspace-activity) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
 
-![Council in Herdr Desktop showing a rollout poll, its vote breakdown, and agent responses](herdr/preview.png)
+![Council Workspace in Herdr Desktop, with a decision desk and runs grouped by attention, activity, and ready results](herdr/screenshots/workspace.png)
 
 | Open from the sidebar | Track participation | Follow delegations | Inspect formal reviews |
 | --- | --- | --- | --- |
@@ -123,6 +123,14 @@ Set `--timeout <seconds>` to cover the entire job, including worker startup and 
 The CLI and MCP `status` and `result` responses distinguish `timed_out`, `blocked`, and `uncertain` in the `outcome` field. The Desktop Delegations tab shows the same outcomes and recovery guidance. A timed-out job may leave its agent working. Inspect the participant and worker addresses from `status` with `hc get` and `hc read` before starting another job. A new job after uncertain delivery requires an explicit start after the original deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
 
 For an adopted terminal, `participant.reportedApp` records the app Herdr reported at adoption when available. Use that field to identify the app for a borrowed job. `participant.agent` records the launch-agent setting.
+
+## Workspace activity
+
+Open **Council → Workspace** to see in-flight runs, issues requiring attention, saved results, and decisions from the focused local project. Pin a folder to keep it in view. Drill into a delegation to see delivery, capture, and shutdown milestones, navigate Team handoffs, or add a progress update.
+
+**Plan** reads the project’s optional `PLAN.md` and shows its declared tasks, dependencies, and decisions alongside matching Git paths and reported updates. **Changes** shows working-tree paths, worktrees, and recent commits. Council labels what it recorded, what an agent reported, and what Git observed. [Workspace guide and plan format](docs/workspace-activity.md)
+
+Use `council activity` or `council_activity` to read the same workspace overview. Attach a note with `council activity report` or `council_report_progress`.
 
 ## On-demand team roles
 

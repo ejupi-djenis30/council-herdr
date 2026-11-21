@@ -6,7 +6,9 @@ Council is a native collaboration panel for an active Herdr workspace. Ask its a
 
 ## What you see
 
-The **Council** entry in the sidebar uses a purple conversation mark and opens a native menu for **Polls**, **Delegations**, **Debate**, **Reviews**, and **Team**. Select **All local spaces** to include projects from other open spaces and their terminal folders. Lists show the project that produced each record. Details use side-by-side cards on wider windows and stack on narrower windows.
+The **Council** entry in the sidebar uses a purple conversation mark and opens a native menu for **Workspace**, **Polls**, **Delegations**, **Debate**, **Reviews**, and **Team**. Select **All local spaces** in the record lists to include projects from other open spaces and their terminal folders. Details use side-by-side cards on wider windows and stack on narrower windows.
+
+**Workspace** follows the focused local terminal's folder, with explicit folder pinning in spaces that contain multiple projects. Its Runs view links to Council jobs and pending decisions. Plan reads stable headings, task checkboxes and dependencies from an optional `PLAN.md`. Changes shows observed Git paths, worktrees and recent commits. Delegations show recorded milestones, separate reported updates and links between related Team calls. Add updates in a run detail or with the activity CLI/MCP tools.
 
 ## How it behaves
 

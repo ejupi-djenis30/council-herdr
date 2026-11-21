@@ -7,7 +7,7 @@ description: Select a Council workflow in Herdr, respond to a Council readiness 
 
 ## Choose the operation
 
-The first word after the Council skill mention selects the workflow. Accept **delegate**, **review**, **council**, **team**, **status**, **result**, **doctor**, **poll**, and **debate**. An explicit operation in plain language works too. Pass the mode explicitly when the tool accepts a mode field. If the invocation only names Council or leaves the intended workflow ambiguous, show the matching choices and ask which to run before launching agents. An explicit Council readiness notice or participation assignment follows the relevant instructions below.
+The first word after the Council skill mention selects the workflow. Accept **delegate**, **review**, **council**, **team**, **activity**, **status**, **result**, **doctor**, **poll**, and **debate**. An explicit operation in plain language works too. Pass the mode explicitly when the tool accepts a mode field. If the invocation only names Council or leaves the intended workflow ambiguous, show the matching choices and ask which to run before launching agents. An explicit Council readiness notice or participation assignment follows the relevant instructions below.
 
 | Invocation | Operation |
 | --- | --- |
@@ -16,6 +16,7 @@ The first word after the Council skill mention selects the workflow. Accept **de
 | `$council council "Decide the migration strategy"` | Convene an author, skeptic and simplifier with `council_convene` and `mode: council`. CLI: `council convene --mode council --task ...`. |
 | `$council team call qa "Check the migration plan" --session qa-1` | Call the configured Team role `qa`. Use the `council-team` skill. |
 | `$council status --session qa-1` / `$council result --session qa-1` | Inspect the existing job with `council_session_status` / `council_result`. CLI: `council status` / `council result` with the same session. |
+| `$council activity` / `$council activity --session qa-1` | Read project or run activity through `council_activity` or the matching CLI command. Use `council_report_progress` for an explicit report. |
 | `$council status` / `$council doctor` | Inspect Herdr terminals or the environment. Use `council_status` or the matching CLI command. |
 | `$council poll show <id>` / `$council debate show <id>` | Inspect the advisory poll or Desktop discussion in its project. Use the matching tool or CLI command. |
 
@@ -95,6 +96,7 @@ Use the poll ID and project folder from the invitation. Read its options and con
 - Cleanup only completed terminals created by the workflow. Preserve recoverable agents beyond orchestrator exit; never automatically dismiss borrowed/user terminals.
 - Present findings, dissent, authorization state and concrete next actions. Persist provisional reports under `validation/`; approved reports go to `reports/`.
 - Tally and digest checks are mechanical, not an agent synthesis, signature or endorsement.
+- In an assigned delegation, a short handoff or blocker can go in `council_report_progress` with the session ID. Include a real `PLAN.md` component ID when applicable. Treat notes as reported context and rely on the recorded outcome for completion.
 
 ## Reply to a Desktop debate invitation
 

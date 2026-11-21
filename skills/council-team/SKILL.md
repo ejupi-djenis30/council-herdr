@@ -16,3 +16,5 @@ $council-team set qa --agent claude --role "QA reviewer" --reports-to lead
 - `set <member>`: use `council team set` in the selected project only when the user asks to configure the role. When editing, read the existing profile and carry forward its agent, role, model, access, responsibilities and manager unless the user asked to change them. The command saves a complete profile.
 
 Read `hc --skill` before launching or steering terminals. A Team turn starts a managed process. If you are a Team member and have delegated all remaining work, include called session IDs and any unresolved work in a final handoff, then end the turn. Ask the teammate to explicitly call your role once they have something actionable. Council archives completed results and shuts down the process after verifying completion. Use the same project for status and result retrieval.
+
+Use `council_activity` with a session ID to follow its timeline and related calls. If you have a progress update or blocker for the operator, use `council_report_progress` on your assigned session when available.

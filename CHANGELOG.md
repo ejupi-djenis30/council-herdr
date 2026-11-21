@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.4.0
+
+- Open a native Workspace view for active runs, decisions, declared plans, Team handoffs, and local Git changes.
+- Record a delegation timeline and attach progress, blocker, and handoff notes from Desktop, CLI, or MCP.
+- Read stable components and dependencies from PLAN.md and highlight observed Git paths beside their declared tasks.
+- Keep Workspace scoped to the owning project when a terminal enters a subfolder, with exact folder pinning and a return path from run and decision details.
+- Group plan components by dependency order, surface read issues, and make progress updates safe to retry.
+
 ## 3.3.0
 
 - Add dedicated skills for single-agent delegation, formal review, and on-demand Team roles.

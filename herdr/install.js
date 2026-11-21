@@ -23,7 +23,8 @@ const legacy = {
   'poll-view.js': 'd43e5ceb1269ced3636102c710eacced220b7c2f1d45aa83287ad8ab1c5925bd'
 };
 const files = [
-  'mod.json', 'components.js', 'delegation-view.js', 'discussion-view.js', 'navigation.js', 'poll-text.js', 'poll-view.js', 'team-view.js', 'main.js',
+  'mod.json', 'components.js', 'delegation-view.js', 'discussion-view.js', 'navigation.js', 'poll-text.js', 'poll-view.js', 'team-view.js', 'workspace-view.js', 'main.js',
+  'runtime/activity.mjs', 'runtime/activity-command.mjs', 'runtime/activity-git.mjs', 'runtime/activity-log.mjs', 'runtime/activity-plan.mjs',
   'runtime/alignment.mjs', 'runtime/council.mjs', 'runtime/debate-command.mjs', 'runtime/debate-room.mjs', 'runtime/delegations.mjs', 'runtime/desktop.mjs',
   'runtime/discussion.mjs', 'runtime/invitations.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs', 'runtime/wait-alignment.mjs',
   'runtime/polls.mjs', 'runtime/store-files.mjs', 'runtime/team.mjs',
