@@ -40,13 +40,15 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 
 In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. You can also open a thread without invitations and add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
 
+From a debate, **Create poll** pre-fills the question and context. Edit them, select recipients, and open the poll in the debate's project. Both views link to each other. Use **Close with decision** to record the decision, its owner, and the next step. The closed thread stays readable with those fields and its linked polls. The CLI and MCP can read the recorded decision.
+
 The invitation queue is saved before the worker starts. The worker runs in Herdr after the panel closes. If it stops, Council resumes pending deliveries when you reopen its panel in the original space, within the original 15-minute window. The panel checks for interrupted workers while open. An invitation marked **Delivery uncertain** needs a check in the agent's terminal. Earlier queues without a saved space remain visible for manual inspection.
 
 ## Agent alignment
 
 Agents register readiness through `council_alignment` using the current Council skill. Setup notices reach unknown agents before Council shares any task, poll ID or debate ID. Receipts apply to the current Herdr terminal and expire after eight hours. A reported setup issue stays visible in the invitation. See [Council host setup](docs/alignment.md) for configuring and refreshing a specific agent.
 
-**Debate** also shows saved Council and review proposals, replies, and submitted ballots in chronological order. The view labels terminal captures and drafts and links to the formal review. **Reviews** shows submitted direct ballots as they arrive and displays the saved tally and verdict when available.
+**Debate** also shows saved Council and review proposals, replies, and submitted ballots in chronological order. The view labels terminal captures and drafts and links to the formal review. In **Reviews** and the formal thread, a badge on each direct ballot shows whether its SHA-256 matches the recorded proposal for that round. **Reviews** displays the saved tally and verdict when available.
 
 ### Open or respond to a poll from an agent
 
@@ -66,7 +68,7 @@ Use `poll track <poll-id> --voter <id> --label "Reviewer"` and `poll untrack <po
 
 ### Data and permissions
 
-The panel reads Council records under `.agent_workspace/` in the local projects in scope. Poll actions write advisory events under `.agent_workspace/.polls/` in the poll's original project. Poll writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses the local clipboard for invitations and handoffs.
+The panel reads Council records under `.agent_workspace/` in the local projects in scope. Poll actions write advisory events under `.agent_workspace/.polls/` in the poll's original project. Poll and debate writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses the local clipboard for invitations and handoffs.
 
 ## Available workflows
 
@@ -121,6 +123,23 @@ Set `--timeout <seconds>` to cover the entire job, including worker startup and 
 The CLI and MCP `status` and `result` responses distinguish `timed_out`, `blocked`, and `uncertain` in the `outcome` field. The Desktop Delegations tab shows the same outcomes and recovery guidance. A timed-out job may leave its agent working. Inspect the participant and worker addresses from `status` with `hc get` and `hc read` before starting another job. A new job after uncertain delivery requires an explicit start after the original deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
 
 For an adopted terminal, `participant.reportedApp` records the app Herdr reported at adoption when available. Use that field to identify the app for a borrowed job. `participant.agent` records the launch-agent setting.
+
+## On-demand team roles
+
+Open **Council → Team** in a local project space and add named members. Give each one a role and choose its agent, project access and optional responsibilities. Codex and Claude also accept a specific model ID. Choose **Reports to** if a member has a manager. Council checks that the reporting lines are acyclic and includes them in each role's task brief. Role titles and reporting lines leave formal review and voting rules unchanged.
+
+Use the Council CLI inside the project's Herdr space or the matching MCP server to start a turn. The same model can fill several roles. For example, using the installed CLI:
+
+```bash
+council team set lead --agent codex --role "Delivery lead"
+council team set qa --agent claude --role "QA reviewer" --reports-to lead
+council team call lead --session rollout-plan-1 --task "Plan the rollout and ask QA to review its risks."
+council result --session rollout-plan-1
+```
+
+Team members use `council_team_list` and `council_team_call` to delegate work to a named teammate. A member that has handed off its remaining work ends its turn immediately. Council saves the result, confirms the model process has terminated, and shows **Off**. The called teammate can keep working independently and can explicitly call the first role when it has something to report. A new call starts a fresh process and points it to the archived handoff. Use a new session ID for a new turn, and reuse the same ID and options to reconnect.
+
+Calls for a role already in use wait for its previous process to exit within the original deadline. Incomplete work stays available for inspection. Use **Team → Latest turn** to inspect the delivery and the saved terminal capture in **Delegations**. The power-off lifecycle applies to processes started by Team. Team calls use the same host setup and readiness check as other Council jobs. [Host setup](docs/alignment.md)
 
 ## Results and approvals
 

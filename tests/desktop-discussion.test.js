@@ -1,16 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { AgentWorkspace } from '../lib/workspace.js';
 import { desktopRequest } from '../herdr/mods/council/runtime/desktop.mjs';
-import { inviteReadyAgent, readInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
+import { inviteReadyAgent, readInvitations, sendInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
 import { alignmentKey, alignmentLabel } from '../herdr/mods/council/runtime/alignment.mjs';
 
 const cli = fileURLToPath(new URL('../bin/council.js', import.meta.url));
+const runtime = fileURLToPath(new URL('../herdr/mods/council/runtime/council.mjs', import.meta.url));
+const run = promisify(execFile);
 
 function project(t) {
   const path = mkdtempSync(join(tmpdir(), 'council discussion '));
@@ -126,6 +129,113 @@ test('new Desktop debates accept replies from the CLI, MCP, and Desktop in their
   assert.equal(read.messages.length, 4);
   assert.equal(updated.messages.find(message => message.body === 'Keep both on the calendar.').author, 'operator');
   assert.equal(desktopRequest(cwd, 'reviews', { id: debate.id }).review, null);
+});
+
+test('Review and Debate compare each direct ballot with the exact proposal handed to the round', t => {
+  const cwd = project(t);
+  const workspace = new AgentWorkspace(cwd);
+  const id = 'rollout-review';
+  const { sessionDir, sessionMeta } = workspace.initSession({ sessionId: id, mode: 'review', task: 'Review the rollout',
+    participants: [{ name: 'review-author', role: 'author', agent: 'claude' }] });
+  const proposal = workspace.writeArtifact(sessionDir, {
+    phase: 'proposal', author: 'review-author', agent: 'claude', content: 'First proposal.\r\n',
+    metadata: { source: 'direct_artifact' }
+  });
+  const targetPath = join(sessionDir, 'task', 'proposal-target.json');
+  writeFileSync(targetPath, JSON.stringify({ sessionId: id, createdAt: sessionMeta.createdAt, round: 1, sha256: proposal.sha256 }));
+  const different = 'a'.repeat(64);
+  for (const [voter, targetArtifactSha256, round = 1] of [
+    ['matching', proposal.sha256], ['different', different], ['missing', ''], ['invalid', 'bad-digest'],
+    ['other-round', proposal.sha256, 2]
+  ]) workspace.castBallot(sessionDir, { voter, agent: 'codex', role: 'reviewer', vote: 'approve', score: 8, round, targetArtifactSha256 });
+
+  writeFileSync(proposal.artifactPath, 'The artifact was edited.');
+  const expected = { matching: 'match', different: 'mismatch', missing: 'missing', invalid: 'invalid', 'other-round': 'unavailable' };
+  const matches = ballots => Object.fromEntries(ballots.map(ballot => [ballot.voter, ballot.proposalMatch]));
+  const review = desktopRequest(cwd, 'reviews', { id }).review;
+  assert.equal(review.proposal.sha256, proposal.sha256);
+  assert.equal(review.proposal.source, 'handoff');
+  assert.equal(review.status, 'pending');
+  assert.equal(review.tally, null);
+  assert.deepEqual(matches(review.ballots), expected);
+  assert.deepEqual(matches(desktopRequest(cwd, 'debates', { id }).debate.messages
+    .filter(message => message.ballot).map(message => message.ballot)), expected);
+
+  unlinkSync(targetPath);
+  const withoutTarget = desktopRequest(cwd, 'reviews', { id }).review;
+  assert.equal(withoutTarget.proposal, null);
+  assert.equal(matches(withoutTarget.ballots).matching, 'unavailable');
+  writeFileSync(join(sessionDir, 'validation', 'verdict.json'), JSON.stringify({
+    sessionId: id, mode: 'review', tally: { passed: false }, validation: {
+      $schema: 'council.validation/v1', round: 1, verdict: 'vetoed', validatedAt: new Date().toISOString(),
+      expectedSha256: proposal.sha256, verifiedSha256: different, artifactIntegrity: false, mutationDetected: true
+    }
+  }));
+  const saved = desktopRequest(cwd, 'reviews', { id }).review;
+  assert.equal(saved.proposal.source, 'saved');
+  assert.deepEqual(matches(saved.ballots), expected);
+  assert.equal(saved.status, 'vetoed');
+});
+
+test('a linked poll and a closed debate keep the source, decision and queued delivery in their original project', async t => {
+  const operator = project(t);
+  const cwd = project(t);
+  const selection = { space: 'sp42', recipients: [{ address: 't17', label: 'Reviewer', createdAt: 17 }] };
+  const debate = desktopRequest(cwd, 'debate-create', { ...selection, question: 'Decide the pilot scope' });
+  const legacyId = '00000000-0000-4000-8000-000000000010';
+  const legacyDir = join(cwd, '.agent_workspace', debate.id, 'messages');
+  writeFileSync(join(legacyDir, `${legacyId}.json`), JSON.stringify({
+    id: legacyId, sessionId: debate.id, author: 't17', body: 'Legacy reply',
+    timestamp: debate.createdAt
+  }));
+  const pollInput = { ...selection, question: 'Which pilot?', mode: 'open', sourceDebateId: debate.id };
+  assert.throws(() => desktopRequest(operator, 'create', pollInput), /not found/);
+  const poll = desktopRequest(cwd, 'create', pollInput);
+  assert.equal(command(cwd, ['poll', 'show', poll.id]).sourceDebateId, debate.id);
+  assert.deepEqual(desktopRequest(cwd, 'debates', { id: debate.id }).debate.polls.map(item => item.id), [poll.id]);
+  assert.deepEqual(desktopRequest(operator, 'pending-invitations', { projects: [cwd, cwd], space: selection.space })
+    ['pending-invitations'].map(item => item.id).sort(), [debate.id, poll.id].sort());
+
+  const input = { id: debate.id, decision: 'Start with one team', owner: 'Release lead', nextStep: 'Confirm rollback' };
+  assert.throws(() => desktopRequest(cwd, 'debate-close', { ...input, owner: '' }), /Owner/);
+  const closed = desktopRequest(cwd, 'debate-close', input);
+  assert.equal(closed.status, 'closed');
+  assert.equal(closed.decision.closedAt, closed.closedAt);
+  assert.equal(closed.decision.owner, input.owner);
+  assert.equal(closed.decision.nextStep, input.nextStep);
+  assert.equal(closed.messages[0].body, 'Legacy reply');
+  assert.equal(closed.invitations[0].state, 'cancelled');
+  assert.equal(closed.polls[0].id, poll.id);
+  assert.deepEqual(desktopRequest(cwd, 'debate-close', input).decision, closed.decision);
+  assert.throws(() => desktopRequest(cwd, 'debate-close', { ...input, owner: 'Another owner' }), /recorded decision/);
+  assert.throws(() => desktopRequest(cwd, 'debate-reply', { id: debate.id, text: 'Late reply' }), /closed/);
+  const fromCli = command(cwd, ['debate', 'show', debate.id]);
+  const fromMcp = invoke(operator, 'council_debate_read', { project: cwd, debateId: debate.id });
+  assert.deepEqual(fromCli.decision, closed.decision);
+  assert.deepEqual(fromMcp.decision, closed.decision);
+  await sendInvitations(cwd, runtime, { id: debate.id }, { events: () => assert.fail('closed debate started a feed') });
+  assert.deepEqual(desktopRequest(operator, 'pending-invitations', { projects: [cwd], space: selection.space })
+    ['pending-invitations'], [{ id: poll.id, project: cwd }]);
+  assert.equal(desktopRequest(cwd, 'vote', { id: poll.id, answer: 'Use the existing pilot' }).responseCount, 1);
+});
+
+test('concurrent replies and competing closes have a single ordered outcome', async t => {
+  const cwd = project(t);
+  const debate = desktopRequest(cwd, 'debate-create', { question: 'Record one decision' });
+  const call = async (action, fields) => JSON.parse((await run(process.execPath,
+    [runtime, 'desktop', action, JSON.stringify({ id: debate.id, ...fields })], { cwd })).stdout);
+  const attempts = await Promise.allSettled([
+    ...Array.from({ length: 8 }, (_, i) => call('debate-reply', { text: `Reply ${i}` })),
+    call('debate-close', { decision: 'Start pilot', owner: 'A', nextStep: 'Measure latency' }),
+    call('debate-close', { decision: 'Hold pilot', owner: 'B', nextStep: 'Review burn-in' })
+  ]);
+  const accepted = attempts.slice(0, 8).flatMap((result, i) => result.status === 'fulfilled' ? [`Reply ${i}`] : []);
+  const closes = attempts.slice(8).filter(result => result.status === 'fulfilled');
+  assert.equal(closes.length, 1);
+  for (const result of attempts.filter(r => r.status === 'rejected')) assert.match(result.reason.stderr, /closed|recorded decision/);
+  const closed = desktopRequest(cwd, 'debates', { id: debate.id }).debate;
+  assert.deepEqual(closed.decision, closes[0].value.decision);
+  assert.deepEqual(closed.messages.map(message => message.body).sort(), accepted.sort());
 });
 
 test('dispatch defers busy and blocked terminals and never retries ambiguous delivery', async () => {

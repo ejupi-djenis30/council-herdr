@@ -82,6 +82,9 @@ export function readDelegation(base, id, selected) {
     remainingSec: ['starting', 'attempting', 'deliberating'].includes(status)
       ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null,
     workerAddress: field(job.worker?.address),
+    ...(participant?.team ? { team: {
+      role: field(participant.team.role), power: field(participant.power), error: field(participant.powerError)
+    } } : {}),
     wait: {
       reason: field(job.waitDetails?.reason),
       status: field(job.waitDetails?.status),

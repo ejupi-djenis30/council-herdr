@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.2.0
+
+- Configure explicit project team roles, optional reporting lines and model selection in Desktop and the CLI.
+- Call named team members through CLI or MCP. Save each completed handoff and stop the model process until the next explicit call.
+- Show whether each formal ballot targets the recorded proposal in Reviews and Debate.
+- Create linked polls from a debate and close discussions with a recorded decision, owner, and next step.
+
 ## 3.1.0
 
 - Select which agents to invite when opening a Desktop poll or debate, with zero recipients selected by default.

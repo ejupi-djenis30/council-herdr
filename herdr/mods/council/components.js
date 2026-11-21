@@ -7,7 +7,7 @@ export function label(value, size = 13, color) {
 }
 
 export function glyph(name, size = 15) {
-  return svg(`mods/council/icons/${name === 'debates' ? 'people' : name}.svg`).size(size).flex_shrink_0();
+  return svg(`mods/council/icons/${name === 'debates' || name === 'team' ? 'people' : name}.svg`).size(size).flex_shrink_0();
 }
 
 export function brandMark(size = 36) {
@@ -100,6 +100,7 @@ export function reviewStatus(status) {
   const names = {
     approved: 'Approved',
     archived: 'Archived',
+    closed: 'Closed',
     open: 'Open',
     pending: 'Awaiting verdict',
     provisional: 'Provisional',

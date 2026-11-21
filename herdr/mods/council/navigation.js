@@ -7,7 +7,8 @@ export const sections = [
   { id: 'polls', title: 'Polls', description: 'Collect votes and record decisions' },
   { id: 'delegations', title: 'Delegations', description: 'Follow agent tasks and their results' },
   { id: 'debates', title: 'Debate', description: 'Read the conversation between agents' },
-  { id: 'reviews', title: 'Reviews', description: 'Inspect verdicts and direct ballots' }
+  { id: 'reviews', title: 'Reviews', description: 'Inspect verdicts and direct ballots' },
+  { id: 'team', title: 'Team', description: 'Set roles and see which models are active' }
 ];
 
 function openSection(id) {

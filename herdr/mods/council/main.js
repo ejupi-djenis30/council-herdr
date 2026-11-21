@@ -7,6 +7,7 @@ import { pollParticipants, pollResults } from './poll-view.js';
 import { delegationStatus, delegationView } from './delegation-view.js';
 import { ballotBody, discussionView } from './discussion-view.js';
 import { launcher, menu, sections } from './navigation.js';
+import { teamEditor, teamView } from './team-view.js';
 
 const modes = [
   ['choice', 'Options'],
@@ -225,11 +226,13 @@ export default class Council extends View {
     this.recovering = true;
     cx.spawn(async () => {
       try {
-        const { ids } = await this.request(space.folder, 'pending-invitations', { space: space.id });
-        for (const id of ids) {
+        const pending = await this.request(space.folder, 'pending-invitations', {
+          space: space.id, projects: localProjects(space, true)
+        });
+        for (const { id, project } of pending['pending-invitations']) {
           if (localSpace()?.id !== space.id) break;
           // A running worker or a temporary dispatch error will be reconciled on the next pass.
-          try { await this.launchInvitations(space.folder, id); } catch {}
+          try { await this.launchInvitations(project, id); } catch {}
         }
       } catch {
         // A failed scan leaves the persisted queue available to the next pass.
@@ -264,8 +267,18 @@ export default class Council extends View {
           }
         }
         if (epoch !== this.epoch) return;
+        if (action === 'team-set') {
+          this.data = record;
+          this.clearForm();
+          return;
+        }
+        if (action === 'create' && this.tab !== 'polls') {
+          this.tab = 'polls';
+          this.pollSection = 'results';
+          this.clearFilters();
+        }
         this.selected = { id: record.id, project: folder };
-        this.data = { ...this.data, [section]: record };
+        this.data = { [section]: record };
         this.error = deliveryError;
         if (action === 'debate-reply') this.reply.set_value('');
         this.clearForm();
@@ -317,16 +330,37 @@ export default class Council extends View {
     return `Opened by ${agent?.program?.name ?? poll.createdBy}`;
   }
 
-  startCreate(cx) {
-    const debate = this.tab === 'debates';
-    this.setForm(debate ? 'create-debate' : 'create', { question: '', context: '' }, {
-      recipients: new Map(), mode: 'choice', options: []
+  startCreate(cx, source) {
+    const debate = this.tab === 'debates' && !source;
+    this.setForm(debate ? 'create-debate' : 'create', {
+      question: source?.task ?? '',
+      context: source?.messages.find(message => message.id === 'opening')?.body ?? ''
+    }, {
+      recipients: new Map(), mode: 'choice', options: [], sourceDebateId: source?.id
     });
     if (!debate) {
       this.addDraftOption();
       this.addDraftOption();
     }
     cx.notify();
+  }
+
+  renderDebateClose(t, debate) {
+    const form = this.form;
+    return panel(t)
+      .child(cardHeading(t, 'Close with a decision', 'check'))
+      .child(field(t, 'Decision', form.decision))
+      .child(field(t, 'Owner', form.owner))
+      .child(field(t, 'Next step', form.nextStep))
+      .child(h_flex().gap(6).justify_end()
+        .child(button(t, 'cancel-debate-close', 'Cancel', (_e, cx) => {
+          this.clearForm();
+          this.error = '';
+          cx.notify();
+        }, 'normal', this.saving))
+        .child(button(t, 'save-debate-close', 'Close debate', (_e, cx) => this.save(cx, 'debate-close', {
+          id: debate.id, decision: form.decision.value(), owner: form.owner.value(), nextStep: form.nextStep.value()
+        }), 'primary', this.saving, 'check')));
   }
 
   selectedRecipients() {
@@ -376,7 +410,7 @@ export default class Council extends View {
     const form = this.form;
     const debate = form.kind === 'create-debate';
     const fields = panel(t)
-      .child(label(debate ? 'New debate' : 'New poll', 16, t.foreground).font_semibold())
+      .child(label(debate ? 'New debate' : form.sourceDebateId ? 'New poll from debate' : 'New poll', 16, t.foreground).font_semibold())
       .child(field(t, debate ? 'Topic' : 'Question', form.question))
       .child(field(t, debate ? 'Opening message (optional)' : 'Context (optional)', form.context));
     if (!debate) fields.child(label('Response format', 11, t.muted))
@@ -405,6 +439,7 @@ export default class Council extends View {
         question: form.question.value(),
         context: form.context.value(),
         mode: form.mode,
+        sourceDebateId: form.sourceDebateId,
         options: debate || form.mode === 'open' ? [] : form.options.map(input => input.value()).filter(value => value.trim())
       }), 'primary', this.saving)));
   }
@@ -474,6 +509,8 @@ export default class Council extends View {
     if (editing) return v_flex().w_full().gap(10).child(header).child(this.renderPollForm(t, poll));
 
     const actions = h_flex().gap(6).flex_wrap();
+    if (poll.sourceDebateId) actions.child(button(t, 'poll-debate-source', 'View debate', (_e, cx) =>
+      this.navigate(cx, 'debates', { id: poll.sourceDebateId, project: this.selected.project }), 'normal', this.saving, 'debates'));
     if (!poll.closedAt) {
       actions.child(button(t, 'respond', mine ? 'Edit response' : 'Respond', (_e, cx) => {
         this.setForm('vote', { answer: mine?.answer ?? '', note: mine?.note ?? '' }, {
@@ -528,8 +565,8 @@ export default class Council extends View {
     }
     if (validation?.rationale) card.child(label(validation.rationale, 12, t.muted));
     for (const condition of validation?.conditions ?? []) card.child(label(`• ${condition}`, 12, t.foreground));
-    if (validation?.verifiedSha256) card.child(h_flex().child(button(t, 'copy-sha', 'Copy proposal SHA', (_e, cx) =>
-      this.copy(cx, validation.verifiedSha256, 'Proposal SHA copied.'), 'normal', false, 'copy')));
+    if (review.proposal?.sha256) card.child(h_flex().child(button(t, 'copy-sha', 'Copy proposal SHA', (_e, cx) =>
+      this.copy(cx, review.proposal.sha256, 'Proposal SHA copied.'), 'normal', false, 'copy')));
     if (review.reportPath) card.child(h_flex().child(button(t, 'copy-report', 'Copy report path', (_e, cx) =>
       this.copy(cx, review.reportPath, 'Report path copied.'), 'normal', false, 'copy')));
     const ballots = review.ballots.length ? review.ballots : (tally?.sortedBallots ?? []).map(ballot => ({
@@ -626,6 +663,17 @@ export default class Council extends View {
     if (space.machine) return panel(t).child(label('Council is available in local spaces.', 13, t.muted));
     if (space.folder !== this.folder || (!this.data && !this.readError)) return label('Loading project…', 12, t.muted);
     if (!this.data && this.readError) return div();
+    if (this.tab === 'team') {
+      if (this.form?.kind === 'team') return teamEditor(t, this.data, this.form, {
+        saving: this.saving,
+        save: (cx, profile) => this.save(cx, 'team-set', profile),
+        cancel: cx => { this.clearForm(); cx.notify(); }
+      });
+      return teamView(t, this.data, {
+        edit: (cx, member) => this.editTeamMember(cx, member),
+        open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.folder })
+      });
+    }
     if (['create', 'create-debate'].includes(this.form?.kind)) return this.renderCreate(t, space);
     if (this.selected) {
       const detail = this.data?.[this.tab.slice(0, -1)];
@@ -637,20 +685,41 @@ export default class Council extends View {
         openReview: (_e, cx) => this.navigate(cx, 'reviews', this.selected),
         copy: (cx, value) => this.copy(cx, value, 'Contribution path copied.'),
         delivery: deliveryView(t, detail.invitations),
-        composer: detail.interactive ? h_flex().w_full().gap(8).items_center()
+        startPoll: (_e, cx) => this.startCreate(cx, detail),
+        startClose: (_e, cx) => {
+          this.setForm('close-debate', { decision: '', owner: '', nextStep: '' });
+          cx.notify();
+        },
+        openPoll: (cx, id) => this.navigate(cx, 'polls', { id, project: this.selected.project }),
+        copyDecision: (cx, text) => this.copy(cx, `${text}\nProject: ${this.selected.project}`, 'Decision copied.'),
+        closing: this.form?.kind === 'close-debate' && !detail.closedAt ? this.renderDebateClose(t, detail) : null,
+        saving: this.saving,
+        composer: detail.interactive && !detail.closedAt && !this.form ? h_flex().w_full().gap(8).items_center()
           .child(div().flex_1().min_w_0().child(input(t, this.reply)))
           .child(button(t, 'post-reply', 'Reply', (_e, cx) => this.save(cx, 'debate-reply', {
             id: detail.id, text: this.reply.value()
           }), 'primary', this.saving || !this.reply.value().trim())) : null
       });
+      const teamTerminal = detail.team && detail.team.power !== 'off'
+        ? terminals().find(terminal => terminal.address === detail.address && terminal.state === 'live') : null;
       return delegationView(t, detail, {
         wide: this.wide,
-        terminal: this.visibleAgents(space).find(agent => agent.address === detail.address),
-        focus: (cx, address) => this.focusAgent(cx, address),
+        terminal: teamTerminal ?? this.visibleAgents(space).find(agent => agent.address === detail.address),
+        focus: (cx, address) => teamTerminal ? run('terminal.peek', { terminal: address }) : this.focusAgent(cx, address),
         copy: (cx, value, title) => this.copy(cx, value, title)
       });
     }
     return this.renderList(t, space);
+  }
+
+  editTeamMember(cx, member) {
+    this.setForm('team', {
+      id: '', role: member?.role ?? '', model: member?.model ?? '', instructions: member?.instructions ?? ''
+    }, {
+      memberId: member?.id ?? null, agent: member?.agent ?? 'codex',
+      reportsTo: member?.reportsTo ?? '', permission: member?.permission ?? 'read'
+    });
+    cx.notify();
   }
 
   render() {
@@ -682,6 +751,8 @@ export default class Council extends View {
           .when(Boolean(space?.folder), node => node.child(label(space.name || space.folder, 12, t.muted).truncate())))
         .when(current && ['polls', 'debates'].includes(this.tab) && !this.selected && !this.form, node =>
           node.child(button(t, 'new', this.tab === 'polls' ? 'New poll' : 'New debate', (_e, cx) => this.startCreate(cx), 'primary', false, 'add')))
+        .when(current && this.tab === 'team' && Boolean(this.data) && !this.form, node =>
+          node.child(button(t, 'add-member', 'Add member', (_e, cx) => this.editTeamMember(cx), 'primary', false, 'add')))
         .when(current && Boolean(this.selected), node =>
           node.child(button(t, 'back', `All ${this.tab}`,
             (_e, cx) => this.navigate(cx, this.tab), 'normal', this.saving, 'back')))

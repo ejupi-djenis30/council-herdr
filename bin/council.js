@@ -7,10 +7,12 @@ import { setupAlignment } from '../lib/alignment-setup.js';
 import { alignmentOf, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
 import { runDebateCommand } from '../herdr/mods/council/runtime/debate-command.mjs';
 import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
+import { TeamStore } from '../herdr/mods/council/runtime/team.mjs';
+import { callTeamMember } from '../lib/team.js';
 
 function printHelp() {
   console.log(`
-Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.1.0)
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.2.0)
 
 USAGE:
   council <command> [options]
@@ -30,6 +32,7 @@ COMMANDS:
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
   poll help                     Manage advisory project polls and submit responses
   debate help                   Read or reply to a Council Desktop debate
+  team help                     Configure named roles and call on-demand team members
   alignment status [target]     Inspect an agent's Council alignment
   alignment decline             Report missing Council setup from your terminal
   alignment setup --host ... --project ...  Preview project setup. Use --apply to write it.
@@ -119,6 +122,27 @@ async function main() {
   const jobManager = new JobManager({ herdr, cwd: process.cwd() });
 
   switch (command.toLowerCase()) {
+    case 'team': {
+      const [action = 'help', member] = flags._;
+      if (action === 'help') {
+        console.log(`council team list
+council team set <member> --agent <codex|claude|antigravity|junie> --role <title>
+  [--model <id>] [--reports-to <member>] [--permission <read|write>] [--instructions <text>]
+council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
+        break;
+      }
+      const store = new TeamStore(process.cwd());
+      let result;
+      if (action === 'list') result = store.list();
+      else if (action === 'set') result = store.set({ id: member, agent: flags.agent, role: flags.role,
+        model: flags.model, reportsTo: flags['reports-to'], instructions: flags.instructions, permission: flags.permission });
+      else if (action === 'call') result = await callTeamMember(jobManager, { member, task: flags.task,
+        sessionId: flags.session, timeoutSec: flags.timeout === true ? NaN : flags.timeout });
+      else throw new Error('Use council team help.');
+      console.log(JSON.stringify(result, null, 2));
+      if (result.success === false) process.exitCode = 1;
+      break;
+    }
     case 'alignment': {
       const [action, target] = flags._;
       if (action === 'setup') {

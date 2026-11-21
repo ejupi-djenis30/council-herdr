@@ -116,7 +116,7 @@ function projectTargets(record, running) {
 
 function recordIsOpen(cwd, id) {
   try {
-    return id.startsWith('poll-') ? !new PollStore(cwd).show(id).closedAt : Boolean(readDebateRoom(cwd, id));
+    return id.startsWith('poll-') ? !new PollStore(cwd).show(id).closedAt : !readDebateRoom(cwd, id).closedAt;
   } catch { return false; }
 }
 
@@ -139,13 +139,14 @@ export function pendingInvitationIds(cwd, space) {
   });
 }
 
-export function readInvitations(cwd, id) {
+export function readInvitations(cwd, id, { closed = false } = {}) {
   try {
     const path = recordPath(cwd, id);
     const record = path && readQueue(path, id);
     if (!record) return null;
     const running = existsSync(`${path}.lock`) || liveClaim(dirname(path), id);
-    return projectTargets(record, running);
+    return projectTargets(record, running).map(target => closed && waiting.has(target.state)
+      ? { ...target, state: 'cancelled' } : target);
   } catch { return null; }
 }
 
@@ -197,6 +198,7 @@ export async function inviteReadyAgent({ space, address, createdAt, message, ent
     text = alignmentNotice(entry, challenge);
   }
   if (Date.now() >= deadline) return 'expired';
+  if (!stillOpen()) return 'cancelled';
   if (checking) markProbe(true);
   else markSending();
   const delivery = await command(['send', '--json', ...options, address, text], Math.min(90000, remaining()));

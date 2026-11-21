@@ -1,11 +1,12 @@
 import { readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { readDelegation } from './delegations.mjs';
-import { createDebate, replyToDebate, roomMessages, roomSchema } from './debate-room.mjs';
-import { discussionMessages, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
+import { closeDebate, createDebate, readDebate, readDebateRoom, replyToDebate, roomSchema } from './debate-room.mjs';
+import { discussionMessages, proposalReference, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
 import { pendingInvitationIds, planInvitations, prepareInvitations, readInvitations } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
+import { TeamStore } from './team.mjs';
 
 function verdictFor(dir, session) {
   const { sessionId: id } = session;
@@ -42,26 +43,31 @@ function readCouncilSession(base, id, selected, discussion, cwd) {
   const session = readDiscussionSession(dir, id);
   if (!session || (!discussion && session.mode === 'debate')) return null;
   const saved = session.mode === 'debate' ? null : verdictFor(dir, session);
-  const interactive = session.$schema === roomSchema;
+  const interactive = session.mode === 'debate' && session.$schema === roomSchema;
+  const room = interactive ? (selected ? readDebate(cwd, id) : readDebateRoom(cwd, id)) : null;
   const taskDir = join(dir, 'task');
   const task = interactive ? session.question : isDirectory(taskDir) ? readText(join(taskDir, 'task.md'), 1024 * 1024)?.trim() : null;
   const summary = {
     id, mode: session.mode, question: task?.slice(0, 220) || id, createdAt: session.createdAt,
-    status: interactive ? 'open' : session.mode === 'debate' ? 'archived' : reviewStatus(saved)
+    status: interactive ? (room.closedAt ? 'closed' : 'open') : session.mode === 'debate' ? 'archived' : reviewStatus(saved),
+    ...(room ? { closedAt: room.closedAt } : {})
   };
   if (!selected) return { summary, detail: null };
+  const proposal = proposalReference(dir, session, saved?.verdict.validation);
   const detail = { ...summary, task: task?.slice(0, 2400) || id, participants: session.participants ?? [] };
   if (discussion) {
-    const invitations = interactive ? readInvitations(cwd, id) : null;
+    const invitations = interactive ? readInvitations(cwd, id, { closed: Boolean(room.closedAt) }) : null;
     const names = new Map(invitations?.map(target => [target.address, target.label]));
-    const messages = interactive ? roomMessages(dir, session).map(message => ({ ...message, agent: names.get(message.author) }))
-      : discussionMessages(dir, session);
-    return { summary, detail: { ...detail, interactive, messages, invitations } };
+    const messages = interactive ? room.messages.map(message => ({ ...message, agent: names.get(message.author) }))
+      : discussionMessages(dir, session, proposal);
+    const polls = interactive ? new PollStore(cwd).list({ sourceDebateId: id }).polls : [];
+    return { summary, detail: { ...detail, interactive, messages, invitations, polls, decision: room?.decision ?? null } };
   }
   const reportPath = saved ? join(dir, saved.folder, 'report.md') : null;
   return { summary, detail: { ...detail,
     tally: saved?.verdict.tally ?? null, validation: saved?.verdict.validation ?? null,
-    ballots: readSubmittedBallots(dir, session), reportPath: reportPath && isFile(reportPath) ? reportPath : null
+    ballots: readSubmittedBallots(dir, session, proposal), proposal,
+    reportPath: reportPath && isFile(reportPath) ? reportPath : null
   } };
 }
 
@@ -95,6 +101,12 @@ function sessions(cwd, selected, collection, item, readRecord) {
 function projectRequest(cwd, action, args) {
   const store = new PollStore(cwd);
   switch (action) {
+    case 'team': return new TeamStore(cwd).list();
+    case 'team-set': {
+      const team = new TeamStore(cwd);
+      team.set(args);
+      return team.list();
+    }
     case 'polls': {
       if (args.id) return { poll: { ...store.show(args.id), invitations: readInvitations(cwd, args.id) } };
       return store.list();
@@ -112,11 +124,15 @@ function projectRequest(cwd, action, args) {
         return projectRequest(cwd, 'debates', { id: room.sessionId }).debate;
       }
       const participants = args.recipients === undefined ? args.participants : plan?.targets ?? [];
-      const poll = store.create({ ...args, participants, createdBy: 'operator' }, { fromPanel: true, beforePublish });
+      const sourceDebateId = args.sourceDebateId === undefined ? undefined : readDebateRoom(cwd, args.sourceDebateId).sessionId;
+      const poll = store.create({ ...args, participants, createdBy: 'operator' }, { fromPanel: true, beforePublish, sourceDebateId });
       return { ...poll, invitations: plan?.targets ?? null };
     }
     case 'debate-reply':
       replyToDebate(cwd, args.id, { author: 'operator', body: args.text }, { fromPanel: true });
+      return projectRequest(cwd, 'debates', { id: args.id }).debate;
+    case 'debate-close':
+      closeDebate(cwd, args.id, args);
       return projectRequest(cwd, 'debates', { id: args.id }).debate;
     case 'add-option': return store.addOption(args.id, args.label);
     case 'track': return store.track(args.id, args);
@@ -128,7 +144,8 @@ function projectRequest(cwd, action, args) {
 }
 
 export function desktopRequest(cwd, action, args) {
-  if (!['polls', 'reviews', 'debates', 'delegations'].includes(action) || args.id != null || !Array.isArray(args.projects)) {
+  const pendingInvites = action === 'pending-invitations';
+  if ((!pendingInvites && !['polls', 'reviews', 'debates', 'delegations'].includes(action)) || args.id != null || !Array.isArray(args.projects)) {
     return projectRequest(cwd, action, args);
   }
   const items = [];
@@ -141,6 +158,10 @@ export function desktopRequest(cwd, action, args) {
       const key = process.platform === 'win32' ? project.toLowerCase() : project;
       if (scanned.has(key)) continue;
       scanned.add(key);
+      if (pendingInvites) {
+        items.push(...pendingInvitationIds(project, args.space).map(id => ({ id, project })));
+        continue;
+      }
       const result = projectRequest(project, action, {});
       items.push(...result[action].map(item => ({ ...item, project })));
       errors.push(...result.errors.map(error => ({ ...error, project })));

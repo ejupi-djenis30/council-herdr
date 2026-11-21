@@ -51,6 +51,10 @@ node C:/path/to/council-herdr/bin/council.js result --session parser-review
 
 The MCP tools are `council_start`, `council_session_status` and `council_result`. Inspect the participant's terminal while the worker runs and retrieve the saved output when ready. Adopted agents retain their existing permissions. If delivery is uncertain, inspect the terminal and the worker before starting another task.
 
+## On-demand team turns
+
+On a named Team turn, use `council_team_list` to find a teammate and `council_team_call` to give them a brief and unique session ID. Follow your role and reporting line from your task brief. If you delegate all remaining work, record the handoff and called session IDs in your final response and end the turn immediately. Ask the teammate to explicitly call your role once they have something actionable. Council saves the result and stops your model process after a verified turn. Start each new turn with a new ID. Read archived handoffs with `council_result` or `council result --session <id>`.
+
 Set `--timeout` or MCP `timeoutSec` to cover the entire job when the default of 180 seconds is too short. Read the `outcome` and `nextAction` fields after a blocked turn, uncertain delivery, or deadline expiry. A deadline can end Council collection while the agent continues working in Herdr.
 
 ## Submission and approval

@@ -24,7 +24,7 @@ try {
     const state = alignmentOf(terminal);
     const status = terminal?.status?.state;
     if (state === 'aligned' && ['idle', 'done'].includes(status)) {
-      outcome = { state, turn: terminal.turn };
+      outcome = { state, turn: terminal.turn, pid: terminal.pid, createdMs: terminal.created_ms };
       break;
     }
     if (state === 'not_aligned' || terminal.state !== 'live' || ['blocked', 'error'].includes(status) ||

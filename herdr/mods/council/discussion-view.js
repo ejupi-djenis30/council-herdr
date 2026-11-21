@@ -1,5 +1,5 @@
 import { h_flex, v_flex } from 'gpui-base';
-import { button, label, panel, reviewStatus, statusPill } from './components.js';
+import { button, cardHeading, label, panel, reviewStatus, statusPill } from './components.js';
 
 function timeText(timestamp) {
   const date = new Date(timestamp);
@@ -8,12 +8,18 @@ function timeText(timestamp) {
 
 export function ballotBody(t, ballot) {
   const color = ballot.vote === 'approve' ? t.done : ballot.vote === 'reject' ? t.blocked : t.working;
+  const [match, matchColor] = {
+    match: ['Matches proposal', t.done],
+    mismatch: ['Different proposal digest', t.blocked],
+    missing: ['Proposal digest missing', t.working],
+    invalid: ['Invalid proposal digest', t.blocked]
+  }[ballot.proposalMatch] ?? ['Proposal match unavailable', t.muted];
   return v_flex().gap(5).w_full()
     .child(h_flex().gap(6).items_center().flex_wrap()
       .child(statusPill(t, `${ballot.vote} · ${ballot.score}/10`, color))
       .when(Boolean(ballot.round), row => row.child(label(`Round ${ballot.round}`, 11, t.muted)))
       .when(ballot.assigned === false, row => row.child(label('Unassigned voter', 11, t.muted)))
-      .when(ballot.bound === false, row => row.child(label('Proposal digest missing', 11, t.muted))))
+      .child(statusPill(t, match, matchColor)))
     .when(Boolean(ballot.rationale), col => col.child(label(ballot.rationale, 13, t.foreground)))
     .children((ballot.amendments ?? []).map(amendment => label(`• ${amendment}`, 13, t.foreground)));
 }
@@ -48,7 +54,9 @@ function post(t, message, copy) {
     .child(v_flex().flex_1().min_w_0().gap(5).child(heading).child(bubble));
 }
 
-export function discussionView(t, debate, { project, openReview, copy, delivery, composer }) {
+export function discussionView(t, debate, {
+  project, openReview, copy, delivery, composer, startPoll, startClose, openPoll, copyDecision, closing, saving
+}) {
   const header = panel(t)
     .child(h_flex().w_full().gap(8).items_center().justify_between()
       .child(statusPill(t, reviewStatus(debate.status), ['approved', 'open'].includes(debate.status) ? t.done : t.muted))
@@ -56,8 +64,33 @@ export function discussionView(t, debate, { project, openReview, copy, delivery,
     .child(label(debate.task, 18, t.foreground).font_semibold())
     .child(label(project, 11, t.muted))
     .when(Boolean(delivery), node => node.child(delivery));
+  if (debate.interactive) {
+    header.child(h_flex().gap(6).flex_wrap()
+      .child(button(t, 'start-linked-poll', 'Create poll', startPoll, 'normal', saving || Boolean(closing), 'polls'))
+      .when(!debate.closedAt, row => row.child(
+        button(t, 'start-debate-close', 'Close with decision', startClose, 'normal', saving || Boolean(closing), 'check'))));
+  }
   const body = v_flex().w_full().gap(12).child(header);
-  if (!debate.messages.length) body.child(panel(t).child(label('Waiting for replies.', 13, t.muted)));
+  if (closing) body.child(closing);
+  if (debate.decision) {
+    const { decision, owner, nextStep } = debate.decision;
+    const fields = [['Decision', decision], ['Owner', owner], ['Next step', nextStep]];
+    body.child(panel(t)
+      .child(h_flex().gap(6).justify_between().items_center().flex_wrap()
+        .child(cardHeading(t, 'Recorded decision', 'check'))
+        .child(button(t, 'copy-debate-decision', 'Copy decision', (_e, cx) => copyDecision(cx, [
+          debate.task, `Debate ID: ${debate.id}`, ...fields.map(([title, value]) => `${title}: ${value}`)
+        ].join('\n')), 'normal', false, 'copy')))
+      .children(fields.map(([title, value]) => v_flex().gap(3)
+        .child(label(title, 11, t.muted)).child(label(value, 13, t.foreground)))));
+  }
+  if (debate.polls?.length) body.child(panel(t)
+    .child(cardHeading(t, 'Linked polls', 'polls'))
+    .children(debate.polls.map(poll => h_flex().gap(8).items_center()
+      .child(label(poll.question, 13, t.foreground).flex_1())
+      .child(statusPill(t, poll.closedAt ? 'Closed' : 'Open', poll.closedAt ? t.muted : t.done))
+      .child(button(t, `open-${poll.id}`, 'View poll', (_e, cx) => openPoll(cx, poll.id), 'normal', saving)))));
+  if (!debate.messages.length) body.child(panel(t).child(label(debate.closedAt ? 'No replies were recorded.' : 'Waiting for replies.', 13, t.muted)));
   else body.children(debate.messages.map(message => post(t, message, copy)));
   if (composer) body.child(composer);
   return body;

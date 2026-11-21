@@ -68,6 +68,7 @@ export function delegationView(t, job, { wide, terminal, focus, copy }) {
       .child(label(job.id, 11, t.muted).truncate()))
     .child(label(job.task, 19, t.foreground).font_semibold())
     .when(Boolean(job.error), node => node.child(label(job.error, 13, t.blocked)))
+    .when(Boolean(job.team?.error), node => node.child(label(job.team.error, 13, t.blocked)))
     .child(h_flex().gap(6).flex_wrap()
       .when(Boolean(terminal), row => row.child(button(t, 'delegate-terminal', 'Open terminal',
         (_event, cx) => focus(cx, job.address), 'primary', false, 'terminal')))
@@ -79,6 +80,10 @@ export function delegationView(t, job, { wide, terminal, focus, copy }) {
   const route = [program, job.address, ownership].filter(Boolean).join(' · ');
   const delivery = panel(t).child(cardHeading(t, 'Delivery record', 'delegations'))
     .child(detail(t, 'Participant', route || 'Awaiting a terminal'))
+    .when(Boolean(job.team?.role), node => node.child(detail(t, 'Team role', job.team.role)))
+    .when(Boolean(job.team?.power), node => node.child(detail(t, 'Model process', {
+      starting: 'Starting', on: 'Started', stopping: 'Stopping', off: 'Off', unconfirmed: 'Needs attention'
+    }[job.team.power] ?? 'Unknown')))
     .child(detail(t, 'Task delivery', deliveries[job.deliveryState] ?? 'Unavailable'))
     .when(job.remainingSec !== null, node => node.child(detail(t, 'Deadline', duration(job.remainingSec))))
     .when(job.expired && job.status === 'uncertain', node => node.child(detail(t, 'Deadline', 'Elapsed')))

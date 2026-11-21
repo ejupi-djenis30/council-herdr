@@ -6,6 +6,8 @@ Council's reliability milestone supports `council`, `review` and `delegate`. Thi
 
 Only a valid direct ballot from an expected participant whose turn completed successfully can authorize promotion. A ballot must match the session, voter, round and exact proposal digest. Its vote and score must be valid. Corrupt, malformed, mismatched or unbound ballots cannot satisfy authorizing quorum.
 
+Herdr Desktop shows whether each submitted digest matches the proposal recorded for that round. The comparison uses the saved validation target or the digest recorded for the reviewer handoff. Older sessions can use verified metadata from the canonical proposal artifact. The saved tally and verdict show the outcome of formal validation.
+
 The current workflows use quorum ratio 0.67 and approval threshold 0.6. Quorum uses valid direct ballots, not the number of files present. Any invalid ballot prevents a passing tally. Rejection and recorded amendments remain visible. A failed tally cannot be converted into conditional approval.
 
 Screen text and vote markers are informational. A quoted author's vote is not a reviewer's endorsement. Screen-only evidence leaves the result provisional, with `success: false`, `status: provisional` and `authorized: false`. Preserve its report and next actions under `validation/`; do not promote it to `reports/`.
