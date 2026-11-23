@@ -7,6 +7,7 @@
 - Refresh a formal tally or start a linked voting round from Reviews. Recounts preserve provisional evidence and exclude ballots from an earlier session generation.
 - Route Desktop helpers, workers, and terminal navigation to the selected space's machine. Project discovery stays scoped to that machine, including when another terminal is visible in a peek.
 - Recover workflow launches after a lost acknowledgement and verify the selected agent process before delivering an adopted task. Press Enter to post a reply in a debate.
+- Check host readiness against the installed Council release and its full MCP tool list. Save the agent identity with new debate contributions when the originating terminal can be verified.
 
 ## 3.6.0
 

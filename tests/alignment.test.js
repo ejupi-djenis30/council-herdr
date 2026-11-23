@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { alignmentChallenge, alignmentKey, alignmentOf, challengeKey, reportAlignment, skillRevision } from '../herdr/mods/council/runtime/alignment.mjs';
+import { alignmentChallenge, alignmentDetails, alignmentKey, alignmentOf, alignmentVersion, challengeKey, reportAlignment, skillRevision } from '../herdr/mods/council/runtime/alignment.mjs';
 import { setupAlignment } from '../lib/alignment-setup.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
+import { councilVersion, diagnoseCouncilHost } from '../lib/diagnostics.js';
+import { HerdrClient } from '../lib/herdr.js';
 
 function terminal() {
   return { address: 't7', state: 'live', reported: true, created_ms: 1, pid: 23, status: { state: 'idle', app: 'claude-code' }, labels: {} };
@@ -40,11 +42,50 @@ test('readiness requires the current skill and MCP and expires with the terminal
   server.herdr = herdr;
   let response;
   server.sendResult = (_id, value) => { response = value; };
-  await server.handleToolCall(1, { name: 'council_alignment', arguments: { action: 'report', state: 'aligned', revision: skillRevision } });
-  assert.equal(JSON.parse(response.content[0].text).state, 'aligned');
+  await server.handleToolCall(1, { name: 'council_alignment', arguments: { action: 'report', state: 'aligned', revision: skillRevision,
+    serverVersion: 'caller-supplied-value' } });
+  const reported = JSON.parse(response.content[0].text);
+  assert.equal(reported.state, 'aligned');
+  assert.equal(reported.serverVersion, councilVersion);
+  assert.equal(alignmentVersion, councilVersion, 'the standalone Desktop runtime and packaged MCP server must match');
+  assert.equal(alignmentDetails(subject).serverVersion, councilVersion);
   assert.equal(alignmentOf(subject), 'aligned');
   assert.equal(alignmentOf({ ...subject, pid: subject.pid + 1 }), 'unconfirmed');
   assert.equal(alignmentOf(subject, Date.now() + 9 * 60 * 60 * 1000), 'unconfirmed');
+});
+
+test('an old positive receipt holds the handoff until the original terminal registers with the current MCP', async () => {
+  const subject = terminal();
+  const client = new HerdrClient();
+  client.get = () => ({ success: true, details: subject });
+  client.exec = () => assert.fail('A stale receipt cannot release the task');
+  const prior = { subject: '1:23:claude-code', revision: skillRevision, state: 'aligned', expiresAt: Date.now() + 10000 };
+  for (const serverVersion of [undefined, '3.0.1']) {
+    subject.labels[alignmentKey] = Buffer.from(JSON.stringify({ ...prior, serverVersion })).toString('base64url');
+    const { alignment, issues } = diagnoseCouncilHost({ target: subject.address, herdr: client });
+    assert.equal(alignment.state, 'needs_reload');
+    assert.equal(alignment.expectedVersion, councilVersion);
+    assert.equal(alignment.serverVersion, serverVersion ?? null);
+    assert.equal(issues[0].code, 'needs_reload');
+    assert.match(issues[0].action, /terminal t7.*alignment check t7/);
+    assert.equal(client.send(subject.address, 'Inspect the build').attempted, false);
+    assert.equal(alignmentOf({ ...subject, pid: 24 }), 'unconfirmed');
+    assert.equal(alignmentOf(subject, prior.expiresAt), 'unconfirmed');
+  }
+  const server = new CouncilMcpServer();
+  server.herdr = transport(subject, 't9');
+  const challenge = alignmentChallenge(subject);
+  subject.labels[challengeKey] = challenge.argument.split('=')[1];
+  let response;
+  server.sendResult = (_id, value) => { response = value; };
+  await server.handleToolCall(1, { name: 'council_alignment', arguments: { action: 'status', target: subject.address } });
+  assert.deepEqual(JSON.parse(response.content[0].text), { address: subject.address, ...alignmentDetails(subject) });
+  await server.handleToolCall(1, { name: 'council_alignment', arguments: {
+    action: 'report', state: 'aligned', revision: skillRevision, target: subject.address, challenge: challenge.token
+  } });
+  assert.equal(JSON.parse(response.content[0].text).serverVersion, councilVersion);
+  assert.equal(alignmentOf(subject), 'aligned');
+  assert.equal(subject.labels[challengeKey], undefined);
 });
 
 test('an MCP host without Herdr identity uses a current one-time challenge only', () => {

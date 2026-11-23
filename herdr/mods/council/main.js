@@ -5,7 +5,7 @@ import { brandMark, button, cardHeading, columns, field, glyph, iconTile, input,
 import { countLabel, decisionSummary, discussionType, invitation, pollStatus, projectLabels, projectName } from './poll-text.js';
 import { pollParticipants, pollResults } from './poll-view.js';
 import { delegationStatus, delegationView } from './delegation-view.js';
-import { ballotBody, discussionView } from './discussion-view.js';
+import { agentName, ballotBody, discussionView } from './discussion-view.js';
 import { launcher, menu, sections } from './navigation.js';
 import { submitTask, taskFormDefaults, taskFormValues } from './task-launch.js';
 import { refreshFormalTally, startFormalRound } from './round-actions.js';
@@ -96,12 +96,13 @@ function eligibleRecipient(recipient) {
 const inviteStates = {
   queued: 'Waiting for terminal', sending: 'Sending invitation', uncertain: 'Delivery uncertain · Check terminal',
   alignment_required: 'Waiting for Council alignment', not_aligned: 'Council skill or integration missing',
+  needs_reload: 'Reload Council in this agent terminal',
   unavailable: 'Terminal unavailable', expired: 'Delivery window elapsed', cancelled: 'Invitation cancelled',
   dispatch_failed: 'Invitation worker stopped before sending'
 };
 
 function needsSetup(person) {
-  return ['alignment_required', 'not_aligned'].some(state => state === person.state || state === person.reason);
+  return ['alignment_required', 'not_aligned', 'needs_reload'].some(state => state === person.state || state === person.reason);
 }
 
 function deliveryView(t, delivery, { canAct, disabled, check, retry }) {
@@ -566,6 +567,10 @@ export default class Council extends View {
   pollCreator(poll, space) {
     if (!poll.createdBy) return '';
     if (poll.createdBy === 'operator') return 'Opened in Desktop';
+    if (poll.interactive) {
+      const name = agentName(poll.creatorIdentity?.agent);
+      return name ? `Opened by ${name} (${poll.createdBy})` : `Opened by ${poll.createdBy}`;
+    }
     const agent = this.visibleAgents(space).find(agent => agent.address === poll.createdBy);
     return `Opened by ${agent?.program?.name ?? poll.createdBy}`;
   }
@@ -878,7 +883,8 @@ export default class Council extends View {
 
     const query = this.search?.value().trim().toLowerCase() ?? '';
     const visible = items.filter(item => {
-      const matchesQuery = [item.question, item.id, item.project, item.createdBy].some(value => value?.toLowerCase().includes(query));
+      const matchesQuery = [item.question, item.id, item.project, item.createdBy, agentName(item.creatorIdentity?.agent)]
+        .some(value => value?.toLowerCase().includes(query));
       const group = isPolls ? (item.closedAt ? 'closed' : 'open')
         : isDelegations ? delegationStatus(t, item.status).group : null;
       const matchesStatus = this.listFilter === 'all' || group === this.listFilter;

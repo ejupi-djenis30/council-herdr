@@ -30,10 +30,15 @@ const postTitles = {
   argument: 'Argument', recommendation: 'Recommendation', result: 'Result'
 };
 const sources = { terminal: 'Terminal capture', draft: 'Unverified draft' };
-const agentNames = new Map([['claude', 'Claude Code'], ['codex', 'Codex'], ['antigravity', 'Antigravity'], ['junie', 'Junie']]);
+const agentNames = new Map([['claude', 'Claude Code'], ['claude-code', 'Claude Code'], ['codex', 'Codex'],
+  ['antigravity', 'Antigravity'], ['agy', 'Antigravity'], ['junie', 'Junie']]);
+
+export function agentName(agent) {
+  return agentNames.get(agent) ?? agent;
+}
 
 function post(t, message, copy) {
-  const speaker = message.author === 'operator' ? 'You' : agentNames.get(message.agent) ?? (message.agent || message.author);
+  const speaker = message.author === 'operator' ? 'You' : agentName(message.agent) || message.author;
   const color = message.kind === 'proposal' ? t.accent : message.kind === 'ballot' ? t.working : t.done;
   const heading = h_flex().w_full().min_w_0().gap(6).items_center().flex_wrap()
     .child(label(speaker, 13, t.foreground).font_semibold())

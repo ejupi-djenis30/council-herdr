@@ -1,6 +1,7 @@
-import { createDebate, readDebate, readDebateRoom } from './debate-room.mjs';
+import { createDebate, readDebate, readDebateRoom, replyToDebate } from './debate-room.mjs';
+import { terminalIdentity } from './alignment.mjs';
 import { desktopRequest } from './desktop.mjs';
-import { publishWithInvitations, readInvitationDelivery } from './invitations.mjs';
+import { publishWithInvitations, readInvitationDelivery, runHerdrCommand } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 
 export function listThreads(cwd) {
@@ -19,10 +20,25 @@ export function inspectPoll(cwd, id) {
   return { ...poll, invitationDelivery: readInvitationDelivery(cwd, id, { closed: Boolean(poll.closedAt) }) };
 }
 
-export function openThread(cwd, { question, context, author, recipients }) {
+async function postingIdentity(address) {
+  if (!address || address !== process.env.HC_TERMINAL_ID || !/^t[0-9a-z]+$/.test(address)) return null;
+  const { ok, details } = await runHerdrCommand(['get', '--json', address], 1000);
+  if (!ok || details?.address !== address || !terminalIdentity(details) ||
+      details.created_ms > Math.ceil(performance.timeOrigin)) return null;
+  return { address, agent: details.status.app, pid: details.pid, createdMs: details.created_ms };
+}
+
+export async function openThread(cwd, { question, context, author, recipients }) {
   const createdBy = process.env.HC_TERMINAL_ID || author;
+  const identity = await postingIdentity(createdBy);
   return publishWithInvitations(cwd, recipients, ({ beforePublish }) =>
-    createDebate(cwd, { question, context, createdBy }, { beforePublish }));
+    createDebate(cwd, { question, context, createdBy }, { beforePublish, identity }));
+}
+
+export async function replyToThread(cwd, id, { author, text }) {
+  const address = process.env.HC_TERMINAL_ID || author;
+  const identity = await postingIdentity(address);
+  return replyToDebate(cwd, id, { author: address, body: text }, { identity });
 }
 
 export function openPoll(cwd, { question, mode, options, context, recipients, sourceDebateId }) {

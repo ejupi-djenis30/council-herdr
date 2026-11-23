@@ -19,7 +19,15 @@ function json(path) {
   return value === null ? null : JSON.parse(value);
 }
 
-export function createDebate(cwd, { question, context = '', createdBy }, { beforePublish, fromPanel = false } = {}) {
+function recordedIdentity(address, identity) {
+  if (identity?.address !== address || !address || !Number.isSafeInteger(identity.pid) || identity.pid <= 0 ||
+      !Number.isSafeInteger(identity.createdMs) || identity.createdMs <= 0 || typeof identity.agent !== 'string') return null;
+  const agent = identity.agent.trim();
+  if (!agent || agent.length > 80 || /[\u0000-\u001f\u007f]/.test(agent)) return null;
+  return { address, agent, pid: identity.pid, createdMs: identity.createdMs };
+}
+
+export function createDebate(cwd, { question, context = '', createdBy }, { beforePublish, fromPanel = false, identity } = {}) {
   const title = requiredText(question, 'Debate topic', 240);
   const brief = context ? requiredText(context, 'Opening message', 2000) : '';
   const creator = fromPanel ? 'operator' : createdBy == null ? null : speaker(createdBy);
@@ -31,7 +39,7 @@ export function createDebate(cwd, { question, context = '', createdBy }, { befor
   mkdirSync(join(dir, 'messages'));
   const room = {
     $schema: roomSchema, sessionId: id, mode: 'debate', question: title, context: brief,
-    createdAt: new Date().toISOString(), ...(creator ? { createdBy: creator } : {})
+    createdAt: new Date().toISOString(), ...(creator ? { createdBy: creator, creatorIdentity: recordedIdentity(creator, identity) } : {})
   };
   beforePublish?.(id);
   writeFileSync(join(dir, 'session.json'), JSON.stringify(room), { flag: 'wx' });
@@ -49,6 +57,7 @@ function roomSnapshot(cwd, id) {
       (room.createdBy !== undefined && (typeof room.createdBy !== 'string' || !speakerId.test(room.createdBy)))) {
     throw new Error('Debate is unavailable.');
   }
+  if (Object.hasOwn(room, 'creatorIdentity')) room.creatorIdentity = recordedIdentity(room.createdBy, room.creatorIdentity);
   const events = join(dir, 'events');
   const revisions = eventFiles(events);
   if (revisions.some((name, index) => Number.parseInt(name, 10) !== index + 1)) {
@@ -72,7 +81,8 @@ export function readDebateRoom(cwd, id) {
 export function readDebate(cwd, id) {
   const { dir, events, revisions, room } = roomSnapshot(cwd, id);
   const messages = room.context ? [{
-    id: 'opening', kind: 'message', author: room.createdBy || 'agent', timestamp: room.createdAt, body: room.context
+    id: 'opening', kind: 'message', author: room.createdBy || 'agent', timestamp: room.createdAt, body: room.context,
+    ...(Object.hasOwn(room, 'creatorIdentity') ? { authorIdentity: room.creatorIdentity, agent: room.creatorIdentity?.agent } : {})
   }] : [];
   function add(message) {
     if (message?.sessionId === id && typeof message.id === 'string' && messageFile.test(`${message.id}.json`) &&
@@ -80,7 +90,9 @@ export function readDebate(cwd, id) {
         typeof message.body === 'string' && message.body.length <= 2000 &&
         Date.parse(message.timestamp) >= Date.parse(room.createdAt)) {
       const { author, body, timestamp } = message;
-      messages.push({ id: message.id, kind: 'message', author, body, timestamp });
+      const identity = recordedIdentity(author, message.authorIdentity);
+      messages.push({ id: message.id, kind: 'message', author, body, timestamp,
+        ...(Object.hasOwn(message, 'authorIdentity') ? { authorIdentity: identity, agent: identity?.agent } : {}) });
     }
   }
   for (const revision of revisions) {
@@ -123,13 +135,13 @@ function speaker(author, fromPanel = false) {
   return sender;
 }
 
-export function replyToDebate(cwd, id, { author, body }, { fromPanel = false } = {}) {
+export function replyToDebate(cwd, id, { author, body }, { fromPanel = false, identity } = {}) {
   const sender = speaker(author, fromPanel);
   const content = requiredText(body, 'Reply', 2000);
   return updateRoom(cwd, id, room => {
     if (room.closedAt) throw new Error('This debate is closed.');
     return { type: 'reply', message: {
-      id: randomUUID(), sessionId: id, author: sender, body: content,
+      id: randomUUID(), sessionId: id, author: sender, authorIdentity: recordedIdentity(sender, identity), body: content,
       timestamp: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString()
     } };
   });

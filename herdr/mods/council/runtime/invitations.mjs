@@ -12,7 +12,7 @@ import { isDirectory, readText } from './store-files.mjs';
 const spaceId = /^[a-z0-9-]{1,80}$/i;
 const recordId = /^(poll|debate)-[0-9a-f-]{36}$/;
 const terminalId = /^t[0-9a-z]+$/;
-const waiting = new Set(['queued', 'alignment_required', 'not_aligned']);
+const waiting = new Set(['queued', 'alignment_required', 'not_aligned', 'needs_reload']);
 const lifetimeMs = 15 * 60 * 1000;
 const wakeEvents = new Set(['status', 'labels', 'created', 'restarted', 'finished', 'removed', 'lost']);
 
@@ -197,6 +197,8 @@ function defaultCommand(args, timeout) {
   });
 }
 
+export { defaultCommand as runHerdrCommand };
+
 // Capture identity before publication so a reused address cannot receive an old invitation.
 export async function publishWithInvitations(cwd, addresses, publish, command = defaultCommand) {
   if (addresses === undefined) return publish({});
@@ -235,7 +237,7 @@ export async function checkInvitationAlignment(cwd, entry, { id, space, address 
   if (!target || !Number.isSafeInteger(target.createdAt) || record.space !== space || !recordIsOpen(cwd, id)) {
     throw new Error('This invitation has no matching terminal to check.');
   }
-  const setupStates = ['alignment_required', 'not_aligned'];
+  const setupStates = ['alignment_required', 'not_aligned', 'needs_reload'];
   if (!setupStates.some(state => state === target.state || state === target.reason)) throw new Error('This invitation is not waiting for setup.');
   const dir = dirname(path);
   const key = `send-${address}`;
@@ -283,7 +285,7 @@ export async function inviteReadyAgent({ space, address, createdAt, message, ent
   if (createdAt != null && terminal.created_ms !== createdAt) return 'unavailable';
   if (!stillOpen()) return 'cancelled';
   const alignment = alignmentOf(terminal);
-  if (alignment === 'not_aligned') return 'not_aligned';
+  if (alignment === 'not_aligned' || alignment === 'needs_reload') return alignment;
   const state = terminal.status?.state;
   if (!terminal.reported || !['idle', 'done'].includes(state)) return probeSent && alignment === 'unconfirmed' ? 'alignment_required' : 'queued';
   const checking = alignment !== 'aligned';

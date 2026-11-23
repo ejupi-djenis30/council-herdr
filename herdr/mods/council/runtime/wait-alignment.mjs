@@ -27,9 +27,10 @@ try {
       outcome = { state, turn: terminal.turn, pid: terminal.pid, createdMs: terminal.created_ms };
       break;
     }
-    if (state === 'not_aligned' || terminal.state !== 'live' || ['blocked', 'error'].includes(status) ||
+    const setupRequired = state === 'not_aligned' || state === 'needs_reload';
+    if (setupRequired || terminal.state !== 'live' || ['blocked', 'error'].includes(status) ||
         (status === 'done' && terminal.turn > 0 && state !== 'aligned')) {
-      outcome = { state: state === 'not_aligned' ? state : 'unconfirmed', terminalStatus: status };
+      outcome = { state: setupRequired ? state : 'unconfirmed', terminalStatus: status };
       break;
     }
   }

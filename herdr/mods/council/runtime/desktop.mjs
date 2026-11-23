@@ -51,7 +51,7 @@ function readCouncilSession(base, id, selected, view, cwd) {
     id, mode: session.mode, interactive, question: task?.slice(0, 220) || id, createdAt: session.createdAt,
     status: interactive ? (room.closedAt ? 'closed' : 'open')
       : advisory?.status ?? (failure?.status === 'incomplete' ? 'incomplete' : reviewStatus(saved)),
-    ...(room ? { closedAt: room.closedAt, createdBy: room.createdBy } : {}),
+    ...(room ? { closedAt: room.closedAt, createdBy: room.createdBy, creatorIdentity: room.creatorIdentity } : {}),
     ...(advisory ? { standalone: true, updatedAt: advisory.updatedAt ?? session.createdAt } : {}),
     ...(formal ? { updatedAt: saved?.verdict.validation.validatedAt ?? failure?.updatedAt ?? session.createdAt } : {})
   };
@@ -62,7 +62,8 @@ function readCouncilSession(base, id, selected, view, cwd) {
     const invitationDelivery = interactive ? readInvitationDelivery(cwd, id, { closed: Boolean(room.closedAt) }) : null;
     const invitations = invitationDelivery?.targets ?? null;
     const names = new Map(invitations?.map(target => [target.address, target.label]));
-    const messages = interactive ? room.messages.map(message => ({ ...message, agent: names.get(message.author) }))
+    const messages = interactive ? room.messages.map(message => Object.hasOwn(message, 'authorIdentity') ? message
+      : { ...message, agent: names.get(message.author) })
       : discussionMessages(dir, session, proposal);
     const polls = interactive ? new PollStore(cwd).list({ sourceDebateId: id }).polls : [];
     return { summary, detail: { ...detail, messages, invitations, invitationDelivery, polls, decision: room?.decision ?? null,

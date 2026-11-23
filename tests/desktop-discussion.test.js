@@ -442,6 +442,10 @@ test('an unknown agent receives a neutral check without the poll or debate detai
   assert.equal(await inviteReadyAgent({ ...options, probeSent }), 'alignment_required');
   terminal.labels[alignmentKey] = alignmentLabel(terminal, 'not_aligned').split('=')[1];
   assert.equal(await inviteReadyAgent({ ...options, probeSent }), 'not_aligned');
+  terminal.labels[alignmentKey] = Buffer.from(JSON.stringify({
+    state: 'aligned', subject: '20:12:codex', revision: 'council/herdr-alignment-v1', expiresAt: Date.now() + 10000
+  })).toString('base64url');
+  assert.equal(await inviteReadyAgent({ ...options, probeSent }), 'needs_reload');
   assert.equal(actions.filter(args => args[0] === 'send').length, 1);
   terminal.labels[alignmentKey] = alignmentLabel(terminal, 'aligned').split('=')[1];
   assert.equal(await inviteReadyAgent({ ...options, probeSent }), 'sent');

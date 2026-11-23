@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
-import { inspectThread, listThreads, openThread } from './agent-discussion.mjs';
-import { closeDebate, replyToDebate } from './debate-room.mjs';
+import { inspectThread, listThreads, openThread, replyToThread } from './agent-discussion.mjs';
+import { closeDebate } from './debate-room.mjs';
 
 const help = `Usage:
   council debate list
@@ -32,5 +32,5 @@ export function runDebateCommand(args, cwd = process.cwd()) {
   if (action === 'show') return inspectThread(cwd, id);
   const author = process.env.HC_TERMINAL_ID || values.author;
   if (action === 'close') return closeDebate(cwd, id, { ...values, nextStep: values['next-step'] }, { author });
-  return replyToDebate(cwd, id, { author, body: values.text });
+  return replyToThread(cwd, id, values);
 }

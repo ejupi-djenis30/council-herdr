@@ -57,6 +57,10 @@ test('HerdrClient sends only an alignment check before releasing a real brief', 
   assert.equal(res.baselineTurn, 1);
   assert.equal(sends.length, 1);
   assert.equal(existsSync(briefPath), true, 'Brief file should be created');
+  client.send = () => ({ success: false, attempted: false, alignment: 'needs_reload', error: 'Reload Council in t21.' });
+  const stale = client.launchAgent(options);
+  assert.equal(stale.success, false);
+  assert.equal(stale.alignment, 'needs_reload');
 });
 
 function terminal({ state = 'done', turn = 8 } = {}) {

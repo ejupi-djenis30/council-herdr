@@ -9,7 +9,7 @@ import { ScheduleManager } from '../lib/schedules.js';
 import { nextFormalRound, resolveVotingSession, retallyAfterBallot, retallyFormalRound } from '../lib/formal-rounds.js';
 import { setupAlignment } from '../lib/alignment-setup.js';
 import { councilVersion, diagnoseCouncilHost } from '../lib/diagnostics.js';
-import { alignmentOf, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
+import { alignmentDetails, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
 import { runActivityCommand } from '../herdr/mods/council/runtime/activity-command.mjs';
 import { runDebateCommand } from '../herdr/mods/council/runtime/debate-command.mjs';
 import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
@@ -216,7 +216,7 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
       }
       const result = herdr.get(address);
       if (!result.success) throw new Error(result.error);
-      console.log(JSON.stringify({ address: result.details.address, state: alignmentOf(result.details) }));
+      console.log(JSON.stringify({ address: result.details.address, ...alignmentDetails(result.details) }));
       break;
     }
     case 'start': {
@@ -291,7 +291,7 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
 
     case 'doctor': {
       const doc = herdr.doctor();
-      const liveServer = flags['live-version'] || flags['live-tools'] ? {
+      const liveServer = flags['live-version'] !== undefined || flags['live-tools'] !== undefined ? {
         version: typeof flags['live-version'] === 'string' ? flags['live-version'] : null,
         tools: typeof flags['live-tools'] === 'string' ? flags['live-tools'].split(',').map(name => name.trim()).filter(Boolean) : null
       } : undefined;

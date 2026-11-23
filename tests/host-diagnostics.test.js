@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { skillRevision } from '../herdr/mods/council/runtime/alignment.mjs';
 import { setupAlignment } from '../lib/alignment-setup.js';
 import { councilVersion, diagnoseCouncilHost, requiredCouncilTools } from '../lib/diagnostics.js';
@@ -46,6 +48,40 @@ test('host doctor distinguishes stale config, stale live MCP, skill mismatch and
   const editedSkill = diagnoseCouncilHost(request);
   assert.equal(editedSkill.configured.skill.revision, skillRevision);
   assert.deepEqual(editedSkill.issues.map(issue => issue.code), ['skill_mismatch']);
+});
+
+test('a matching-version host must expose every advertised tool, including scheduling, formal rounds and Team', async t => {
+  const project = temporaryProject(t);
+  const request = { host: 'junie', project };
+  setupAlignment({ ...request, apply: true });
+  const server = new CouncilMcpServer({ cwd: project });
+  let advertised;
+  server.sendResult = (_id, { tools }) => { advertised = tools.map(tool => tool.name); };
+  await server.handleMessage({ id: 1, method: 'tools/list' });
+  assert.deepEqual(requiredCouncilTools, advertised);
+  const inspect = tools => diagnoseCouncilHost({ ...request, liveServer: { version: councilVersion, tools } });
+  assert.deepEqual(inspect(advertised).issues, []);
+  assert.deepEqual(inspect(advertised.map(name => 'mcp__council__' + name)).issues, []);
+  for (const hidden of [['council_schedule_create'], ['council_retally', 'council_team_call']]) {
+    const exposed = advertised.filter(name => !hidden.includes(name));
+    const { expected, issues } = inspect([...exposed, 'mcp__another__' + hidden[0]]);
+    assert.deepEqual(expected.tools, advertised);
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].code, 'needs_reload');
+    assert.deepEqual(issues[0].missingTools, hidden);
+    for (const tool of hidden) assert.ok(issues[0].action.includes(tool));
+  }
+  assert.deepEqual(inspect([]).issues[0].missingTools, advertised);
+  assert.deepEqual(inspect(undefined).issues, []);
+});
+
+test('doctor accepts an explicitly empty tool inventory even without a live version', t => {
+  const cli = fileURLToPath(new URL('../bin/council.js', import.meta.url));
+  const result = JSON.parse(execFileSync(process.execPath, [cli, 'doctor', '--live-tools=', '--json'], {
+    cwd: temporaryProject(t), encoding: 'utf8', timeout: 10000
+  }));
+  assert.deepEqual(result.integration.liveServer.tools, []);
+  assert.deepEqual(result.integration.issues[0].missingTools, requiredCouncilTools);
 });
 
 test('Antigravity setup merges an absolute runner and explicit project binding into the workspace profile', t => {
