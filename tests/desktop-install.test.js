@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -14,7 +14,7 @@ function run(args, cwd) {
 }
 
 function environment(t) {
-  const root = mkdtempSync(join(tmpdir(), 'council desktop '));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'council desktop ')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const appHome = join(root, 'app profile');
   const project = join(root, 'sample worktree');
