@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HerdrClient } from '../lib/herdr.js';
@@ -50,6 +50,7 @@ test('HerdrClient sends only an alignment check before releasing a real brief', 
   assert.equal(sends.length, 0);
   assert.equal(existsSync(briefPath), false);
   assert.match(launches[0].at(-1), /Council alignment check/);
+  assert.doesNotMatch(launches[0].at(-1), /[\r\n]/);
   assert.doesNotMatch(launches[0].at(-1), /Build the feature/);
   client.waitForAlignment = () => ({ state: 'aligned', turn: 1 });
   const res = client.launchAgent(options);
@@ -61,6 +62,31 @@ test('HerdrClient sends only an alignment check before releasing a real brief', 
   const stale = client.launchAgent(options);
   assert.equal(stale.success, false);
   assert.equal(stale.alignment, 'needs_reload');
+});
+
+test('a Windows batch launcher receives the complete initial notice through Herdr', {
+  skip: process.platform !== 'win32' || !process.env.HC_TERMINAL_ID
+}, t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'council batch '));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFileSync(join(cwd, 'record.cjs'), "require('node:fs').writeFileSync('argv.json', JSON.stringify(process.argv.slice(2)))");
+  const launcher = join(cwd, 'record.cmd');
+  writeFileSync(launcher, '@echo off\r\n@node "%~dp0record.cjs" %*\r\n');
+  const client = new HerdrClient({ cwd });
+  client.waitForAlignment = address => {
+    const wait = client.exec(['wait', '--json', address, '--timeout', '10']);
+    const finished = client.parseJson(wait.stdout);
+    assert.equal(finished?.exit_code, 0, wait.stderr || wait.stdout);
+    client.exec(['rm', address]);
+    return { state: 'unconfirmed' };
+  };
+  const result = client.launchAgent({ name: `batch-${process.pid}`, agent: launcher, task: 'Private assignment' });
+  assert.ok(result.address, result.error);
+  const received = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
+  assert.equal(received.length, 1);
+  assert.match(received[0], /Council alignment check/);
+  assert.match(received[0], /challenge: [a-f0-9]{32}/);
+  assert.doesNotMatch(received[0], /Private assignment|[\r\n]/);
 });
 
 function terminal({ state = 'done', turn = 8 } = {}) {

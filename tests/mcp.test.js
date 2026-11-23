@@ -87,7 +87,24 @@ test('CouncilMcpServer executes tools via tools/call', async t => {
     params: { name: 'council_status', arguments: {} }
   });
   assert.equal(response.id, 10);
-  assert.match(response.result.content[0].text, /"status": "ok"/);
+  const advertised = JSON.parse(response.result.content[0].text);
+  assert.equal(advertised.status, 'unverified');
+  assert.equal(advertised.integration.hostInventory.state, 'unverified');
+  const names = advertised.integration.liveServer.tools;
+  const hidden = ['council_schedule_create', 'council_schedules', 'council_round', 'council_retally',
+    'council_report_progress', 'council_team_list', 'council_team_call'];
+  const status = async hostTools => {
+    await server.handleMessage({ id: 10, method: 'tools/call', params: { name: 'council_status', arguments: { hostTools } } });
+    return JSON.parse(response.result.content[0].text);
+  };
+  const exposed = names.filter(name => !hidden.includes(name)).map(name => 'council_' + name);
+  const partial = await status([...exposed, ...hidden.map(name => 'other_' + name), ...exposed]);
+  assert.equal(partial.status, 'degraded');
+  assert.deepEqual(partial.integration.hostInventory, { state: 'incomplete', expectedCount: names.length,
+    availableCount: names.length - hidden.length, missingTools: hidden });
+  assert.deepEqual(partial.integration.liveServer.tools, names);
+  assert.deepEqual(partial.integration.issues[0].missingTools, hidden);
+  assert.equal((await status(names.map(name => 'tools.council.' + name))).status, 'ok');
 
   // Test council_read
   await server.handleMessage({

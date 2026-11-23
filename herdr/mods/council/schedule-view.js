@@ -18,7 +18,6 @@ function badge(t, item) {
 }
 
 const modeName = mode => workflowModes.find(([id]) => id === mode)?.[1] || mode;
-const timeLabel = at => new Date(at).toLocaleString();
 const cadence = item => item.everySec == null ? 'Once' :
   `Every ${item.everySec} s · ${item.count == null ? 'Until cancelled' : item.count + (item.count === 1 ? ' run' : ' runs')}`;
 
@@ -35,19 +34,12 @@ export function changeSchedule(view, cx, action, runCli) {
   const form = view.form;
   let target = view.data?.schedule;
   let project = view.selected?.project;
+  let draft;
   if (action === 'create') {
     if (form?.kind !== 'schedule') return;
-    try {
-      target = prepareSchedule({ id: form.id, firstRun: form.firstRun.value(), repeating: form.repeating,
-        interval: form.interval.value(), runs: form.runs.value(), task: taskFormValues(form) }, form.immediateAt || new Date().toISOString());
-      // An empty start time represents the same instant if this form is submitted again.
-      if (!form.firstRun.value().trim()) form.immediateAt = target.at;
-      project = form.project;
-    } catch (error) {
-      view.error = error.message;
-      cx.notify();
-      return;
-    }
+    project = form.project;
+    draft = { id: form.id, firstRun: form.firstRun.value().trim() || form.immediateAt || '',
+      repeating: form.repeating, interval: form.interval.value(), runs: form.runs.value(), task: taskFormValues(form) };
   } else if (!target || target.id !== view.selected?.id ||
       (action === 'resume' && target.state !== 'worker_stopped') ||
       (action === 'cancel' && ['finished', 'cancelled'].includes(target.state))) return;
@@ -60,6 +52,13 @@ export function changeSchedule(view, cx, action, runCli) {
   cx.notify();
   cx.spawn(async cx => {
     try {
+      if (draft) {
+        target = await prepareSchedule(draft, timing => view.request(project, 'schedule-timing', timing, engine));
+        if (view.epoch !== epoch) return;
+        // Pin the project and immediate start time before dispatch so retries use the same definition.
+        if (!draft.firstRun) form.immediateAt = target.at;
+        form.submitted = true;
+      }
       await submitSchedule(action, target, args => runCli(project, args), id => view.request(project, 'schedules', { id }, engine));
       if (view.epoch === epoch) view.navigate(cx, 'schedules', { id: target.id, project }, { returnTo: view.workspaceReturn });
     } catch (error) {
@@ -80,7 +79,7 @@ function scheduleForm(t, view, act) {
     .child(label(form.project, 12, t.muted))
     .child(workflowFields(t, form, saving))
     .child(field(t, 'First run', form.firstRun))
-    .child(label('Use YYYY-MM-DD HH:mm in local time, or include an ISO time zone. Leave blank to start immediately.', 11, t.muted))
+    .child(label('Use YYYY-MM-DD HH:mm in the project machine’s time zone, or include an ISO offset. Leave blank to start immediately.', 11, t.muted))
     .child(h_flex().gap(5).flex_wrap().children([[false, 'Once'], [true, 'Repeat']].map(([repeat, title]) =>
       button(t, 'schedule-repeat-' + repeat, title, (_e, cx) => { form.repeating = repeat; cx.notify(); },
         form.repeating === repeat ? 'active' : 'normal', saving))))
@@ -102,8 +101,8 @@ function scheduleDetail(t, view, act) {
   const detail = panel(t).child(cardHeading(t, item.job.task, 'schedules'))
     .child(h_flex().gap(6).items_center().flex_wrap().child(badge(t, item)).child(label(modeName(item.job.mode || 'delegate'), 12, t.muted)))
     .child(label(project, 12, t.muted)).child(label(item.id, 12, t.muted))
-    .child(label(`${cadence(item)} · First run ${timeLabel(item.at)}`, 12, t.foreground))
-    .when(!finished && Boolean(item.nextAt), node => node.child(label(`Scheduled slot ${item.index + 1} · ${timeLabel(item.nextAt)}`, 12, t.foreground)))
+    .child(label(`${cadence(item)} · First run ${item.atLocal || item.at}`, 12, t.foreground))
+    .when(!finished && Boolean(item.nextAt), node => node.child(label(`Scheduled slot ${item.index + 1} · ${item.nextAtLocal || item.nextAt}`, 12, t.foreground)))
     .when(Boolean(terminal || observation), node => node.child(label(['Scheduler', terminal, observation?.state,
       observation?.exitCode != null ? 'exit ' + observation.exitCode : null].filter(Boolean).join(' · '), 12, t.muted)))
     .when(Boolean(item.error), node => node.child(label(item.error, 12, t.blocked)))
@@ -153,7 +152,7 @@ export function renderSchedules(t, view, act) {
   return body.children(visible.map(item => panel(t)
     .child(label(item.question, 14, t.foreground).font_semibold())
     .child(h_flex().gap(6).items_center().flex_wrap().child(badge(t, item)).child(label(modeName(item.mode), 12, t.muted)))
-    .child(label([origins.get(item.project), cadence(item), item.nextAt ? timeLabel(item.nextAt) : ''].filter(Boolean).join(' · '), 12, t.muted).tooltip(item.project))
+    .child(label([origins.get(item.project), cadence(item), item.nextAtLocal || item.nextAt].filter(Boolean).join(' · '), 12, t.muted).tooltip(item.project))
     .child(h_flex().child(button(t, item.project + '/' + item.id, 'Open schedule', (_e, cx) =>
       view.navigate(cx, 'schedules', { id: item.id, project: item.project }, { returnTo: view.workspaceReturn }))))));
 }

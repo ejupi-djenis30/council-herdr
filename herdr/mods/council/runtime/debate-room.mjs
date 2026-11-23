@@ -71,6 +71,9 @@ function roomSnapshot(cwd, id) {
     !(Date.parse(decision.closedAt) >= Date.parse(room.createdAt)))) {
     throw new Error('Invalid debate decision.');
   }
+  if (decision && Object.hasOwn(decision, 'closedByIdentity')) {
+    decision.closedByIdentity = recordedIdentity(decision.closedBy, decision.closedByIdentity);
+  }
   return { dir, events, revisions, room: { ...room, decision, closedAt: decision?.closedAt ?? null } };
 }
 
@@ -147,7 +150,7 @@ export function replyToDebate(cwd, id, { author, body }, { fromPanel = false, id
   });
 }
 
-export function closeDebate(cwd, id, { decision, owner, nextStep }, { author, fromPanel = false } = {}) {
+export function closeDebate(cwd, id, { decision, owner, nextStep }, { author, fromPanel = false, identity } = {}) {
   const closedBy = speaker(fromPanel ? 'operator' : author, fromPanel);
   const outcome = {
     decision: requiredText(decision, 'Decision', 2000),
@@ -160,7 +163,8 @@ export function closeDebate(cwd, id, { decision, owner, nextStep }, { author, fr
       throw new Error('This debate already has a recorded decision.');
     }
     return { type: 'close', decision: {
-      ...outcome, closedAt: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString(), closedBy
+      ...outcome, closedAt: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString(),
+      closedBy, closedByIdentity: recordedIdentity(closedBy, identity)
     } };
   });
 }

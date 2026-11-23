@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { readText } from './store-files.mjs';
 
 /**
  * Compute deterministic input fingerprint for job idempotency and conflict detection
@@ -20,6 +22,18 @@ export function computeFingerprint(options = {}, workflow = null) {
 
 export function isJobRecord(job) {
   return Boolean(job && typeof job === 'object' && job.$schema === 'council.job/v1');
+}
+
+export function readDispatchError(dir) {
+  try {
+    const raw = readText(join(dir, 'dispatch-error.json'), 64 * 1024);
+    if (raw === null) return null;
+    const record = JSON.parse(raw);
+    return { error: typeof record?.error === 'string' && record.error || 'Worker dispatch failed',
+      failedAt: typeof record?.failedAt === 'string' ? record.failedAt : null };
+  } catch {
+    return { error: 'Worker dispatch failure record is unreadable', failedAt: null };
+  }
 }
 
 export function jobRecordProblem(job, dispatchError) {

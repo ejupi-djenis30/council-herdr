@@ -42,6 +42,12 @@ test('CLI and MCP debate authors persist across terminal reuse and offline reads
   mcpReply('Current process predates the terminal.', live('other', 30, Date.now() + 60000));
   submit(['debate', 'reply', sessionId, '--text', 'Offline post.'], null);
   submit(['debate', 'reply', sessionId, '--author', 'outside-agent', '--text', 'External post.'], null, '');
+  const outcome = { decision: 'Ship', owner: 'QA', nextStep: 'Publish' };
+  const decision = submit(['mcp'], live('junie', 10, 100), 't17', JSON.stringify({
+    id: 1, method: 'tools/call', params: { name: 'council_debate_close', arguments: { project: cwd, debateId: sessionId, ...outcome } }
+  }) + '\n');
+  const closeArgs = ['debate', 'close', sessionId, '--decision', 'Ship', '--owner', 'QA', '--next-step', 'Publish'];
+  assert.deepEqual(submit(closeArgs, live('replacement', 40, 400)), decision);
   const view = desktopRequest(cwd, 'debates', { id: sessionId }).debate;
   assert.deepEqual(view.creatorIdentity, { address: 't17', agent: 'junie', pid: 10, createdMs: 100 });
   assert.deepEqual(view.messages.map(m => [m.author, m.agent, m.authorIdentity?.pid]), [
@@ -49,7 +55,12 @@ test('CLI and MCP debate authors persist across terminal reuse and offline reads
     ['t17', undefined, undefined], ['outside-agent', undefined, undefined]
   ]);
   assert.deepEqual(desktopRequest(cwd, 'debates', {}).debates[0].creatorIdentity, view.creatorIdentity);
+  assert.deepEqual(view.decision.closedByIdentity, view.creatorIdentity);
   const saved = submit(['debate', 'show', sessionId], live('replacement', 40, 400));
+  assert.deepEqual(saved.decision, decision);
   assert.deepEqual(saved.messages.map(m => m.authorIdentity), view.messages.map(m => m.authorIdentity));
-  assert.equal(readFileSync(join(cwd, 'lookups.txt'), 'utf8').trimEnd().split('\n').length, 4);
+  const other = submit(['debate', 'create', '--question', 'Record this?'], null, '');
+  const cliClose = submit(closeArgs.map(value => value === sessionId ? other.sessionId : value), live('codex', 20, 200));
+  assert.deepEqual(cliClose.closedByIdentity, { address: 't17', agent: 'codex', pid: 20, createdMs: 200 });
+  assert.equal(readFileSync(join(cwd, 'lookups.txt'), 'utf8').trimEnd().split('\n').length, 7);
 });

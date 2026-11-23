@@ -820,8 +820,9 @@ export default class Council extends View {
       .child(h_flex().child(button(t, 'open-debate', 'View discussion', (_e, cx) => this.openLinked(cx, 'debates', this.selected), 'normal', false, 'debates')));
     if (round) card.child(h_flex().gap(6).flex_wrap()
       .child(button(t, 'retally', 'Refresh tally', (_e, cx) => this.changeRound(cx, review, false), 'normal', this.saving))
-      .when(Boolean(round.nextJobId), row => row.child(button(t, 'open-next-round', 'Open next round', (_e, cx) =>
-        this.openLinked(cx, 'delegations', { id: round.nextJobId, project: this.selected.project }), 'normal', this.saving, 'right')))
+      .children((round.nextJobIds ?? (round.nextJobId ? [round.nextJobId] : [])).map(id =>
+        button(t, 'open-next-round-' + id, round.nextJobIds?.length > 1 ? `Open ${id}` : 'Open next round', (_e, cx) =>
+          this.openLinked(cx, 'delegations', { id, project: this.selected.project }), 'normal', this.saving, 'right')))
       .when(!round.nextJobId && round.canStartNext, row => row.child(button(t, 'next-round', 'Start next round', (_e, cx) =>
         this.changeRound(cx, review, true), 'primary', this.saving, 'add'))));
     const results = panel(t)
@@ -1090,7 +1091,6 @@ export default class Council extends View {
     if (!this.currentSpace() || this.saving) return;
     const engine = this.engine;
     changeSchedule(this, cx, action, (project, args) => this.runCli(project, args, engine));
-    if (this.saving && this.form) this.form.submitted = true;
   }
 
   changeRound(cx, review, start) {

@@ -2,9 +2,9 @@ import { randomBytes } from 'node:crypto';
 
 export const alignmentKey = 'council.alignment';
 export const challengeKey = 'council.challenge';
-export const skillRevision = 'council/herdr-alignment-v1';
+export const skillRevision = 'council/herdr-alignment-v2';
 // Included in the standalone Desktop runtime as well as the MCP server.
-export const alignmentVersion = '3.7.0';
+export const alignmentVersion = '3.7.1';
 const maxAge = 8 * 60 * 60 * 1000;
 
 export function terminalIdentity(terminal) {
@@ -19,7 +19,7 @@ export function alignmentDetails(terminal, now = Date.now()) {
   try {
     const receipt = JSON.parse(Buffer.from(terminal.labels[alignmentKey], 'base64url').toString('utf8'));
     if (receipt.subject === subject && Number.isFinite(receipt.expiresAt) && now < receipt.expiresAt) {
-      if (receipt.state === 'aligned' && receipt.serverVersion !== alignmentVersion) {
+      if (receipt.state === 'aligned' && (receipt.serverVersion !== alignmentVersion || receipt.revision !== skillRevision)) {
         return { state: 'needs_reload', serverVersion: typeof receipt.serverVersion === 'string' ? receipt.serverVersion : null,
           expectedVersion: alignmentVersion, nextAction: alignmentError(terminal.address, 'needs_reload') };
       }
@@ -57,7 +57,7 @@ export function alignmentChallenge(terminal) {
   return { token, argument: `${challengeKey}=${Date.now() + 15 * 60 * 1000}.${token}`, target: terminal?.address };
 }
 
-export function reportAlignment(herdr, { state, revision, target, challenge }, { viaMcp = false } = {}) {
+export function reportAlignment(herdr, { state, revision, target, challenge }, { viaMcp = false, hostInventory } = {}) {
   const address = target ?? herdr.terminalId;
   if (!address) throw new Error('Run the Council integration from your own Herdr terminal. HC_TERMINAL_ID is missing.');
   if (!['aligned', 'not_aligned'].includes(state)) throw new Error('Use aligned or not_aligned.');
@@ -70,16 +70,21 @@ export function reportAlignment(herdr, { state, revision, target, challenge }, {
       (typeof challenge !== 'string' || challenge !== pendingChallenge(probe.details))) {
     throw new Error('A current challenge from that terminal is required for this readiness report.');
   }
-  const value = alignmentLabel(probe.details, state);
+  // Replace any previous positive receipt when this agent now reports incomplete or unknown exposure.
+  const inventoryRequired = state === 'aligned' && hostInventory?.state !== 'complete';
+  const verifiedState = inventoryRequired ? 'not_aligned' : state;
+  const value = alignmentLabel(probe.details, verifiedState);
   const reply = herdr.exec(['label', '--json', address, value, `${challengeKey}=`], { timeout: 10000 });
   if (!reply.success) throw new Error(reply.stderr || reply.stdout || 'Herdr could not save your Council alignment.');
-  return { address, state, revision: skillRevision, ...(state === 'aligned' ? { serverVersion: alignmentVersion } : {}) };
+  return { address, state: verifiedState, revision: skillRevision,
+    ...(verifiedState === 'aligned' ? { serverVersion: alignmentVersion } : {}),
+    ...(inventoryRequired ? { hostInventory, nextAction: 'Discover the Council tools exposed to this agent, enable any missing tools and request a fresh alignment check.' } : {}) };
 }
 
 export function alignmentNotice(declineEntry, challenge) {
   const lines = [
     'Council alignment check. This message contains no Council assignment.',
-    `Use council_status to confirm this agent's Council MCP server is version ${alignmentVersion}. If you have this version and the current Council skill, follow the skill to report your alignment using council_alignment. Then finish this turn and wait for a separate assignment.`,
+    `Load the Council skill and discover this agent's Council tools, including deferred tools. Pass the discovered names as hostTools to council_status. If the server is version ${alignmentVersion} and the host inventory is complete, follow the skill to report alignment with the same hostTools. Then finish this turn and wait for a separate assignment.`,
     'If either is missing, reply exactly "Council alignment: not aligned" and stop. In Council MCP, report not_aligned if the tool is available.'
   ];
   if (challenge) {
@@ -92,7 +97,7 @@ export function alignmentNotice(declineEntry, challenge) {
 
 export function alignmentError(address, state) {
   if (state === 'needs_reload') {
-    return `Reload the Council MCP connection in the agent running in terminal ${address} with Council ${alignmentVersion}. Then run council alignment check ${address} and wait for a fresh receipt.`;
+    return `Refresh the Council skill and reload the Council MCP connection in the agent running in terminal ${address} with Council ${alignmentVersion}. Then run council alignment check ${address} and wait for a fresh receipt.`;
   }
   const label = state === 'not_aligned' ? 'reported missing Council setup' : 'has no current Council alignment';
   return `Terminal ${address} ${label}. Install or refresh the Council skill and the plugin or MCP connection in that agent, then register with council_alignment.`;

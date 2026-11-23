@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +43,7 @@ async function fixture(t, mode) {
 test('desktop refresh preserves provisional evidence and only current direct ballots authorize a decision', async t => {
   const { detail, dir, workspace, dispatch } = await fixture(t, 'review');
   const review = detail();
-  assert.deepEqual(review.roundActions, { round: 1, nextSessionId: 'prior-round-2', canStartNext: true, nextJobId: null });
+  assert.deepEqual(review.roundActions, { round: 1, nextSessionId: 'prior-round-2', canStartNext: true, nextJobId: null, nextJobIds: [] });
   const refresh = () => refreshFormalTally(detail(), dispatch);
   const provisional = await refresh();
   assert.equal(provisional.authorized, false);
@@ -115,4 +115,51 @@ test('a project alias identifies the same round for new and previously saved job
   assert.equal(JSON.parse(dispatch(args).stdout).reconnect, true);
   assert.equal(JSON.parse(dispatch([...args, '--task', 'A different task', '--inspect']).stdout).matches, false);
   assert.equal(JSON.parse(dispatch([...args, '--context', 'Different context', '--inspect']).stdout).matches, false);
+});
+
+test('Desktop discovers custom next rounds and a stale start reconnects without creating a sibling', async t => {
+  const { cwd, detail, workspace, dispatch } = await fixture(t, 'review');
+  const stale = detail();
+  const manager = new JobManager({ cwd, workerLauncher: () => ({ success: true, address: 't99' }) });
+  const start = sessionId => manager.startJob(nextFormalRound(workspace, 'prior', { sessionId }));
+  const first = await start('Revision A');
+  assert.equal(first.sessionId, 'revision-a');
+  assert.equal(detail().roundActions.nextJobId, first.sessionId);
+  assert.equal(await startFormalRound(stale, dispatch), first.sessionId);
+  const lost = args => args.includes('--inspect') ? dispatch(args) : Promise.reject(new Error('Lost launch reply'));
+  assert.equal(await startFormalRound(stale, lost), first.sessionId);
+  assert.equal(existsSync(workspace.resolveSessionDir(stale.roundActions.nextSessionId)), false);
+  const second = await start('Revision B');
+  assert.equal(second.success, true);
+  assert.deepEqual(detail().roundActions.nextJobIds, ['revision-a', 'revision-b']);
+  await assert.rejects(() => startFormalRound(stale, dispatch), /several linked jobs/);
+  assert.equal(existsSync(workspace.resolveSessionDir(stale.roundActions.nextSessionId)), false);
+});
+
+test('round inspection uses the stored ID and reports an existing dispatch failure after a lost reply', async t => {
+  const { cwd, detail, workspace, dispatch } = await fixture(t, 'review');
+  const review = detail();
+  const manager = new JobManager({ cwd, workerLauncher: () => ({ success: true, address: 't99' }) });
+  const id = 'Revision A';
+  const job = await manager.startJob(nextFormalRound(workspace, 'prior', { sessionId: id }));
+  const args = ['round', '--session', 'prior', '--new-session', id, '--inspect'];
+  const match = JSON.parse(dispatch(args).stdout);
+  assert.equal(match.sessionId, job.sessionId);
+  assert.equal(match.matches, true);
+  const jobDir = workspace.resolveSessionDir(job.sessionId);
+  writeFileSync(join(jobDir, 'dispatch-error.json'), JSON.stringify({ error: 'Worker dispatch failed' }));
+  const receipt = dispatch(args);
+  assert.equal(JSON.parse(receipt.stdout).matches, false);
+  const lost = request => {
+    if (!request.includes('--inspect')) throw new Error('Reply lost');
+    return dispatch(request);
+  };
+  await assert.rejects(() => startFormalRound(review, lost), /Worker dispatch failed/);
+  const jobPath = join(jobDir, 'job.json');
+  const claimed = JSON.parse(readFileSync(jobPath, 'utf8'));
+  claimed.worker.status = 'claimed';
+  writeFileSync(jobPath, JSON.stringify(claimed));
+  assert.equal(JSON.parse(dispatch(args).stdout).matches, true);
+  writeFileSync(jobPath, JSON.stringify({ ...claimed, state: 'failed', error: 'Worker timed out' }));
+  await assert.rejects(() => startFormalRound(review, lost), /Worker timed out/);
 });

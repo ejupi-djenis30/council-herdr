@@ -69,7 +69,7 @@ export function readScheduleStatus(dir, id, lookup, limit = Infinity) {
     const saved = readOptional(join(dir, 'state.json'), limit);
     const state = { ...schedule, state: 'scheduled', index: 0, nextAt: schedule.at, ...saved, attempt };
     if ((saved?.attempt ?? 0) !== attempt || !saved) {
-      state.state = receipt.error ? 'dispatch_uncertain' : 'scheduled';
+      state.state = receipt.workerAddress && !receipt.error ? 'scheduled' : 'dispatch_uncertain';
       state.workerAddress = receipt.workerAddress ?? null;
       delete state.error;
       if (receipt.error) state.error = receipt.error;
@@ -115,7 +115,7 @@ export function desktopSchedules(cwd, id, lookup = probeTerminal) {
         isFile(join(workspace, entry.name, 'job.json')))
       .map(entry => ({ id: entry.name, slot: Number(entry.name.slice(prefix.length)) }))
       .sort((a, b) => b.slot - a.slot);
-    return { schedule: { ...schedule, occurrences } };
+    return { schedule: { ...schedule, ...localTimes(schedule), occurrences } };
   }
   const schedules = [];
   const errors = [];
@@ -125,10 +125,16 @@ export function desktopSchedules(cwd, id, lookup = probeTerminal) {
     try {
       if (!isFile(join(dir, 'schedule.json'))) continue;
       const { id, at, everySec, count, job, state, nextAt } = readScheduleStatus(dir, entry.name, undefined, limit);
-      schedules.push({ id, project: cwd, question: job.task.trim().slice(0, 220), mode: job.mode || 'delegate', at, everySec, count, state, nextAt });
+      schedules.push({ id, project: cwd, question: job.task.trim().slice(0, 220), mode: job.mode || 'delegate', at, everySec, count, state, nextAt,
+        ...localTimes({ at, nextAt }) });
     } catch (error) {
       errors.push({ id: entry.name, error: error.message });
     }
   }
   return { schedules, errors };
+}
+
+function localTimes({ at, nextAt }) {
+  const format = value => new Date(value).toLocaleString(undefined, { timeZoneName: 'shortOffset' });
+  return { atLocal: format(at), nextAtLocal: nextAt ? format(nextAt) : null };
 }

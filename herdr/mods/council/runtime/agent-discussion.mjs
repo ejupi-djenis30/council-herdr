@@ -1,4 +1,4 @@
-import { createDebate, readDebate, readDebateRoom, replyToDebate } from './debate-room.mjs';
+import { closeDebate, createDebate, readDebate, readDebateRoom, replyToDebate } from './debate-room.mjs';
 import { terminalIdentity } from './alignment.mjs';
 import { desktopRequest } from './desktop.mjs';
 import { publishWithInvitations, readInvitationDelivery, runHerdrCommand } from './invitations.mjs';
@@ -39,6 +39,12 @@ export async function replyToThread(cwd, id, { author, text }) {
   const address = process.env.HC_TERMINAL_ID || author;
   const identity = await postingIdentity(address);
   return replyToDebate(cwd, id, { author: address, body: text }, { identity });
+}
+
+export async function closeThread(cwd, id, { author, decision, owner, nextStep }) {
+  const address = process.env.HC_TERMINAL_ID || author;
+  const identity = await postingIdentity(address);
+  return closeDebate(cwd, id, { decision, owner, nextStep }, { author: address, identity });
 }
 
 export function openPoll(cwd, { question, mode, options, context, recipients, sourceDebateId }) {

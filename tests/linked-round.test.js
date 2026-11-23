@@ -51,6 +51,9 @@ for (const mode of ['review', 'council']) {
       assert.equal(cliJob.workflow.round, 2);
       assert.equal(cliJob.workflow.previousSession, 'first');
       assert.equal(cliJob.task, 'Revise the command path');
+      const actions = desktopRequest(cwd, 'reviews', { id: 'first' }).review.roundActions;
+      assert.deepEqual(actions.nextJobIds, ['command-round']);
+      assert.equal(actions.canStartNext, false);
     }
     server.jobManager.workerLauncher = () => ({ success: true, address: 't90' });
     server.sendResult = (_id, result) => result;
@@ -62,6 +65,9 @@ for (const mode of ['review', 'council']) {
     const job = readJson(join(parentDir, 'job.json'));
     assert.equal(job.workflow.round, 2);
     assert.equal(job.workflow.previousSession, 'first');
+    const branches = desktopRequest(cwd, 'reviews', { id: 'first' }).review.roundActions;
+    assert.deepEqual(branches.nextJobIds, mode === 'review' ? ['command-round', 'second'] : ['second']);
+    assert.equal(branches.canStartNext, false);
     const herdr = participants(({ sessionDir, task }, index) => {
       if (index !== 2) return;
       const target = readJson(join(sessionDir, 'task', 'proposal-target.json'));

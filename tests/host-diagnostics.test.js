@@ -59,12 +59,17 @@ test('a matching-version host must expose every advertised tool, including sched
   server.sendResult = (_id, { tools }) => { advertised = tools.map(tool => tool.name); };
   await server.handleMessage({ id: 1, method: 'tools/list' });
   assert.deepEqual(requiredCouncilTools, advertised);
-  const inspect = tools => diagnoseCouncilHost({ ...request, liveServer: { version: councilVersion, tools } });
-  assert.deepEqual(inspect(advertised).issues, []);
-  assert.deepEqual(inspect(advertised.map(name => 'mcp__council__' + name)).issues, []);
+  const inspect = hostTools => diagnoseCouncilHost({ ...request, hostTools, liveServer: { version: councilVersion, tools: advertised } });
+  for (const prefix of ['', 'mcp__council__', 'tools.mcp__council__', 'mcp__council.', 'mcp__plugin_council_council__',
+    'council_', 'council.', 'tools.council.']) {
+    const observation = inspect(advertised.map(name => prefix + name));
+    assert.deepEqual(observation.issues, []);
+    assert.equal(observation.hostInventory.state, 'complete');
+    assert.equal(observation.hostInventory.availableCount, advertised.length);
+  }
   for (const hidden of [['council_schedule_create'], ['council_retally', 'council_team_call']]) {
     const exposed = advertised.filter(name => !hidden.includes(name));
-    const { expected, issues } = inspect([...exposed, 'mcp__another__' + hidden[0]]);
+    const { expected, issues } = inspect([...exposed, 'mcp__another__' + hidden[0], 'another_' + hidden[0], 'tools.other.' + hidden[0]]);
     assert.deepEqual(expected.tools, advertised);
     assert.equal(issues.length, 1);
     assert.equal(issues[0].code, 'needs_reload');
@@ -72,16 +77,44 @@ test('a matching-version host must expose every advertised tool, including sched
     for (const tool of hidden) assert.ok(issues[0].action.includes(tool));
   }
   assert.deepEqual(inspect([]).issues[0].missingTools, advertised);
-  assert.deepEqual(inspect(undefined).issues, []);
+  assert.equal(inspect(undefined).hostInventory.state, 'unverified');
 });
 
-test('doctor accepts an explicitly empty tool inventory even without a live version', t => {
+test('CLI doctor verifies the observed tool inventory independently of the live server version', t => {
   const cli = fileURLToPath(new URL('../bin/council.js', import.meta.url));
-  const result = JSON.parse(execFileSync(process.execPath, [cli, 'doctor', '--live-tools=', '--json'], {
-    cwd: temporaryProject(t), encoding: 'utf8', timeout: 10000
-  }));
-  assert.deepEqual(result.integration.liveServer.tools, []);
-  assert.deepEqual(result.integration.issues[0].missingTools, requiredCouncilTools);
+  const cwd = temporaryProject(t);
+  const run = (...flags) => JSON.parse(execFileSync(process.execPath, [cli, 'doctor', ...flags, '--json'],
+    { cwd, encoding: 'utf8', timeout: 10000 })).integration;
+  assert.equal(run('--live-version', councilVersion).hostInventory.state, 'unverified');
+  assert.deepEqual(run('--live-tools=').issues[0].missingTools, requiredCouncilTools);
+  const names = requiredCouncilTools.map(name => 'council_' + name).join(',');
+  assert.equal(run('--live-tools', names).hostInventory.state, 'complete');
+});
+
+test('OpenCode doctor reads v2 project JSONC and distinguishes disabled and unreadable configurations', t => {
+  const project = temporaryProject(t);
+  const request = { host: 'opencode', project };
+  const plan = setupAlignment({ ...request, apply: true });
+  const jsonc = disabled => `{
+    // Permission filters can still affect tools at runtime.
+    "$schema": "https://opencode.ai/config.json", /* remote schema URL */
+    "mcp": { "servers": { "council": ${JSON.stringify({ ...plan.server, disabled })}, }, },
+  }`;
+  writeFileSync(plan.config, jsonc(false));
+  assert.equal(diagnoseCouncilHost(request).configured.server.version, councilVersion);
+  writeFileSync(plan.config, jsonc(true));
+  assert.deepEqual(diagnoseCouncilHost(request).issues.map(issue => issue.code), ['mcp_disabled']);
+  writeFileSync(plan.config, '{');
+  assert.deepEqual(diagnoseCouncilHost(request).issues.map(issue => issue.code), ['mcp_config_unreadable']);
+});
+
+test('Codex doctor recognizes an externally managed MCP connection alongside the installed project skills', t => {
+  const request = { host: 'codex', project: temporaryProject(t) };
+  setupAlignment({ ...request, apply: true });
+  const diagnostic = diagnoseCouncilHost(request);
+  assert.equal(diagnostic.configured.server.status, 'externally_managed');
+  assert.equal(diagnostic.hostInventory.state, 'unverified');
+  assert.deepEqual(diagnostic.issues, []);
 });
 
 test('Antigravity setup merges an absolute runner and explicit project binding into the workspace profile', t => {

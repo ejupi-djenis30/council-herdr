@@ -85,6 +85,25 @@ export function completedFormalRound(dir, session, saved) {
   return { ...round, ...definition, roster };
 }
 
+export function linkedRoundJobs(base, session, round) {
+  const children = [];
+  if (!isDirectory(base)) return children;
+  for (const entry of readdirSync(base, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !safeName.test(entry.name)) continue;
+    try {
+      const raw = readText(join(base, entry.name, 'job.json'), 16 * 1024 * 1024);
+      if (!raw) continue;
+      const job = JSON.parse(raw);
+      if (job?.$schema === 'council.job/v1' && job.sessionId === entry.name && job.mode === session.mode &&
+          job.workflow?.previousSession === session.sessionId && job.workflow.round === round &&
+          Date.parse(job.createdAt) >= Date.parse(session.createdAt)) children.push(entry.name);
+    } catch {
+      // An unreadable job cannot establish a link or hide other linked rounds.
+    }
+  }
+  return children.sort();
+}
+
 export function verifiedFormalProposal(dir, round) {
   const root = join(dir, 'artifacts');
   const phase = join(root, round.proposal.phase);

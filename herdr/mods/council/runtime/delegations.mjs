@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { jobTimeline, readProgress } from './activity-log.mjs';
-import { computeFingerprint, isJobRecord, jobExpired, jobInterruption, jobRecordProblem, jobRecovery } from './job-record.mjs';
+import { computeFingerprint, isJobRecord, jobExpired, jobInterruption, jobRecordProblem, jobRecovery, readDispatchError } from './job-record.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 import { observeWorker, sameActiveWorker } from './worker-observation.mjs';
 
@@ -9,18 +9,6 @@ const OUTPUT_LIMIT = 12000;
 
 function field(value) {
   return typeof value === 'string' && value ? value : null;
-}
-
-function dispatchError(dir) {
-  try {
-    const raw = readText(join(dir, 'dispatch-error.json'), 64 * 1024);
-    if (raw === null) return null;
-    const record = JSON.parse(raw);
-    return { error: field(record?.error) ?? 'Worker dispatch failed', failedAt: field(record?.failedAt) };
-  } catch {
-    // The job reader treats an unreadable dispatch sidecar as unavailable.
-    return null;
-  }
 }
 
 function stateOf(job, problem, expired, workerObservation) {
@@ -95,7 +83,7 @@ export function readDelegation(base, id, selected, lookupWorker) {
   const deadline = Date.parse(job.deadlineAt);
   if (!Number.isFinite(deadline)) throw new Error('Job record has no valid deadline.');
   const expired = jobExpired(job, now);
-  const dispatch = dispatchError(dir);
+  const dispatch = readDispatchError(dir);
   const problem = jobRecordProblem(job, dispatch?.error);
   const status = stateOf(job, problem, expired, workerObservation);
   const task = field(job.task) ?? id;

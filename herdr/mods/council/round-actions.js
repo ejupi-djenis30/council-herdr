@@ -21,7 +21,8 @@ export async function refreshFormalTally(review, dispatch) {
 export async function startFormalRound(review, dispatch) {
   const action = review.roundActions;
   if (!action?.canStartNext) throw new Error('A completed round and its original proposal are required.');
-  const args = ['round', '--session', review.id, '--new-session', action.nextSessionId];
+  // An implicit start can reconnect to a custom ID created since this view was read.
+  const args = ['round', '--session', review.id];
   let response;
   let reason;
   try {
@@ -29,14 +30,20 @@ export async function startFormalRound(review, dispatch) {
   } catch (error) {
     reason = error.message;
   }
+  const identifiesRound = record => record?.sessionId === action.nextSessionId ||
+    (typeof record?.sessionId === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(record.sessionId) &&
+      record.previousSession === review.id && record.round === action.round + 1);
   const record = parsed(response);
-  if (response?.code === 0 && record?.success === true && record.sessionId === action.nextSessionId) return record.sessionId;
+  if (response?.code === 0 && record?.success === true && identifiesRound(record)) return record.sessionId;
   if (record?.success === false) throw new Error(problem(response, record));
   // Read the job fingerprint after an unacknowledged launch; never dispatch a second worker here.
+  let id = action.nextSessionId;
   try {
     const receipt = await dispatch([...args, '--inspect']);
     const match = parsed(receipt);
-    if (receipt.code === 0 && match?.sessionId === action.nextSessionId && match.matches === true) return match.sessionId;
+    if (receipt.code === 0 && match?.matches === true && identifiesRound(match)) return match.sessionId;
+    if (match?.success === false) reason = problem(receipt, match);
+    if (match?.sessionId) id = match.sessionId;
   } catch {}
-  throw new Error(`${reason || problem(response, record)} Check session ${action.nextSessionId} in Activity.`);
+  throw new Error(`${reason || problem(response, record)} Check session ${id} in Activity.`);
 }

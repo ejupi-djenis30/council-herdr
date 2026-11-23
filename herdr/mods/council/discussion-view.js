@@ -86,7 +86,8 @@ export function discussionView(t, debate, {
   if (debate.decision) {
     const { decision, owner, nextStep } = debate.decision;
     const fields = [['Decision', decision], ['Owner', owner], ['Next step', nextStep]];
-    if (debate.decision.closedBy) fields.push(['Recorded by', debate.decision.closedBy]);
+    const { closedBy, closedByIdentity } = debate.decision;
+    if (closedBy) fields.push(['Recorded by', closedByIdentity ? `${agentName(closedByIdentity.agent)} (${closedBy})` : closedBy]);
     body.child(panel(t)
       .child(h_flex().gap(6).justify_between().items_center().flex_wrap()
         .child(cardHeading(t, 'Recorded decision', 'check'))

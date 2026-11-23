@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.1
+
+- Start agents through Windows batch launchers with a single-line readiness notice.
+- Resolve schedule times on the project machine and report scheduler dispatch failures during creation and recovery.
+- Open existing linked voting rounds with custom IDs. Round inspection recognizes canonical IDs and reports dispatch failures.
+- Check the tools an agent host actually exposes during alignment, including OpenCode tool names.
+- Preserve the verified agent and terminal that closed a debate in its decision and copied handoff.
+
 ## 3.7.0
 
 - Launch all six workflows from Herdr Desktop. Configure participants, parallel assignments, and ordered pipeline stages. Immediate delegations can use an existing aligned terminal.

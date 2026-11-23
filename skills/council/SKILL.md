@@ -60,9 +60,13 @@ For authorized project setup, preview `council alignment setup --host <codex|cla
 
 ## Respond to an alignment check
 
-When you have this skill and the Council tool, call `council_alignment` with `{"action":"report","state":"aligned","revision":"council/herdr-alignment-v1"}`. If the server lacks `HC_TERMINAL_ID`, include your terminal address as `target` and the `challenge` from the notice. After the receipt, finish the readiness turn and wait for a separate assignment.
+Discover the Council tools available to **this agent in this session**, including deferred tools. Use the host's tool discovery or callable catalog. In Codex with `functions.exec`, collect `ALL_TOOLS.map(t => t.name).filter(n => n.startsWith("mcp__council__"))`. In OpenCode, inspect the `council` namespace in the Code Mode catalog or the native tools named `council_council_…`. In hosts that expose bare tool names, collect those from the Council connection's agent-visible tool list.
 
-If the skill or integration is unavailable, report `not_aligned` through MCP if possible, or use the notice's `alignment decline` command from your own terminal if permitted. Say `Council alignment: not aligned` and end the turn.
+Pass the discovered names as the `hostTools` array to `council_status`. The server's `integration.expected.tools`, `integration.liveServer.tools` and MCP `tools/list` describe the server catalog. Only the host's own discovery supplies evidence of exposure. An omitted inventory is unverified. If the host inventory is incomplete, report the missing names from `integration.hostInventory.missingTools`.
+
+When the status is `ok`, its version matches the notice and the host inventory is complete, call `council_alignment` with `{"action":"report","state":"aligned","revision":"council/herdr-alignment-v2"}` **and the same `hostTools` array**. If the server lacks `HC_TERMINAL_ID`, include your terminal address as `target` and the `challenge` from the notice. After the receipt, finish the readiness turn and wait for a separate assignment.
+
+If a tool or the skill is missing, tool exposure cannot be verified, or the version differs, report `not_aligned` through MCP if possible, or use the notice's `alignment decline` command from your own terminal if permitted. Say `Council alignment: not aligned` and end the turn.
 
 ## Convene a formal review
 

@@ -257,11 +257,18 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
       } else {
         const options = nextFormalRound(orchestrator.workspace, id, jobFlags({ ...flags, session: flags['new-session'], _: [] }));
         if (flags.inspect) {
-          const { job } = jobManager.readJobRecord(options.sessionId);
+          const record = jobManager.readJobRecord(options.sessionId);
           const fingerprint = computeFingerprint(options, workflowInputs(options, options.mode));
-          result = { sessionId: options.sessionId, matches: job?.sessionId === options.sessionId && job.fingerprint === fingerprint };
+          const failed = !record.success && !record.notFound ? record.error
+            : record.job?.state === 'failed' ? record.job.error || 'The previous job failed' : null;
+          result = { sessionId: record.sessionId, matches: record.success && !failed && record.job.fingerprint === fingerprint,
+            ...(failed ? { success: false, error: failed } : {}) };
         } else {
           result = await jobManager.startJob(options);
+        }
+        if (result.success || result.matches) {
+          result.previousSession = options.previousSession;
+          result.round = options.round;
         }
       }
       console.log(JSON.stringify(result, null, 2));
@@ -291,11 +298,9 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
 
     case 'doctor': {
       const doc = herdr.doctor();
-      const liveServer = flags['live-version'] !== undefined || flags['live-tools'] !== undefined ? {
-        version: typeof flags['live-version'] === 'string' ? flags['live-version'] : null,
-        tools: typeof flags['live-tools'] === 'string' ? flags['live-tools'].split(',').map(name => name.trim()).filter(Boolean) : null
-      } : undefined;
-      const integration = diagnoseCouncilHost({ host: flags.host, project: flags.project ?? process.cwd(), target: flags.target, herdr, liveServer });
+      const liveServer = typeof flags['live-version'] === 'string' ? { version: flags['live-version'] } : undefined;
+      const hostTools = typeof flags['live-tools'] === 'string' ? flags['live-tools'].split(',').map(name => name.trim()).filter(Boolean) : undefined;
+      const integration = diagnoseCouncilHost({ host: flags.host, project: flags.project ?? process.cwd(), target: flags.target, herdr, liveServer, hostTools });
       if (flags.json) {
         console.log(JSON.stringify({ environment: doc, integration }, null, 2));
         break;
@@ -308,6 +313,9 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
         console.log(`  - ${name.padEnd(12)}: ${info.available ? `Ready (${info.path})` : 'Not on PATH'}`);
       }
       console.log(`\nCouncil ${integration.expected.version}, skill ${integration.expected.skillRevision}`);
+      const inventory = integration.hostInventory;
+      console.log('Host tool inventory: ' + (inventory.state === 'unverified' ? 'unverified (pass --live-tools)'
+        : `${inventory.availableCount}/${inventory.expectedCount} exposed`));
       for (const issue of integration.issues) console.log(`  - ${issue.code}: ${issue.action}`);
       break;
     }
