@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.1
+## 3.5.0
 
 - Enable structured debate, parallel assignments, and sequential pipelines in `convene`, with verified handoffs and saved advisory reports.
 - Keep collecting an acknowledged delegation through Herdr input prompts. Show the pause and original deadline in Desktop, CLI, and MCP.
@@ -10,6 +10,34 @@
 - Launch bundled MCP from the plugin installation directory. Pass an absolute `project` to workspace tools when the connection has no default project. Use `doctor` to inspect versions, tools, and alignment.
 - Lead with resumable delegation in the skill and include the assigned proposal digest in formal reviewer briefs.
 - Show invitation deadlines and delivery outcomes in Desktop, add checks and retries for eligible targets, and improve keyboard navigation.
+- Support background runs in all six modes, one-time and recurring schedules, linked voting rounds, and retallies for late direct ballots.
+- Report stopped background workers while preserving the delivery record and terminal claims.
+
+## 3.4.0
+
+- Open a native Workspace view for active runs, decisions, declared plans, Team handoffs, and local Git changes.
+- Record a delegation timeline and attach progress, blocker, and handoff notes from Desktop, CLI, or MCP.
+- Read stable components and dependencies from PLAN.md and highlight observed Git paths beside their declared tasks.
+- Keep Workspace scoped to the owning project when a terminal enters a subfolder, with exact folder pinning and a return path from run and decision details.
+- Group plan components by dependency order, surface read issues, and make progress updates safe to retry.
+
+## 3.3.0
+
+- Add dedicated skills for single-agent delegation, formal review, and on-demand Team roles.
+- Route explicit Council workflow and argument selections through the shared skill and Claude Code command.
+- Preview and install all Council skills for a project, including Codex.
+
+## 3.2.0
+
+- Configure explicit project team roles, optional reporting lines and model selection in Desktop and the CLI.
+- Call named team members through CLI or MCP. Save each completed handoff and stop the model process until the next explicit call.
+- Show whether each formal ballot targets the recorded proposal in Reviews and Debate.
+- Create linked polls from a debate and close discussions with a recorded decision, owner, and next step.
+
+## 3.1.0
+
+- Select which agents to invite when opening a Desktop poll or debate, with zero recipients selected by default.
+- Persist invitation queues before dispatch and resume pending deliveries within the original deadline. Show uncertain sends for manual inspection.
 
 ## 3.0.0
 

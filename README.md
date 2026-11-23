@@ -2,11 +2,11 @@
 
 <img src="herdr/mods/council/icons/logo.svg" width="48" height="48" alt="" align="right">
 
-Run a poll with the agents already in your workspace. See their votes and reasoning, record the decision, and give the next agent a handoff. Open **Council** in the Herdr sidebar to find polls, delegations, debate threads, and formal reviews.
+Follow the work of your agents, coordinate a handoff, and record decisions. Open **Council** in the Herdr sidebar to see workspace activity, polls, delegations, debate threads, formal reviews, and Team roles.
 
-[Install](#install) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
+[Install](#install) · [Workspace activity](#workspace-activity) · [Run a poll](#run-a-poll) · [CLI and MCP](#available-workflows) · [Gallery package](herdr/RECIPE.md)
 
-![Council in Herdr Desktop showing a rollout poll, its vote breakdown, and agent responses](herdr/preview.png)
+![Council Workspace in Herdr Desktop, with a decision desk and runs grouped by attention, activity, and ready results](herdr/screenshots/workspace.png)
 
 | Open from the sidebar | Track participation | Follow delegations | Inspect formal reviews |
 | --- | --- | --- | --- |
@@ -32,21 +32,23 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 ## Run a poll
 
 1. Select **New poll** and choose listed options, free responses, or both.
-2. Select **Open poll**. Council sends an invitation with the project and poll ID to the current space's agents. Open **Participants** to follow responses or copy a manual invitation.
+2. In **Invite agents**, select the terminals you want to invite, then select **Open poll**. Leave the list unselected to open without invitations. The rows show each agent's terminal, project folder and status. Open **Participants** to follow responses or copy a manual invitation.
 3. Follow live responses in **Results**. You can add options while the poll is open, see replies from agents outside the roster, and jump to a live terminal from the participant list.
 4. Close the poll with an optional next step. **Copy decision** captures the tally, reasons, and missing responses for the next person or agent.
 
 **Polls** includes polls opened in Desktop or by agents through the CLI and MCP. **This space** includes the space folder and its terminal folders. Use **All local spaces** to see records from other open local spaces. Polls display their project and, when available, the terminal that opened them.
 
-In **Debate**, select **New debate**, enter a topic, and select **Start debate** to invite the space's agents into a shared thread. Add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
+In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. You can also open a thread without invitations and add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
 
-The invitation worker runs in Herdr after the panel closes. Agents that are working, waiting for input, or completing Council setup stay queued for up to 15 minutes. The panel shows their delivery and alignment status.
+From a debate, **Create poll** pre-fills the question and context. Edit them, select recipients, and open the poll in the debate's project. Both views link to each other. Use **Close with decision** to record the decision, its owner, and the next step. The closed thread stays readable with those fields and its linked polls. The CLI and MCP can read the recorded decision.
+
+The invitation queue is saved before the worker starts. The worker runs in Herdr after the panel closes. If it stops, Council resumes pending deliveries when you reopen its panel in the original space, within the original 15-minute window. The panel checks for interrupted workers while open and displays each queue’s deadline. Use **Check setup** to ask the original terminal to register Council. After the window ends, **Retry** opens a fresh window for a confirmed unsent invitation. An invitation marked **Delivery uncertain** needs a check in the agent's terminal. Earlier queues without a saved space remain visible for manual inspection.
 
 ## Agent alignment
 
 Agents register readiness through `council_alignment` using the current Council skill. Setup notices reach unknown agents before Council shares any task, poll ID or debate ID. Receipts apply to the current Herdr terminal and expire after eight hours. A reported setup issue stays visible in the invitation. See [Council host setup](docs/alignment.md) for configuring and refreshing a specific agent.
 
-**Debate** also shows saved Council and review proposals, replies, and submitted ballots in chronological order. The view labels terminal captures and drafts and links to the formal review. **Reviews** shows submitted direct ballots as they arrive and displays the saved tally and verdict when available.
+**Debate** also shows saved Council and review proposals, replies, and submitted ballots in chronological order. The view labels terminal captures and drafts and links to the formal review. In **Reviews** and the formal thread, a badge on each direct ballot shows whether its SHA-256 matches the recorded proposal for that round. **Reviews** displays the saved tally and verdict when available.
 
 ### Open or respond to a poll from an agent
 
@@ -66,7 +68,7 @@ Use `poll track <poll-id> --voter <id> --label "Reviewer"` and `poll untrack <po
 
 ### Data and permissions
 
-The panel reads Council records under `.agent_workspace/` in the local projects in scope. Poll actions write advisory events under `.agent_workspace/.polls/` in the poll's original project. Poll writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses the local clipboard for invitations and handoffs.
+The panel reads Council records under `.agent_workspace/` in the local projects in scope. Poll actions write advisory events under `.agent_workspace/.polls/` in the poll's original project. Poll and debate writes use hard links to publish complete records when multiple agents submit concurrently. The project filesystem must support hard links. The panel uses the local clipboard for invitations and handoffs.
 
 ## Available workflows
 
@@ -138,6 +140,31 @@ hc read parser-panel
 
 For `convene`, `--timeout` sets the per-turn budget and `--keep` retains completed owned terminals for inspection.
 
+## Workspace activity
+
+Open **Council → Workspace** to see in-flight runs, issues requiring attention, saved results, and decisions from the focused local project. Pin a folder to keep it in view. Drill into a delegation to see delivery, capture, and shutdown milestones, navigate Team handoffs, or add a progress update.
+
+**Plan** reads the project’s optional `PLAN.md` and shows its declared tasks, dependencies, and decisions alongside matching Git paths and reported updates. **Changes** shows working-tree paths, worktrees, and recent commits. Council labels what it recorded, what an agent reported, and what Git observed. [Workspace guide and plan format](docs/workspace-activity.md)
+
+Use `council activity` or `council_activity` to read the same workspace overview. Attach a note with `council activity report` or `council_report_progress`.
+
+## On-demand team roles
+
+Open **Council → Team** in a local project space and add named members. Give each one a role and choose its agent, project access and optional responsibilities. Codex and Claude also accept a specific model ID. Choose **Reports to** if a member has a manager. Council checks that the reporting lines are acyclic and includes them in each role's task brief. Role titles and reporting lines leave formal review and voting rules unchanged.
+
+Use the Council CLI inside the project's Herdr space or the matching MCP server to start a turn. The same model can fill several roles. For example, using the installed CLI:
+
+```bash
+council team set lead --agent codex --role "Delivery lead"
+council team set qa --agent claude --role "QA reviewer" --reports-to lead
+council team call lead --session rollout-plan-1 --task "Plan the rollout and ask QA to review its risks."
+council result --session rollout-plan-1
+```
+
+Team members use `council_team_list` and `council_team_call` to delegate work to a named teammate. A member that has handed off its remaining work ends its turn immediately. Council saves the result, confirms the model process has terminated, and shows **Off**. The called teammate can keep working independently and can explicitly call the first role when it has something to report. A new call starts a fresh process and points it to the archived handoff. Use a new session ID for a new turn, and reuse the same ID and options to reconnect.
+
+Calls for a role already in use wait for its previous process to exit within the original deadline. Incomplete work stays available for inspection. Use **Team → Latest turn** to inspect the delivery and the saved terminal capture in **Delegations**. The power-off lifecycle applies to processes started by Team. Team calls use the same host setup and readiness check as other Council jobs. [Host setup](docs/alignment.md)
+
 ## Results and approvals
 
 Sessions live under `.agent_workspace/<session-id>/` in the target project. Inputs, briefs, proposals, reviews, direct ballots and validation records are separate artifacts. Reviewers receive the author's proposal before starting.
@@ -157,6 +184,21 @@ node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-o
 ```
 
 Submit from the same target project, or pass the explicit session directory. A ballot submitted after a completed formal turn refreshes that round’s tally. See [voting and validation](docs/voting-and-validation.md).
+
+## Choose a workflow in your agent
+
+Invoke the named skill in Codex. In the Council checkout and plugin, choose the `council:` prefixed name when shown in the skill picker, for example `$council:council-delegate`. The examples use the unprefixed names for standalone installs.
+
+| Goal | Example |
+| --- | --- |
+| Delegate to a single specialist | `$council-delegate codex "Find parser edge cases" --permission read --timeout 120` |
+| Use an existing Herdr terminal | `$council-delegate --adopt t123 "Inspect the failing test" --session parser-check` |
+| Run the formal review workflow | `$council-review "Review the migration proposal" --agents claude,codex,junie` |
+| Convene the formal Council | `$council council "Choose the migration strategy"` |
+| Call one configured Team member | `$council-team call qa "Check rollout risks" --session rollout-qa-1` |
+| Read a saved job | `$council result --session parser-check` |
+
+Use `$council delegate ...`, `$council review ...`, or `$council team ...` if you prefer a single entry point. In Claude Code with the plugin loaded, use `/council:council delegate ...` or select the dedicated plugin skill. Invoking Council without an operation shows the choices before any agent starts. An explicit session, `--async`, or `--adopt` starts durable delegation; use status and result to follow it. [Host setup](docs/alignment.md)
 
 ## MCP and host packaging
 

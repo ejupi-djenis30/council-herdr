@@ -76,4 +76,26 @@ test('project setup previews paths and updates Council without replacing other s
   assert.deepEqual(configured.mcp.servers.other, old.mcp.servers.other);
   assert.deepEqual(configured.mcp.servers.council, preview.server);
   assert.ok(readFileSync(result.skill, 'utf8').includes(skillRevision));
+  assert.ok(result.skills.every(path => existsSync(path)));
+});
+
+test('Codex setup installs workflow skills and leaves the project MCP configuration untouched', t => {
+  const project = mkdtempSync(join(tmpdir(), 'council-codex-'));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  const request = { project, host: 'codex' };
+  const preview = setupAlignment(request);
+  assert.deepEqual(preview.skills, ['council', 'council-delegate', 'council-review', 'council-team']
+    .map(name => join(project, '.agents', 'skills', name, 'SKILL.md')));
+  assert.equal(preview.config, null);
+  assert.equal(preview.server.cwd, project);
+  assert.ok(preview.skills.every(path => !existsSync(path)));
+  setupAlignment({ ...request, apply: true });
+  assert.ok(preview.skills.every(path => existsSync(path)));
+  assert.equal(existsSync(join(project, '.codex')), false);
+
+  writeFileSync(preview.skills[1], 'A local edit.');
+  assert.throws(() => setupAlignment({ ...request, apply: true }), /--replace/);
+  assert.equal(readFileSync(preview.skills[1], 'utf8'), 'A local edit.');
+  setupAlignment({ ...request, apply: true, replace: true });
+  assert.match(readFileSync(preview.skills[1], 'utf8'), /^name: council-delegate$/m);
 });

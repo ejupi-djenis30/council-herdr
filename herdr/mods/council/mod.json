@@ -1,5 +1,5 @@
 {
   "title": "Council",
   "place": "none",
-  "overlay": { "kind": "window", "key": "council", "width": 760, "height": 710 }
+  "overlay": { "kind": "window", "key": "council", "width": 900, "height": 750 }
 }

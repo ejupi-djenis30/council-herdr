@@ -1,10 +1,10 @@
 # Council host setup
 
-Install the Council skill from `skills/council/` and connect the agent to the matching Council MCP server. Use the host's project scope when available. Start Herdr agents in the intended project and use Node.js 20 or newer.
+Install the Council skills from `skills/` and connect the agent to the matching Council MCP server. Use the host's project scope when available. Start Herdr agents in the intended project and use Node.js 20 or newer.
 
 ## Configure a project
 
-The installer previews project-scoped files for Antigravity, Claude Code, Junie and OpenCode. With the user's authorization for that project, apply the preview.
+The installer previews project-scoped files for Codex, Antigravity, Claude Code, Junie and OpenCode. Apply the preview to install the skills in the target project.
 
 ```powershell
 node C:/path/to/council-herdr/bin/council.js alignment setup --host opencode --project C:/path/to/project

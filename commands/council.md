@@ -1,19 +1,20 @@
 ---
-name: council
-description: Delegate bounded work or review a concrete proposal through visible Herdr agents.
+description: Choose an explicit Council operation in Herdr and pass its arguments.
+argument-hint: "[delegate|review|council|team|activity|status|result|doctor|poll|debate|parallel|pipeline|schedule|round|retally] [arguments]"
 ---
 
-# /council
+# Council
 
-- `/council <task>`: author proposal followed by skeptic and simplifier reviews.
-- `/council review <task>`: author proposal followed by reviewer and simplifier reviews.
-- `/council delegate <agent> <task>`: one specialist task.
-- `/council status` or `/council doctor`: inspect parent-environment availability and Herdr terminals.
+User arguments: $ARGUMENTS
 
-For one specialist, prefer `council_start`, `council_session_status` and `council_result` or the equivalent CLI commands `start`, `status` and `result`. Use the intended project directory for the CLI and carry its absolute path as `project` in project-scoped MCP calls. Specify the terminal address to reuse after verifying it is aligned and idle or done. Keep the session ID and identical task options for reconnecting.
+Use the first argument as the operation and preserve the remaining arguments. Follow the `council` skill and the selected workflow's skill.
 
-Use `council_convene` for formal council or review. Check that the MCP connection exposes the tools required for the workflow, including `council_alignment`. Use the current CLI by absolute path if the connection is missing tools or cannot select the project. Read the installed `hc --skill` and run long blocking CLI commands under `hc run --bg`.
+- `delegate <agent> <task>`: use `council-delegate` for one specialist. Accept `--adopt <address>`, `--async`, and `--session <id>`.
+- `review <task>`: use `council-review` with `mode: review`.
+- `council <task>`: run `council_convene` with `mode: council`.
+- `team list|call|set`: use `council-team` and preserve the configured member ID.
+- `debate <task>`, `parallel`, `pipeline`: convene the named mode. Keep explicit assignments or ordered stages. `debate show` and `debate reply` use the Desktop discussion tools.
+- `schedule`, `round` and `retally`: manage future runs and formal voting in the requested project.
+- `activity`, `status`, `result`, `doctor` and `poll`: use the selected operation in the requested project.
 
-Default to read permissions. Present verified findings, dissent, authorization state and next actions. Screen-only results are provisional. Only explicit, valid direct ballots from completed participants authorize promotion.
-
-On timeout, a blocked turn or uncertain delivery, inspect the session and terminal addresses before attempting recovery. Preserve borrowed and incomplete terminals. See `skills/council/SKILL.md`.
+If no arguments were supplied, show this list. If the operation is missing, ambiguous, or unsupported, explain the valid choices before launching any agent. Keep explicit options and targets. Default to read access.

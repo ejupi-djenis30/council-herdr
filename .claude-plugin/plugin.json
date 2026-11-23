@@ -1,6 +1,6 @@
 {
   "name": "council",
-  "version": "3.0.1",
+  "version": "3.5.0",
   "description": "Herdr-native multi-agent Council plugin coordinating Claude Code, Codex, Antigravity, and Junie.",
   "author": { "name": "Ejupi-Labs" },
   "license": "MIT",
@@ -8,7 +8,10 @@
     "./commands/council.md"
   ],
   "skills": [
-    "./skills/council"
+    "./skills/council",
+    "./skills/council-delegate",
+    "./skills/council-review",
+    "./skills/council-team"
   ],
   "mcpServers": {
     "council": {

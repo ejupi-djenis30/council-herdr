@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { linkSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { isDirectory, readText } from './store-files.mjs';
+import { debateIdPattern } from './debate-room.mjs';
+import { appendEvent, eventFiles, isDirectory, readText } from './store-files.mjs';
 
 const POLL_ID = /^poll-[0-9a-f-]{36}$/;
-const EVENT_FILE = /^\d{8}\.json$/;
 const VOTER_ID = /^[a-z0-9][a-z0-9_.:/-]{0,79}$/;
 const MAX_PARTICIPANTS = 32;
 const MODES = ['choice', 'mixed', 'open'];
@@ -38,22 +38,6 @@ function makeOption(label, options) {
 
 function directoryEntries(dir) {
   return isDirectory(dir) ? readdirSync(dir, { withFileTypes: true }) : [];
-}
-
-function appendEvent(dir, revision, event) {
-  const target = join(dir, `${String(revision).padStart(8, '0')}.json`);
-  const temporary = join(dir, `.${randomUUID()}.tmp`);
-  writeFileSync(temporary, JSON.stringify(event), { flag: 'wx', mode: 0o600 });
-  try {
-    // A hard link publishes complete bytes and fails if another writer took this revision.
-    linkSync(temporary, target);
-    return true;
-  } catch (error) {
-    if (error.code === 'EEXIST') return false;
-    throw error;
-  } finally {
-    unlinkSync(temporary);
-  }
 }
 
 function applyEvent(poll, event) {
@@ -93,6 +77,7 @@ function validSnapshot(poll, id) {
   return poll?.id === id && poll.schema === 'council.poll/v1' && MODES.includes(poll.mode) &&
     typeof poll.question === 'string' && typeof poll.createdAt === 'string' &&
     (poll.createdBy === undefined || (typeof poll.createdBy === 'string' && VOTER_ID.test(poll.createdBy))) &&
+    (poll.sourceDebateId === undefined || (typeof poll.sourceDebateId === 'string' && debateIdPattern.test(poll.sourceDebateId))) &&
     Array.isArray(poll.options) && poll.options.every(option =>
       typeof option?.id === 'string' && typeof option.label === 'string') &&
     Array.isArray(poll.participants) && poll.participants.every(participant =>
@@ -102,17 +87,17 @@ function validSnapshot(poll, id) {
       typeof response.optionId === 'string' && typeof response.answer === 'string' && typeof response.note === 'string');
 }
 
-function readPoll(base, id) {
+function readPoll(base, id, sourceDebateId) {
   const dir = join(base, id);
-  const events = directoryEntries(dir)
-    .filter(file => file.isFile() && EVENT_FILE.test(file.name))
-    .map(file => file.name).sort();
+  const events = eventFiles(dir);
   if (events.length === 0) return null;
 
   let poll;
   for (const [index, name] of events.entries()) {
     if (Number.parseInt(name, 10) !== index + 1) throw new Error(`Poll ${id} has a missing revision.`);
-    poll = applyEvent(poll, JSON.parse(readText(join(dir, name), 32 * 1024)));
+    const event = JSON.parse(readText(join(dir, name), 32 * 1024));
+    if (index === 0 && sourceDebateId !== undefined && event?.poll?.sourceDebateId !== sourceDebateId) return null;
+    poll = applyEvent(poll, event);
   }
   if (!validSnapshot(poll, id)) throw new Error(`Invalid poll record: ${id}.`);
   return { dir, poll, revision: events.length };
@@ -124,6 +109,7 @@ function summarize(poll) {
   return {
     id, question, mode, createdAt, closedAt, responseCount: responses.length,
     ...(typeof createdBy === 'string' && VOTER_ID.test(createdBy) ? { createdBy } : {}),
+    ...(poll.sourceDebateId ? { sourceDebateId: poll.sourceDebateId } : {}),
     participation: {
       expected: participants.length,
       received: participants.filter(participant => voters.has(participant.voter)).length
@@ -150,14 +136,14 @@ export class PollStore {
     this.base = join(this.workspace, '.polls');
   }
 
-  list() {
+  list({ sourceDebateId } = {}) {
     const polls = [];
     const errors = [];
     if (!isDirectory(this.workspace)) return { polls, errors };
     for (const entry of directoryEntries(this.base)) {
       if (!entry.isDirectory() || !POLL_ID.test(entry.name)) continue;
       try {
-        const record = readPoll(this.base, entry.name);
+        const record = readPoll(this.base, entry.name, sourceDebateId);
         if (record) polls.push(summarize(record.poll));
       } catch (error) {
         errors.push({ id: entry.name, error: error.message });
@@ -173,7 +159,10 @@ export class PollStore {
     return results(record.poll);
   }
 
-  create({ question, context, mode = 'choice', options = [], createdBy, participants }, { fromPanel = false } = {}) {
+  create({ question, context, mode = 'choice', options = [], createdBy, participants }, { fromPanel = false, beforePublish, sourceDebateId } = {}) {
+    if (sourceDebateId !== undefined && (typeof sourceDebateId !== 'string' || !debateIdPattern.test(sourceDebateId))) {
+      throw new Error('Invalid source debate ID.');
+    }
     if (!MODES.includes(mode)) throw new Error('Poll mode must be choice, mixed or open.');
     if (!Array.isArray(options)) throw new Error('Options must be an array.');
     if (mode === 'open' && options.length) throw new Error('A free-response poll takes no options.');
@@ -186,10 +175,14 @@ export class PollStore {
       mode,
       options: [],
       createdAt: new Date().toISOString(),
+      ...(sourceDebateId ? { sourceDebateId } : {}),
       ...(createdBy ? { createdBy: voterId(createdBy, fromPanel) } : {})
     };
     for (const label of options) poll.options.push(makeOption(label, poll.options));
     if (fromPanel && Array.isArray(participants)) {
+      if (beforePublish && participants.length > MAX_PARTICIPANTS) {
+        throw new Error(`Select up to ${MAX_PARTICIPANTS} agents per poll.`);
+      }
       const tracked = new Map();
       for (const { address: voter, label } of participants.slice(0, MAX_PARTICIPANTS)) {
         const name = voterId(voter);
@@ -202,6 +195,7 @@ export class PollStore {
     const dir = join(this.base, poll.id);
     mkdirSync(dir);
     const event = { type: 'create', poll };
+    beforePublish?.(poll.id);
     appendEvent(dir, 1, event);
     return results(applyEvent(null, event));
   }

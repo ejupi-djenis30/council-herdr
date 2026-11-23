@@ -1,4 +1,4 @@
-import { div, image, svg } from 'gpui-kit';
+import { div, svg } from 'gpui-kit';
 import { Button, h_flex, v_flex, Input } from 'gpui-base';
 
 export function label(value, size = 13, color) {
@@ -7,11 +7,13 @@ export function label(value, size = 13, color) {
 }
 
 export function glyph(name, size = 15) {
-  return svg(`mods/council/icons/${name === 'debates' ? 'people' : name}.svg`).size(size).flex_shrink_0();
+  return svg(`mods/council/icons/${name === 'debates' || name === 'team' ? 'people' : name}.svg`).size(size).flex_shrink_0();
 }
 
 export function brandMark(size = 36) {
-  return image('mods/council/icons/logo.svg').size(size).flex_shrink_0();
+  return h_flex().size(size).rounded(8).items_center().justify_center().flex_shrink_0()
+    .border_1().border_color('#705bb2').bg('#211945').text_color('#d2c6ff')
+    .child(glyph('brand', Math.round(size * 0.64)));
 }
 
 export function iconTile(t, name, size = 34) {
@@ -107,6 +109,7 @@ export function reviewStatus(status) {
   const names = {
     approved: 'Approved',
     archived: 'Archived',
+    closed: 'Closed',
     open: 'Open',
     pending: 'Awaiting verdict',
     provisional: 'Provisional',

@@ -6,7 +6,9 @@ Council is a native collaboration panel for an active Herdr workspace. Ask its a
 
 ## What you see
 
-The **Council** entry in the sidebar uses a purple conversation mark and opens a native menu for **Polls**, **Delegations**, **Debate**, and **Reviews**. Select **All local spaces** to include projects from other open spaces and their terminal folders. Lists show the project that produced each record. Details use side-by-side cards on wider windows and stack on narrower windows.
+The **Council** entry in the sidebar uses a purple conversation mark and opens a native menu for **Workspace**, **Polls**, **Delegations**, **Debate**, **Reviews**, and **Team**. Select **All local spaces** in the record lists to include projects from other open spaces and their terminal folders. Details use side-by-side cards on wider windows and stack on narrower windows.
+
+**Workspace** follows the focused local terminal's folder, with explicit folder pinning in spaces that contain multiple projects. Its Runs view links to Council jobs and pending decisions. Plan reads stable headings, task checkboxes and dependencies from an optional `PLAN.md`. Changes shows observed Git paths, worktrees and recent commits. Delegations show recorded milestones, separate reported updates and links between related Team calls. Add updates in a run detail or with the activity CLI/MCP tools.
 
 ## How it behaves
 
@@ -14,15 +16,19 @@ Click **Council** and choose a section with the mouse or arrow keys and Enter. E
 
 In Participants, track an agent, copy an invitation scoped to its voter ID, or open its terminal. Live terminal labels are Idle, Working, Done, and Needs you. They use Herdr's idle, working, done, and blocked colors. A missing live terminal shows Terminal unavailable. Response states are Pending, Responded, and No response after closing. The poll still counts responses from outside the roster. Reviews shows submitted direct ballots while the session runs, followed by the saved verdict, formal quorum, invalid or missing ballots, and dissent.
 
-Open a poll or start a debate to automatically invite the current space's agents. Delivery runs in Herdr and follows agent readiness for up to 15 minutes. Check the invitation status in the open item. Debate rooms accept replies from Desktop, the bundled CLI, and MCP. Debate also follows Council and review sessions as threads, with a link to the formal tally and verdict.
+In the poll and debate forms, choose agents under **Invite agents**. Each row shows the terminal address, its project folder and live status. The form starts with no recipients selected. Delivery runs in Herdr and follows agent readiness for up to 15 minutes. Reopening Council in that space resumes the saved queue within the original window. The open item shows delivery status and flags uncertain deliveries for manual inspection. Debate rooms accept replies from Desktop, the bundled CLI, and MCP. Debate also follows Council and review sessions as threads, with a link to the formal tally and verdict.
+
+**Create poll** opens an editable form from a debate and links the two records in the same project. **Close with decision** saves a decision, an owner, and a next step, then closes the discussion to replies and pending invitations. The decision card is copyable. Formal ballots show their match to the proposal digest for their round next to the vote and score.
 
 Delegations reads asynchronous jobs started in the project from CLI or MCP. Filter for Active, Needs attention, or Ready. A detail shows the assigned terminal, acknowledgement, remaining time, recorded wait event, and any error. The Terminal capture card appears alongside the delivery record. It can copy saved output and the path to the full capture. Opening a live terminal leaves the panel visible. An elapsed deadline or uncertain delivery is shown even when a worker has saved no result.
+
+**Team** configures named roles, agent and model choices, and optional reporting lines for the current project. Run `council team call` through the Council CLI or use `council_team_call` through MCP to start an on-demand turn. The tab shows the last known power state and links to the saved turn. Completed managed models shut down after Council archives the result and start again on an explicit call.
 
 ## Built from
 
 `mods/council/mod.json` registers the dashboard window. `navigation.js` draws the native sidebar launcher and popup. `poll-view.js` renders the tally and roster, `poll-text.js` formats invitations and summaries, and `discussion-view.js` draws the debate thread. Herdr supplies project folders from `spaces()` and `panes()`, the live roster from `agents()`, and navigation through `agent.focus`.
 
-The window runs `runtime/council.mjs desktop <action>` through `herdr.exec` in the active local project directory and reads JSON from stdout. The Node helper reads Council session records and writes advisory events only under `.agent_workspace/.polls/`. Delegations reads `job.json` and its dispatch sidecar with the same result and dispatch checks as the CLI. The repository CLI and MCP import the same poll store. The bundled polling CLI also works when invoked directly from the target project directory:
+The window runs `runtime/council.mjs desktop <action>` through `herdr.exec` in the active local project directory and reads JSON from stdout. The Node helper reads Council session records and stores poll and team data inside `.agent_workspace/`. Delegations reads `job.json` and its dispatch sidecar with the same result and dispatch checks as the CLI. The repository CLI and MCP import the same stores. The bundled polling CLI also works when invoked directly from the target project directory:
 
 ```bash
 node /path/to/herdr-app/mods/council/runtime/council.mjs poll help

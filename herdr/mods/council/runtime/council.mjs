@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { runActivityCommand } from './activity-command.mjs';
 import { reportAlignment } from './alignment.mjs';
 import { runDebateCommand } from './debate-command.mjs';
 import { desktopRequest } from './desktop.mjs';
@@ -21,8 +22,12 @@ try {
     case 'debate':
       result = runDebateCommand(args);
       break;
+    case 'activity':
+      result = runActivityCommand(args);
+      break;
     case 'invite':
-      await sendInvitations(process.cwd(), fileURLToPath(import.meta.url), JSON.parse(args[0]));
+      const request = args[0]?.startsWith('{') ? JSON.parse(args[0]) : { id: args[0] };
+      await sendInvitations(process.cwd(), fileURLToPath(import.meta.url), request);
       result = { success: true };
       break;
     case 'invite-check':
@@ -47,7 +52,7 @@ try {
       result = runPollCommand([]);
       break;
     default:
-      throw new Error('Use council.mjs poll help or debate help.');
+      throw new Error('Use council.mjs poll help, debate help, or activity help.');
   }
   console.log(typeof result === 'string' ? result : JSON.stringify(result));
 } catch (error) {

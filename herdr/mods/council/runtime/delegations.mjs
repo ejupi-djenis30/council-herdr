@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { jobTimeline, readProgress } from './activity-log.mjs';
 import { isJobRecord, jobExpired, jobInterruption, jobRecordProblem, jobRecovery } from './job-record.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 import { observeWorker, sameActiveWorker } from './worker-observation.mjs';
@@ -13,7 +14,9 @@ function field(value) {
 function dispatchError(dir) {
   try {
     const raw = readText(join(dir, 'dispatch-error.json'), 64 * 1024);
-    return raw === null ? null : JSON.parse(raw)?.error || 'Worker dispatch failed';
+    if (raw === null) return null;
+    const record = JSON.parse(raw);
+    return { error: field(record?.error) ?? 'Worker dispatch failed', failedAt: field(record?.failedAt) };
   } catch {
     // The job reader treats an unreadable dispatch sidecar as unavailable.
     return null;
@@ -75,7 +78,8 @@ export function readDelegation(base, id, selected, lookupWorker) {
   const deadline = Date.parse(job.deadlineAt);
   if (!Number.isFinite(deadline)) throw new Error('Job record has no valid deadline.');
   const expired = jobExpired(job, now);
-  const problem = jobRecordProblem(job, dispatchError(dir));
+  const dispatch = dispatchError(dir);
+  const problem = jobRecordProblem(job, dispatch?.error);
   const status = stateOf(job, problem, expired, workerObservation);
   const task = field(job.task) ?? id;
   const participant = job.participant;
@@ -89,11 +93,18 @@ export function readDelegation(base, id, selected, lookupWorker) {
     status,
     agent: ownership === 'owned' ? field(participant?.agent) ?? field(job.agent) : field(participant?.reportedApp),
     ownership,
-    address: field(participant?.canonicalAddress) ?? field(participant?.address)
+    address: field(participant?.canonicalAddress) ?? field(participant?.address),
+    teamMember: field(participant?.team?.id),
+    teamSource: field(job.teamSource),
+    power: field(participant?.power),
+    deadlineAt: job.deadlineAt
   };
   if (!selected) return { summary, detail: null };
 
   const output = status === 'completed' || (job.workflow && status === 'failed') ? field(job.result?.output) : null;
+  let progress;
+  try { progress = readProgress(dir); }
+  catch { progress = { notes: [], count: 0, unreadable: 1 }; }
   const detail = {
     ...summary,
     task: task.slice(0, 2400),
@@ -103,6 +114,9 @@ export function readDelegation(base, id, selected, lookupWorker) {
       ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null,
     workerAddress: field(job.worker?.address),
     workerObservation,
+    ...(participant?.team ? { team: {
+      role: field(participant.team.role), power: field(participant.power), error: field(participant.powerError)
+    } } : {}),
     wait: {
       reason: field(job.waitDetails?.reason),
       status: field(job.waitDetails?.status),
@@ -111,6 +125,8 @@ export function readDelegation(base, id, selected, lookupWorker) {
     error: field(problem?.error) ?? field(job.error) ??
       (status === 'invalid' ? 'The saved state and delivery record are inconsistent.' : null),
     nextAction: jobRecovery(status, job.deliveryState),
+    timeline: jobTimeline(job, { dispatchFailed: problem?.dispatchFailed ? dispatch : null, status }),
+    progress,
     output: output?.slice(0, OUTPUT_LIMIT) ?? null,
     outputTruncated: Boolean(output && output.length > OUTPUT_LIMIT),
     outputPath: output !== null ? recordedOutputPath(dir, job.workflow) : null

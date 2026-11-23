@@ -9,8 +9,11 @@ import { nextFormalRound, resolveVotingSession, retallyAfterBallot, retallyForma
 import { setupAlignment } from '../lib/alignment-setup.js';
 import { councilVersion, diagnoseCouncilHost } from '../lib/diagnostics.js';
 import { alignmentOf, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
+import { runActivityCommand } from '../herdr/mods/council/runtime/activity-command.mjs';
 import { runDebateCommand } from '../herdr/mods/council/runtime/debate-command.mjs';
 import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
+import { TeamStore } from '../herdr/mods/council/runtime/team.mjs';
+import { callTeamMember } from '../lib/team.js';
 
 function printHelp() {
   console.log(`
@@ -37,10 +40,14 @@ COMMANDS:
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
   poll help                     Manage advisory project polls and submit responses
   debate help                   Read or reply to a Council Desktop debate
+  team help                     Configure named roles and call on-demand team members
+  activity [--session <id>]     Inspect workspace activity and the session timeline
+  activity report [options]     Record a reported progress note
   alignment status [target]     Inspect an agent's Council alignment
   alignment check <target>      Request a setup check and report delivery separately
   alignment decline             Report missing Council setup from your terminal
-  alignment setup --host ... --project ...  Preview project setup. Use --apply to write it.
+  alignment setup --host <codex|antigravity|claude|junie|opencode> --project <path>
+                                Preview project setup. Use --apply to write it.
 
 CONVENE OPTIONS:
   --mode <name>                 council, review, delegate, debate, parallel, pipeline
@@ -147,9 +154,10 @@ function jobFlags(flags) {
 
 async function main() {
   const rawArgs = process.argv.slice(2);
-  const command = rawArgs[0] || 'help';
-  if (['poll', 'debate'].includes(command.toLowerCase())) {
-    const run = command.toLowerCase() === 'poll' ? runPollCommand : runDebateCommand;
+  const command = (rawArgs[0] || 'help').toLowerCase();
+  const commands = new Map([['poll', runPollCommand], ['debate', runDebateCommand], ['activity', runActivityCommand]]);
+  if (commands.has(command)) {
+    const run = commands.get(command);
     const result = run(rawArgs.slice(1));
     console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     return;
@@ -160,7 +168,28 @@ async function main() {
   const orchestrator = new CouncilOrchestrator({ herdr });
   const jobManager = new JobManager({ herdr, cwd: process.cwd() });
 
-  switch (command.toLowerCase()) {
+  switch (command) {
+    case 'team': {
+      const [action = 'help', member] = flags._;
+      if (action === 'help') {
+        console.log(`council team list
+council team set <member> --agent <codex|claude|antigravity|junie> --role <title>
+  [--model <id>] [--reports-to <member>] [--permission <read|write>] [--instructions <text>]
+council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
+        break;
+      }
+      const store = new TeamStore(process.cwd());
+      let result;
+      if (action === 'list') result = store.list();
+      else if (action === 'set') result = store.set({ id: member, agent: flags.agent, role: flags.role,
+        model: flags.model, reportsTo: flags['reports-to'], instructions: flags.instructions, permission: flags.permission });
+      else if (action === 'call') result = await callTeamMember(jobManager, { member, task: flags.task,
+        sessionId: flags.session, timeoutSec: flags.timeout === true ? NaN : flags.timeout });
+      else throw new Error('Use council team help.');
+      console.log(JSON.stringify(result, null, 2));
+      if (result.success === false) process.exitCode = 1;
+      break;
+    }
     case 'alignment': {
       const [action, target] = flags._;
       if (action === 'setup') {

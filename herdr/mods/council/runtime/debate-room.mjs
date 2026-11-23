@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isDirectory, readText } from './store-files.mjs';
+import { appendEvent, eventFiles, isDirectory, readText } from './store-files.mjs';
 
 export const roomSchema = 'council.debate/v1';
-const roomId = /^debate-[0-9a-f-]{36}$/;
+export const debateIdPattern = /^debate-[0-9a-f-]{36}$/;
 const messageFile = /^[0-9a-f-]{36}\.json$/;
 const speakerId = /^[a-z0-9][a-z0-9_.:/-]{0,79}$/;
 
@@ -19,7 +19,7 @@ function json(path) {
   return value === null ? null : JSON.parse(value);
 }
 
-export function createDebate(cwd, { question, context = '' }) {
+export function createDebate(cwd, { question, context = '' }, { beforePublish } = {}) {
   const title = requiredText(question, 'Debate topic', 240);
   const brief = context ? requiredText(context, 'Opening message', 2000) : '';
   const root = join(cwd, '.agent_workspace');
@@ -32,61 +32,113 @@ export function createDebate(cwd, { question, context = '' }) {
     $schema: roomSchema, sessionId: id, mode: 'debate', question: title, context: brief,
     createdAt: new Date().toISOString(), createdBy: 'operator'
   };
+  beforePublish?.(id);
   writeFileSync(join(dir, 'session.json'), JSON.stringify(room), { flag: 'wx' });
   return room;
 }
 
-export function roomMessages(dir, room) {
-  const dirPath = join(dir, 'messages');
-  const messages = room.context ? [{
-    id: 'opening', kind: 'message', author: 'operator', timestamp: room.createdAt, body: room.context
-  }] : [];
-  if (!isDirectory(dirPath)) return messages;
-  for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
-    if (!entry.isFile() || !messageFile.test(entry.name)) continue;
-    try {
-      const message = json(join(dirPath, entry.name));
-      if (message?.id !== entry.name.slice(0, -5) || message.sessionId !== room.sessionId ||
-          typeof message.author !== 'string' || !speakerId.test(message.author) ||
-          typeof message.body !== 'string' || message.body.length > 2000 ||
-          !(Date.parse(message.timestamp) >= Date.parse(room.createdAt))) continue;
-      messages.push({ id: message.id, kind: 'message', author: message.author, body: message.body, timestamp: message.timestamp });
-    } catch {
-      // A malformed message does not hide other replies.
-    }
-  }
-  return messages.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) ||
-    (a.id === 'opening' ? -1 : b.id === 'opening' ? 1 : a.id.localeCompare(b.id)));
-}
-
-export function readDebateRoom(cwd, id) {
-  if (typeof id !== 'string' || !roomId.test(id)) throw new Error('Invalid debate ID.');
+function roomSnapshot(cwd, id) {
+  if (typeof id !== 'string' || !debateIdPattern.test(id)) throw new Error('Invalid debate ID.');
   const root = join(cwd, '.agent_workspace');
   const dir = join(root, id);
   if (!isDirectory(root) || !isDirectory(dir)) throw new Error('Debate was not found in this project.');
   const room = json(join(dir, 'session.json'));
   if (room?.$schema !== roomSchema || room.sessionId !== id || room.mode !== 'debate' ||
       typeof room.question !== 'string' || !Number.isFinite(Date.parse(room.createdAt))) throw new Error('Debate is unavailable.');
-  return room;
+  const events = join(dir, 'events');
+  const revisions = eventFiles(events);
+  if (revisions.some((name, index) => Number.parseInt(name, 10) !== index + 1)) {
+    throw new Error('The debate has a missing revision.');
+  }
+  const last = revisions.length ? json(join(events, revisions.at(-1))) : null;
+  if (revisions.length && !['reply', 'close'].includes(last?.type)) throw new Error('Invalid debate event.');
+  const decision = last?.type === 'close' ? last.decision : null;
+  if (last?.type === 'close' && (!decision || !['decision', 'owner', 'nextStep'].every(
+    key => typeof decision[key] === 'string' && decision[key].trim()) ||
+    !(Date.parse(decision.closedAt) >= Date.parse(room.createdAt)))) {
+    throw new Error('Invalid debate decision.');
+  }
+  return { dir, events, revisions, room: { ...room, decision, closedAt: decision?.closedAt ?? null } };
+}
+
+export function readDebateRoom(cwd, id) {
+  return roomSnapshot(cwd, id).room;
 }
 
 export function readDebate(cwd, id) {
-  const room = readDebateRoom(cwd, id);
-  return { ...room, messages: roomMessages(join(cwd, '.agent_workspace', id), room) };
+  const { dir, events, revisions, room } = roomSnapshot(cwd, id);
+  const messages = room.context ? [{
+    id: 'opening', kind: 'message', author: 'operator', timestamp: room.createdAt, body: room.context
+  }] : [];
+  function add(message) {
+    if (message?.sessionId === id && typeof message.id === 'string' && messageFile.test(`${message.id}.json`) &&
+        typeof message.author === 'string' && speakerId.test(message.author) &&
+        typeof message.body === 'string' && message.body.length <= 2000 &&
+        Date.parse(message.timestamp) >= Date.parse(room.createdAt)) {
+      const { author, body, timestamp } = message;
+      messages.push({ id: message.id, kind: 'message', author, body, timestamp });
+    }
+  }
+  for (const revision of revisions) {
+    const event = json(join(events, revision));
+    if (event?.type === 'reply') add(event.message);
+  }
+  const legacy = join(dir, 'messages');
+  if (isDirectory(legacy)) {
+    for (const entry of readdirSync(legacy, { withFileTypes: true })) {
+      if (!entry.isFile() || !messageFile.test(entry.name)) continue;
+      try {
+        const message = json(join(legacy, entry.name));
+        if (message?.id !== entry.name.slice(0, -5) ||
+            (room.closedAt && !(Date.parse(message.timestamp) <= Date.parse(room.closedAt)))) continue;
+        add(message);
+      } catch {
+        // Keep the rest of the discussion readable when a legacy reply is malformed.
+      }
+    }
+  }
+  messages.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) ||
+    (a.id === 'opening' ? -1 : b.id === 'opening' ? 1 : a.id.localeCompare(b.id)));
+  return { ...room, messages };
+}
+
+function updateRoom(cwd, id, next) {
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const { room, events, revisions } = roomSnapshot(cwd, id);
+    const event = next(room);
+    if (!event) return room.decision;
+    isDirectory(events, { create: true });
+    if (appendEvent(events, revisions.length + 1, event)) return event.message ?? event.decision;
+  }
+  throw new Error('The debate is being updated concurrently. Retry the operation.');
 }
 
 export function replyToDebate(cwd, id, { author, body }, { fromPanel = false } = {}) {
   const sender = requiredText(author, 'Your Herdr terminal address', 80).toLowerCase();
   if (!speakerId.test(sender) || (sender === 'operator' && !fromPanel)) throw new Error('Use your own Herdr terminal address.');
   const content = requiredText(body, 'Reply', 2000);
-  readDebateRoom(cwd, id);
-  const dir = join(cwd, '.agent_workspace', id, 'messages');
-  isDirectory(dir, { create: true });
-  const message = {
-    id: randomUUID(), sessionId: id, author: sender, body: content, timestamp: new Date().toISOString()
+  return updateRoom(cwd, id, room => {
+    if (room.closedAt) throw new Error('This debate is closed.');
+    return { type: 'reply', message: {
+      id: randomUUID(), sessionId: id, author: sender, body: content,
+      timestamp: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString()
+    } };
+  });
+}
+
+export function closeDebate(cwd, id, { decision, owner, nextStep }) {
+  const outcome = {
+    decision: requiredText(decision, 'Decision', 2000),
+    owner: requiredText(owner, 'Owner', 120),
+    nextStep: requiredText(nextStep, 'Next step', 2000)
   };
-  const temporary = join(dir, `.${message.id}.tmp`);
-  writeFileSync(temporary, JSON.stringify(message), { flag: 'wx' });
-  renameSync(temporary, join(dir, `${message.id}.json`));
-  return message;
+  return updateRoom(cwd, id, room => {
+    if (room.decision) {
+      if (Object.keys(outcome).every(key => outcome[key] === room.decision[key])) return null;
+      throw new Error('This debate already has a recorded decision.');
+    }
+    return { type: 'close', decision: {
+      ...outcome, closedAt: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString(), closedBy: 'operator'
+    } };
+  });
 }

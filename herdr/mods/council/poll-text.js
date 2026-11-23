@@ -41,6 +41,7 @@ export function invitation(poll, { folder, cli, participant }) {
     `Council poll: ${poll.question}`,
     ...(poll.context ? [`Context: ${poll.context}`] : []),
     `Poll ID: ${poll.id}`,
+    ...(poll.sourceDebateId ? [`Source debate: ${poll.sourceDebateId}`] : []),
     `Project folder: ${folder}`,
     voter ? `Submit your response as ${voter}.` : 'Use your own Herdr terminal address as the voter ID.',
     '',
@@ -67,6 +68,7 @@ export function decisionSummary(poll, folder) {
     `Poll ID: ${poll.id}`,
     `${pollStatus(poll)} · ${countLabel(poll.responseCount, 'response')}`
   ];
+  if (poll.sourceDebateId) lines.push(`Source debate: ${poll.sourceDebateId}`);
   if (participation.expected) lines.push(`Tracked agents responded: ${participation.received}/${participation.expected}`);
   if (poll.context) lines.push(`Context: ${poll.context}`);
   if (poll.outcome) lines.push('', `Decision / next step: ${poll.outcome}`);
