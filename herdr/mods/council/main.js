@@ -1,8 +1,8 @@
 import { View, div } from 'gpui-kit';
-import { h_flex, v_flex, InputState } from 'gpui-base';
+import { Button, h_flex, v_flex, InputState } from 'gpui-base';
 import { agents, appHome, checking, closeOverlay, exec, hc, notify, panes, props, readTextFile, run, spaces, terminals, theme } from 'herdr';
 import { brandMark, button, cardHeading, columns, field, glyph, iconTile, input, label, panel, progress, reviewStatus, sectionTab, statusPill } from './components.js';
-import { countLabel, decisionSummary, invitation, pollStatus } from './poll-text.js';
+import { countLabel, decisionSummary, discussionType, invitation, pollStatus, projectLabels, projectName } from './poll-text.js';
 import { pollParticipants, pollResults } from './poll-view.js';
 import { delegationStatus, delegationView } from './delegation-view.js';
 import { ballotBody, discussionView } from './discussion-view.js';
@@ -25,10 +25,6 @@ function localProjects(active, allSpaces) {
     ...panes().filter(pane => pane.terminal && tabs.has(pane.tab)).map(pane => pane.cwd)].filter(Boolean))];
 }
 
-function projectName(folder) {
-  return folder?.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
-}
-
 function spaceRecipients(space) {
   const started = new Map(terminals().map(terminal => [terminal.address, terminal.created_ms]));
   return agents().filter(agent => agent.space === space?.id).map(agent => ({
@@ -39,16 +35,42 @@ function spaceRecipients(space) {
 const inviteStates = {
   queued: 'Waiting for terminal', sending: 'Checking terminal', uncertain: 'Delivery uncertain',
   alignment_required: 'Waiting for Council alignment', not_aligned: 'Council skill or integration missing',
-  unavailable: 'Terminal unavailable', expired: 'Delivery window elapsed', cancelled: 'Invitation cancelled'
+  unavailable: 'Terminal unavailable', expired: 'Delivery window elapsed', cancelled: 'Invitation cancelled',
+  dispatch_failed: 'Invitation worker stopped before sending'
 };
 
-function deliveryView(t, invitations) {
-  if (!invitations?.length) return null;
-  const sent = invitations.filter(person => person.state === 'sent').length;
-  return v_flex().gap(4).pt(8).border_t_1().border_color(t.border)
-    .child(label(`Invitations · ${sent}/${invitations.length} sent`, 12, t.foreground).font_semibold())
-    .children(invitations.filter(person => person.state !== 'sent').map(person =>
-      label(`${person.label} (${person.address}) · ${inviteStates[person.state] ?? person.state}`, 11, t.muted)));
+function needsSetup(person) {
+  return ['alignment_required', 'not_aligned'].some(state => state === person.state || state === person.reason);
+}
+
+function deliveryView(t, delivery, { canAct, disabled, check, retry }) {
+  if (!delivery?.targets.length) return null;
+  const sent = delivery.targets.filter(person => person.state === 'sent').length;
+  const expired = delivery.targets.some(person => person.state === 'expired');
+  const when = new Date(delivery.expiresAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+  const pending = delivery.targets.filter(person => person.state !== 'sent');
+  const section = v_flex().gap(6).pt(8).border_t_1().border_color(t.border)
+    .child(h_flex().gap(6).items_center().justify_between().flex_wrap()
+      .child(label(`Invitations · ${sent}/${delivery.targets.length} sent`, 12, t.foreground).font_semibold())
+      .when(pending.some(needsSetup), row => row.child(button(t, 'invitation-setup-guide', 'Setup guide', (_e, cx) =>
+        cx.open_url('https://github.com/ejupi-djenis30/council-herdr/blob/main/docs/alignment.md')))));
+  if (delivery.active || expired) section.child(label(delivery.active ? `Delivery ends ${when}` : `Delivery window ended ${when}`, 11, t.muted));
+  if (delivery.claimed && !delivery.active && pending.some(person => person.state === 'expired')) {
+    section.child(label('An invitation worker still holds the delivery. Check its terminal before retrying.', 11, t.muted));
+  }
+  return section.children(pending.map(person => {
+    const last = !delivery.active && person.reason && person.reason !== 'queued' ? inviteStates[person.reason] : null;
+    const state = [inviteStates[person.state] ?? person.state, last].filter(Boolean).join(' · ');
+    return h_flex().gap(6).items_center().justify_between().flex_wrap()
+      .child(v_flex().min_w_0().gap(2)
+        .child(label(`${person.label ?? person.address} (${person.address})`, 12, t.foreground))
+        .child(label(person.state === 'uncertain' ? `${state}. Check the terminal before sending again.` : state, 11, t.muted)))
+      .child(h_flex().gap(5).flex_wrap()
+        .when(canAct && needsSetup(person) && Number.isSafeInteger(person.createdAt), row =>
+          row.child(button(t, `check-${person.address}`, 'Check setup', (_e, cx) => check(cx, person.address), 'normal', disabled)))
+        .when(canAct && person.retryable, row =>
+          row.child(button(t, `retry-${person.address}`, 'Retry invite', (_e, cx) => retry(cx, person.address), 'normal', disabled))));
+  }));
 }
 
 export default class Council extends View {
@@ -81,12 +103,18 @@ export default class Council extends View {
     this.readError = '';
     this.loading = false;
     this.saving = false;
+    this.checkingInvitation = false;
+    this.panelFocus = cx.focus_handle();
+    this.backFocus = cx.focus_handle();
+    this.newFocus = cx.focus_handle();
 
     if (checking()) return;
+    this.panelFocus.focus();
     this.search = InputState.new({ placeholder: 'Search by title, project or ID' });
     this.search.on('change', (_e, cx) => cx.notify());
     this.reply = InputState.new({ placeholder: 'Write a reply…' });
     this.reply.on('change', (_e, cx) => cx.notify());
+    this.reply.on('submit', (_e, cx) => this.replyToDebate(cx));
     cx.spawn(async cx => {
       try {
         const root = `${appHome()}/mods/council`;
@@ -117,6 +145,15 @@ export default class Council extends View {
     const states = Object.fromEntries(Object.entries(fields)
       .map(([name, value]) => [name, InputState.new({ value })]));
     this.form = { kind, ...extra, ...states, inputs: Object.values(states) };
+    this.form.inputs[0]?.focus();
+  }
+
+  cancelForm(cx) {
+    this.clearForm();
+    this.error = '';
+    if (this.selected) this.backFocus?.focus();
+    else this.newFocus?.focus();
+    cx.notify();
   }
 
   async request(folder, action, payload = {}) {
@@ -133,6 +170,7 @@ export default class Council extends View {
   }
 
   navigate(cx, tab, selection = null) {
+    const returningToList = this.tab === tab && this.selected && !selection;
     if (tab !== this.tab) this.clearFilters();
     this.pollSection = 'results';
     this.epoch++;
@@ -145,6 +183,8 @@ export default class Council extends View {
     this.readError = '';
     this.clearForm();
     this.reply?.set_value('');
+    if (selection) this.backFocus?.focus();
+    if (returningToList) this.search?.focus();
     this.refresh(cx);
     cx.notify();
   }
@@ -189,6 +229,68 @@ export default class Council extends View {
     });
   }
 
+  async launchInvitations(folder, payload) {
+    const ticket = await this.request(folder, 'invite-prepare', payload);
+    if (!ticket) return;
+    try {
+      const result = await hc(['run', '--bg', '--json', '--no-parent', '--no-notify', '--outlive-parent', '--rm', '--cwd', folder,
+        '--', this.config.node, this.config.entry, 'invite', JSON.stringify(ticket)]);
+      if (result.code !== 0 || !JSON.parse(result.stdout)?.address) throw new Error('Herdr did not confirm worker launch.');
+    } catch {
+      const disposition = await this.request(folder, 'invite-launch-failed', ticket).catch(() => null);
+      const message = disposition?.recorded ? 'Herdr could not start the invitation worker. You can retry the unsent invites.'
+        : 'Herdr did not confirm the invitation worker. Check the recorded delivery status before taking action.';
+      throw new Error(message);
+    }
+  }
+
+  invitationAction(cx, address, action) {
+    const space = localSpace();
+    const selection = this.selected;
+    if (!space || !selection || this.saving || this.checkingInvitation) return;
+    const params = { id: selection.id, space: space.id, address };
+    const epoch = this.epoch;
+    this.error = '';
+    this.checkingInvitation = true;
+    cx.notify();
+    cx.spawn(async cx => {
+      try {
+        if (action === 'retry') {
+          await this.launchInvitations(selection.project, params);
+        } else {
+          const result = await exec(this.config.node, [this.config.entry, 'invite-check', JSON.stringify(params)], {
+            cwd: selection.project, timeout: 120000
+          });
+          if (result.code !== 0) throw new Error(result.stderr.trim() || 'Council could not check this terminal.');
+          const { state } = JSON.parse(result.stdout);
+          if (state === 'uncertain') throw new Error('Herdr did not confirm the setup check. Inspect the original terminal before sending another check.');
+          notify({ title: state === 'aligned' ? 'This terminal is already aligned.' : 'Setup check sent.', level: 'success', timeout: 2000 });
+        }
+      } catch (error) {
+        if (epoch === this.epoch) this.error = error.message;
+      } finally {
+        this.checkingInvitation = false;
+        this.refresh(cx);
+        cx.notify();
+      }
+    });
+  }
+
+  renderInvitations(t, record, space) {
+    return deliveryView(t, record.invitationDelivery, {
+      canAct: !record.closedAt && record.invitationDelivery?.space === space?.id,
+      disabled: this.saving || this.checkingInvitation,
+      check: (cx, address) => this.invitationAction(cx, address, 'check'),
+      retry: (cx, address) => this.invitationAction(cx, address, 'retry')
+    });
+  }
+
+  replyToDebate(cx) {
+    const debate = this.data?.debate;
+    const text = this.reply?.value().trim();
+    if (this.tab === 'debates' && debate?.interactive && text) this.save(cx, 'debate-reply', { id: debate.id, text });
+  }
+
   save(cx, action, payload) {
     const space = localSpace();
     if (!this.folder || space?.machine || space?.folder !== this.folder || this.saving) return;
@@ -206,20 +308,15 @@ export default class Council extends View {
         const record = await this.request(folder, action, action === 'create' ? { ...payload, participants: recipients } : payload);
         let deliveryError = '';
         if (recipients.length) {
-          try {
-            const command = ['run', '--bg', '--json', '--no-parent', '--no-notify', '--outlive-parent', '--rm', '--cwd', folder,
-              '--', this.config.node, this.config.entry, 'invite', JSON.stringify({ id: record.id, space: space.id, recipients })];
-            const result = await hc(command);
-            if (result.code !== 0 || !JSON.parse(result.stdout)?.address) throw new Error(result.stderr.trim());
-          } catch (error) {
-            deliveryError = `The ${section} opened. Herdr could not start the invitation worker. ${error.message}`;
-          }
+          try { await this.launchInvitations(folder, { id: record.id, space: space.id, recipients }); }
+          catch (error) { deliveryError = `The ${section} opened. ${error.message}`; }
         }
         if (epoch !== this.epoch) return;
         this.selected = { id: record.id, project: folder };
         this.data = { ...this.data, [section]: record };
         this.error = deliveryError;
         if (action === 'debate-reply') this.reply.set_value('');
+        if (creation) this.backFocus?.focus();
         this.clearForm();
       } catch (error) {
         if (epoch === this.epoch) this.error = error.message;
@@ -319,7 +416,7 @@ export default class Council extends View {
         }, 'normal', this.saving || form.options.length >= 20, 'add')));
     }
     return fields.child(h_flex().gap(6).justify_end()
-      .child(button(t, 'cancel-create', 'Cancel', (_e, cx) => { this.clearForm(); this.error = ''; cx.notify(); }, 'normal', this.saving))
+      .child(button(t, 'cancel-create', 'Cancel', (_e, cx) => this.cancelForm(cx), 'normal', this.saving))
       .child(button(t, 'create', debate ? 'Start debate' : 'Open poll', (_e, cx) => this.save(cx, debate ? 'debate-create' : 'create', {
         question: form.question.value(),
         context: form.context.value(),
@@ -370,7 +467,7 @@ export default class Council extends View {
         : { optionId: form.choice, note: form.note.value() };
     }
     return card.child(h_flex().gap(6).justify_end()
-      .child(button(t, 'cancel-form', 'Cancel', (_e, cx) => { this.clearForm(); this.error = ''; cx.notify(); }, 'normal', this.saving))
+      .child(button(t, 'cancel-form', 'Cancel', (_e, cx) => this.cancelForm(cx), 'normal', this.saving))
       .child(button(t, 'save-form', title, (_e, cx) => this.save(cx, action, { id: poll.id, ...payload() }),
         'primary', this.saving || (action === 'vote' && !form.choice))));
   }
@@ -386,7 +483,8 @@ export default class Council extends View {
       .child(label(poll.question, 20, t.foreground).font_semibold())
       .child(label([projectName(this.selected.project), this.pollCreator(poll, space)].filter(Boolean).join(' · '), 11, t.muted))
       .when(Boolean(poll.context), node => node.child(label(poll.context, 13, t.muted)));
-    if (poll.invitations?.length) header.child(deliveryView(t, poll.invitations));
+    const delivery = this.renderInvitations(t, poll, space);
+    if (delivery) header.child(delivery);
     if (poll.outcome) header.child(v_flex().w_full().gap(4).pt(8).border_t_1().border_color(t.border)
       .child(label('Decision / next step', 11, t.accent).font_semibold())
       .child(label(poll.outcome, 14, t.foreground)));
@@ -431,7 +529,7 @@ export default class Council extends View {
       .child(h_flex().child(statusPill(t, reviewStatus(review.status), review.status === 'approved' ? t.done : t.muted)))
       .child(label(review.task, 17, t.foreground).font_semibold())
       .child(label(projectName(this.selected.project), 11, t.muted))
-      .child(h_flex().child(button(t, 'open-debate', 'Open debate', (_e, cx) => this.navigate(cx, 'debates', this.selected), 'normal', false, 'debates')));
+      .child(h_flex().child(button(t, 'open-debate', 'View discussion', (_e, cx) => this.navigate(cx, 'debates', this.selected), 'normal', false, 'debates')));
     const results = panel(t)
       .child(cardHeading(t, 'Direct ballots', 'reviews'));
     if (tally) {
@@ -477,7 +575,7 @@ export default class Council extends View {
       const empty = {
         polls: 'Polls opened by you or agents in these projects appear here.',
         delegations: 'Start a delegation with the Council CLI or MCP to follow it here.',
-        debates: 'Open a Council or review session to follow its conversation here.',
+        debates: 'Start a thread with New debate. Formal reviews also appear here when they start.',
         reviews: 'Council and review sessions appear here as soon as they start.'
       };
       return body.child(panel(t).py(20).child(h_flex().gap(11).items_center()
@@ -512,6 +610,7 @@ export default class Council extends View {
         cx.notify();
       }))));
 
+    const origins = projectLabels(items.map(item => item.project));
     return body.children(visible.map(item => {
       const { expected, received } = item.participation ?? {};
       const status = isDelegations ? delegationStatus(t, item.status) : {
@@ -519,23 +618,26 @@ export default class Council extends View {
         color: (isPolls ? !item.closedAt : item.status === 'approved') ? t.done : t.muted
       };
       const metadata = isDelegations ? [item.agent ?? (item.ownership === 'borrowed' ? 'Existing terminal' : null), item.address].filter(Boolean).join(' · ')
-        : !isPolls ? item.mode : expected
+        : !isPolls ? discussionType(item) : expected
           ? `${received}/${expected} tracked replied · ${countLabel(item.responseCount, 'response')}`
           : countLabel(item.responseCount, 'response');
-      const origin = [projectName(item.project), isPolls ? this.pollCreator(item, space) : null].filter(Boolean).join(' · ');
-      return h_flex().id(`${item.project}/${item.id}`).w_full().min_w_0().gap(10).px(12).py(11).rounded(9).items_center()
+      const origin = [origins.get(item.project), isPolls ? this.pollCreator(item, space) : null].filter(Boolean).join(' · ');
+      return Button.new(`${item.project}/${item.id}`).w_full().min_w_0().px(12).py(11).rounded(9).items_center()
         .border_1().border_color(t.border).bg(t.surface).cursor_pointer()
+        .accessibility_label([item.question, origin, metadata, status.title].filter(Boolean).join(', '))
+        .tab_stop(true).focus(s => s.border_color(t.accent))
         .hover(s => s.bg(t.raised).border_color(t.input))
         .on_mouse_down('left', (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.navigate(cx, this.tab, { id: item.id, project: item.project }))
-        .child(iconTile(t, this.tab))
-        .child(v_flex().min_w_0().flex_1().gap(5)
-          .child(label(item.question, 14, t.foreground).font_semibold())
-          .child(label(origin, 11, t.muted).tooltip(item.project))
-          .child(h_flex().items_center().gap(7).flex_wrap()
-            .child(statusPill(t, status.title, status.color))
-            .when(Boolean(metadata), node => node.child(label(metadata, 11, t.muted)))))
-        .child(glyph('right', 14).text_color(t.muted));
+        .child(h_flex().w_full().min_w_0().gap(10).items_center()
+          .child(iconTile(t, this.tab))
+          .child(v_flex().min_w_0().flex_1().gap(5)
+            .child(label(item.question, 14, t.foreground).font_semibold())
+            .child(label(origin, 11, t.muted).tooltip(item.project))
+            .child(h_flex().items_center().gap(7).flex_wrap()
+              .child(statusPill(t, status.title, status.color))
+              .when(Boolean(metadata), node => node.child(label(metadata, 11, t.muted)))))
+          .child(glyph('right', 14).text_color(t.muted)));
     }));
   }
 
@@ -555,12 +657,10 @@ export default class Council extends View {
         project: projectName(this.selected.project),
         openReview: (_e, cx) => this.navigate(cx, 'reviews', this.selected),
         copy: (cx, value) => this.copy(cx, value, 'Contribution path copied.'),
-        delivery: deliveryView(t, detail.invitations),
+        delivery: this.renderInvitations(t, detail, space),
         composer: detail.interactive ? h_flex().w_full().gap(8).items_center()
-          .child(div().flex_1().min_w_0().child(input(t, this.reply)))
-          .child(button(t, 'post-reply', 'Reply', (_e, cx) => this.save(cx, 'debate-reply', {
-            id: detail.id, text: this.reply.value()
-          }), 'primary', this.saving || !this.reply.value().trim())) : null
+          .child(div().flex_1().min_w_0().child(input(t, this.reply).accessibility_label('Debate reply')))
+          .child(button(t, 'post-reply', 'Reply', (_e, cx) => this.replyToDebate(cx), 'primary', this.saving || !this.reply.value().trim())) : null
       });
       return delegationView(t, detail, {
         wide: this.wide,
@@ -589,10 +689,10 @@ export default class Council extends View {
     const current = Boolean(this.config && !this.configError && space?.folder &&
       !space.machine && space.folder === this.folder);
     const tabs = h_flex().w_full().gap(4).p(3).rounded(9).border_1().border_color(t.border).bg(t.background)
-      .children(sections.map(({ id, title }) =>
+      .role('tab_list').accessibility_label('Council sections').children(sections.map(({ id, title }, position) =>
         sectionTab(t, id, title, this.tab === id, (_e, cx) => {
           if (this.tab !== id) this.navigate(cx, id);
-        }, this.saving)));
+        }, this.saving).set_position(position + 1, sections.length)));
     const header = v_flex().flex_shrink_0().gap(12).p(14).bg(t.surface).border_b_1().border_color(t.border)
       .child(h_flex().gap(10).items_center()
         .child(brandMark(40))
@@ -600,13 +700,13 @@ export default class Council extends View {
           .child(label('Council', 19, t.foreground).font_semibold())
           .when(Boolean(space?.folder), node => node.child(label(space.name || space.folder, 12, t.muted).truncate())))
         .when(current && ['polls', 'debates'].includes(this.tab) && !this.selected && !this.form, node =>
-          node.child(button(t, 'new', this.tab === 'polls' ? 'New poll' : 'New debate', (_e, cx) => this.startCreate(cx), 'primary', false, 'add')))
+          node.child(button(t, 'new', this.tab === 'polls' ? 'New poll' : 'New debate', (_e, cx) => this.startCreate(cx), 'primary', false, 'add').track_focus(this.newFocus)))
         .when(current && Boolean(this.selected), node =>
           node.child(button(t, 'back', `All ${this.tab}`,
-            (_e, cx) => this.navigate(cx, this.tab), 'normal', this.saving, 'back')))
+            (_e, cx) => this.navigate(cx, this.tab), 'normal', this.saving, 'back').track_focus(this.backFocus)))
         .when(Boolean(overlay), node =>
           node.child(button(t, 'dismiss-panel', '', () => closeOverlay(overlay), 'normal', false, 'close')
-            .w(30).px(0).tooltip('Close Council'))))
+            .w(30).px(0).tooltip('Close Council').accessibility_label('Close Council'))))
       .child(tabs);
     const body = v_flex().id(`content-${this.tab}-${this.selected?.id ?? 'list'}-${this.form?.kind ?? this.pollSection}`)
       .flex_1().min_h(0).w_full().gap(10).p(14).overflow_y_scrollbar()
@@ -621,6 +721,19 @@ export default class Council extends View {
       body.child(label(`${countLabel(this.data.errors.length, 'record')} could not be read.`, 12, t.blocked));
     }
     return v_flex().id('council-root').size_full().min_h(0).min_w_0().bg(t.chrome).text_color(t.foreground)
+      .track_focus(this.panelFocus).tab_stop(false).on_key_down((event, cx) => {
+        if (event.key === 'tab' && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.platform) {
+          if (event.modifiers.shift) window.focus_prev();
+          else window.focus_next();
+          cx.stop_propagation();
+          return;
+        }
+        if (event.key !== 'escape' || this.saving) return;
+        if (this.form) this.cancelForm(cx);
+        else if (this.selected) this.navigate(cx, this.tab);
+        else return;
+        cx.stop_propagation();
+      })
       .on_size_change((size, cx) => {
         const wide = size.width >= 670;
         if (wide === this.wide) return;

@@ -16,5 +16,4 @@ You are the Primary Author / Implementer in a multi-agent Council coordinated vi
    - **Key Trade-offs**: Explicitly list what was chosen and what was rejected.
    - **Verification Strategy**: How this work should be tested and validated.
 3. Keep your response self-contained so reviewers and skeptics can critique it accurately.
-4. When done or stuck, report your status or findings using:
-   `hc send $HC_TERMINAL_ID "<summary>"` (if `$HC_TERMINAL_ID` is set).
+4. Return the complete proposal or blocker in your final answer so the coordinator can collect it.

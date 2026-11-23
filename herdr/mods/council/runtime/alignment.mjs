@@ -5,14 +5,14 @@ export const challengeKey = 'council.challenge';
 export const skillRevision = 'council/herdr-alignment-v1';
 const maxAge = 8 * 60 * 60 * 1000;
 
-function identity(terminal) {
+export function terminalIdentity(terminal) {
   if (terminal?.state !== 'live' || terminal.reported !== true || !Number.isSafeInteger(terminal.created_ms) ||
       !Number.isSafeInteger(terminal.pid) || typeof terminal.status?.app !== 'string') return null;
   return [terminal.created_ms, terminal.pid, terminal.status.app].join(':');
 }
 
 export function alignmentOf(terminal, now = Date.now()) {
-  const subject = identity(terminal);
+  const subject = terminalIdentity(terminal);
   if (!subject || !terminal.labels?.[alignmentKey]) return 'unconfirmed';
   try {
     const receipt = JSON.parse(Buffer.from(terminal.labels[alignmentKey], 'base64url').toString('utf8'));
@@ -23,7 +23,7 @@ export function alignmentOf(terminal, now = Date.now()) {
 }
 
 export function alignmentLabel(terminal, state, now = Date.now()) {
-  const subject = identity(terminal);
+  const subject = terminalIdentity(terminal);
   if (!subject || !['aligned', 'not_aligned'].includes(state)) throw new Error('Council requires a live Herdr agent that reports its app.');
   const receipt = { revision: skillRevision, subject, state, expiresAt: now + maxAge };
   return `${alignmentKey}=${Buffer.from(JSON.stringify(receipt)).toString('base64url')}`;

@@ -50,11 +50,11 @@ Agents register readiness through `council_alignment` using the current Council 
 
 ### Open or respond to a poll from an agent
 
-Use `council_poll_create`, `council_poll_read`, and `council_poll_vote` through MCP. Pass the same absolute `project` path for all three if the server starts outside the project. To use the bundled poll CLI, run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands.
+Use `council_poll_create`, `council_poll_read`, and `council_poll_vote` through MCP. Pass the same absolute `project` path for all three. To use the bundled poll CLI, run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands.
 
 ```powershell
 node C:/path/to/council-herdr/bin/council.js poll list
-node C:/path/to/council-herdr/bin/council.js poll create --mode open --question "What should we review?"
+node C:/path/to/council-herdr/bin/council.js poll create --mode mixed --question "What should we review?" --option "Parser" --option "API"
 node C:/path/to/council-herdr/bin/council.js poll show <poll-id>
 node C:/path/to/council-herdr/bin/council.js poll vote <poll-id> --option option-1 --note "The diff identifies the exact revision"
 node C:/path/to/council-herdr/bin/council.js poll help
@@ -72,55 +72,71 @@ The panel reads Council records under `.agent_workspace/` in the local projects 
 
 | Mode | Behavior |
 | --- | --- |
-| `delegate` | One specialist receives a bounded task. Run it synchronously with `delegate` or inspect it while it runs with `start`, `status` and `result`. |
+| `delegate` | One specialist receives a bounded task. Use `start`, `status` and `result` to follow it through a saved session. `delegate` is the blocking equivalent. |
 | `council` | An author produces a proposal; a skeptic and simplifier receive that exact proposal and its SHA-256 digest. |
 | `review` | An author produces a proposal; a reviewer and simplifier inspect it before the voting tally. |
+| `debate` | Two agents make independent cases. A third compares the saved arguments and gives an advisory recommendation. |
+| `parallel` | Agents work on independent assignments. Supply `subtasks` to give each one a different brief. |
+| `pipeline` | Stages run in order. Each receives the previous stage’s saved capture and digest. |
 
-`debate`, `parallel` and `pipeline` are experimental and disabled. Asynchronous jobs support one participant in `delegate` mode.
+Use `convene --mode debate|parallel|pipeline` or the corresponding `mode` in `council_convene`. Pass `--subtasks` or `--stages` as a JSON array on the CLI. A stage requires `name` and accepts `task`, `agent`, and `role`. The report and execution record are saved under `validation/`. Use `start` for background execution.
+
+## Background runs, schedules, and voting rounds
+
+Use `start --mode <mode>` or `council_start` for any of the six workflows. Use the same project and job ID with `status` and `result`. For a formal workflow, the result links to a separate workflow session holding its proposal and ballots.
+
+- **Schedules.** Use `council schedule create --id weekly-review --at 2030-01-07T09:00:00Z --every 604800 --mode review --task "Review recent changes"`. Omit `--every` for a one-time run, or set `--count` to limit a recurrence. Use `schedule list`, `schedule status <id>`, and `schedule cancel <id>` to manage future runs. MCP uses `council_schedule_create` and `council_schedules`. A scheduler that wakes late starts one occurrence and skips intervening slots.
+- **Late ballots.** After the participant turns finish, CLI and MCP ballot submissions refresh the saved tally against the original digest. Use `council retally --session <id>` or `council_retally` to refresh manually. Prior reports remain in the session’s validation history.
+- **New rounds.** Use `council round --session <id>` or `council_round` to start a linked background review with the previous proposal and digest in its brief. Each round collects its own direct ballots.
 
 ## Run it
 
 Requirements: Node.js 20 or newer, `hc` on the parent process's PATH, and a selected agent CLI with working authentication. There are no production npm dependencies. Live checks here used Windows, Node.js 24.14.1 and `hc 0.1.21`; those checks do not verify other environments.
 
-Run from the project directory the agents should inspect. Replace the executable path with the absolute path to this checkout:
+Run the CLI from the project directory the agents should inspect. Pass that directory's absolute path as `project` for MCP workflows, including status and result. A server configured to start in that project can use its working directory as the default. Check for `council_alignment` and the tools your workflow needs. Use the current CLI by absolute path if connected tools are missing or the server cannot select the project.
 
-```powershell
-node C:/path/to/council-herdr/bin/council.js doctor
-node C:/path/to/council-herdr/bin/council.js delegate --agent codex --task "Inspect src/parser.js and report concrete edge cases" --permission read
-node C:/path/to/council-herdr/bin/council.js convene --mode review --task "Review the parser proposal" --permission read
-```
-
-Inside Herdr, read `hc --skill` and run long commands in named background terminals:
-
-```powershell
-hc run --bg --name parser-review --cwd C:/path/to/project -- node C:/path/to/council-herdr/bin/council.js convene --mode review --task "Review the parser proposal"
-hc wait parser-review
-hc read parser-review
-```
-
-`doctor` checks executable availability, not authentication or every host integration. Default agents are Claude, Codex and Antigravity; `--agents codex,junie,antigravity` selects another panel. Use `--permission write` only for an authorized editing task. `--timeout` is the turn budget in seconds; `--keep` retains completed participants for inspection.
+Read `hc --skill` before delegating inside Herdr. Run `node C:/path/to/council-herdr/bin/council.js doctor` to check executable availability, then verify authentication and integration readiness for the hosts you intend to use.
 
 ## Delegate in an existing Herdr terminal
 
-Pick a ready agent from `hc ls` and replace `t123` with its address. Run these commands from the project directory.
+Use `hc ls` and `hc get <address>` to choose a live, aligned agent in the intended context whose state is `idle` or `done`. Replace `t123` with its address and run these commands from the project directory.
 
 ```powershell
-node C:/path/to/council-herdr/bin/council.js start --mode delegate --adopt t123 --session parser-review --task "Inspect src/parser.js and report concrete edge cases" --timeout 180
+node C:/path/to/council-herdr/bin/council.js alignment status t123
+node C:/path/to/council-herdr/bin/council.js start --adopt t123 --session parser-review --task "Inspect src/parser.js and report input edge cases with file and line references. Keep the work read-only." --timeout 180
 node C:/path/to/council-herdr/bin/council.js status --session parser-review
 node C:/path/to/council-herdr/bin/council.js result --session parser-review
 ```
 
-`start` returns a session ID while a worker runs the task in Herdr. Check progress with `status`, inspect the terminal with `hc read t123`, and retrieve its saved output with `result`. A pending result has `ready: false`. To launch a new agent for the job, replace `--adopt t123` with `--agent codex`.
+If the terminal needs alignment, use `alignment check t123` and confirm it reports `aligned` before starting the task. If `start` requests a readiness check, it reports the notice's delivery status and what to do next. After preflight succeeds, `start` returns a session ID while a worker runs the task in Herdr. Check progress with `status`, inspect the terminal with `hc read t123`, and retrieve its saved output with `result`. A pending result has `ready: false`. The MCP equivalents are `council_start`, `council_session_status` and `council_result`.
+
+For a new agent, replace `--adopt t123` with `--agent codex` or another configured host. Council gives the new agent an alignment turn before sending the assignment. If it fails that check, inspect the reported terminal before launching again.
 
 Open **Delegations** in the Council panel to follow those same sessions in the active project. Filter by **Active**, **Needs attention**, or **Ready**, see delivery and deadline separately from the outcome, and open the participant's terminal when it is visible in that space. The result card shows saved terminal output and can copy an excerpt or the capture file path. The panel reads records without resending tasks.
 
-Repeat the same `start` with the same session ID and task options from the same directory to reconnect. An adopted terminal keeps its permissions and stays available in Herdr. Council leaves its lifetime and settings under its original owner's control.
+Repeat the same `start` with the same session ID and task options from the same directory to reconnect. For an adopted terminal, Council reports the app observed by Herdr and sets `participant.permission` to `null`. The host controls the terminal's permissions and lifetime. Put any limits on edits or delegation in the task brief.
+
+For a long CLI assignment, pass `--task-file <path>` with a UTF-8 brief in place of `--task`. Council saves the task text in the session, so edits to the source file do not change a job already underway. With MCP, pass the brief in `task`. Large prompts for existing terminals go through Herdr's stdin API to avoid command-line length limits.
 
 Set `--timeout <seconds>` to cover the entire job, including worker startup and capture. The default is 180 seconds. For a longer bounded review, for example, use `--timeout 600` when starting the job.
 
-The CLI and MCP `status` and `result` responses distinguish `timed_out`, `blocked`, and `uncertain` in the `outcome` field. The Desktop Delegations tab shows the same outcomes and recovery guidance. A timed-out job may leave its agent working. Inspect the participant and worker addresses from `status` with `hc get` and `hc read` before starting another job. A new job after uncertain delivery requires an explicit start after the original deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
+When an acknowledged delegation pauses for input, `status` and `result` show `outcome: awaiting_input`, and Desktop shows **Waiting for input** with the remaining time. Resolve the prompt in the participant's Herdr terminal. Council follows that turn through completion and saves the result within the original deadline. This also works with repeated prompts. If the deadline expires or Council cannot verify the resumed turn, inspect the existing terminal with `hc get` and `hc read` for the agent's answer.
 
-For an adopted terminal, `participant.reportedApp` records the app Herdr reported at adoption when available. Use that field to identify the app for a borrowed job. `participant.agent` records the launch-agent setting.
+The `outcome` field and Desktop also distinguish `timed_out`, `blocked`, and `uncertain` jobs. A timed-out job may leave its agent working. A new job after uncertain delivery requires an explicit start after the original deadline and a fresh readiness check. If a worker stopped abruptly, inspect its retained claim before attempting recovery.
+
+`status`, `result`, and the selected Desktop delegation show when Herdr confirms that a claimed worker stopped before saving a result. Inspect the recorded participant for the original task and its answer. When Herdr cannot verify the worker, its status is unavailable and Council keeps the saved delivery state.
+
+### Convene a formal panel
+
+Use `council_convene` or the blocking CLI when the task calls for a formal author and review panel. Specify the agent hosts that are configured for the target project. Use `--permission write` only for an authorized editing task. This example selects Claude, Codex and Junie. Replace those hosts with the ones you have verified.
+
+```powershell
+hc run --bg --name parser-panel --cwd C:/path/to/project -- node C:/path/to/council-herdr/bin/council.js convene --mode review --agents claude,codex,junie --task "Review the parser proposal" --permission read
+hc wait parser-panel
+hc read parser-panel
+```
+
+For `convene`, `--timeout` sets the per-turn budget and `--keep` retains completed owned terminals for inspection.
 
 ## Results and approvals
 
@@ -140,11 +156,11 @@ For an explicit vote, use the proposal digest supplied in the review brief:
 node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-or-path> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Add a bounded connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
 ```
 
-Submit from the same target project, or pass the explicit session directory. A ballot written after a workflow returns does not automatically rerun or promote it. See [voting and validation](docs/voting-and-validation.md).
+Submit from the same target project, or pass the explicit session directory. A ballot submitted after a completed formal turn refreshes that round’s tally. See [voting and validation](docs/voting-and-validation.md).
 
 ## MCP and host packaging
 
-Start the stdio server with `node /absolute/path/to/council-herdr/bin/council.js mcp`. Configure the host to launch it in the intended project directory; the server's working directory determines the target project and session location.
+Start the stdio server with `node /absolute/path/to/council-herdr/bin/council.js mcp`. Pass an absolute `project` in project-scoped tool calls. When you configure the server to start in the target project directory, that directory can serve as the default.
 
 Use `council_start`, `council_session_status` and `council_result` for asynchronous delegation. Blocking workflows use `council_convene` or `council_delegate`. Other tools include `council_cast_ballot`, `council_status`, `council_wait`, `council_read`, `council_send` and `council_dismiss`.
 

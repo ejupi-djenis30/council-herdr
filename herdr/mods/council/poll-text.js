@@ -2,6 +2,26 @@ export function countLabel(count, singular) {
   return `${count} ${singular}${count === 1 ? '' : 's'}`;
 }
 
+export function projectName(folder) {
+  return folder?.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+}
+
+export function projectLabels(folders) {
+  const groups = new Map();
+  for (const folder of new Set(folders)) {
+    const key = projectName(folder).toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(folder);
+  }
+  return new Map([...groups.values()].flatMap(group => group.map(folder => [folder, group.length > 1 ? folder : projectName(folder)])));
+}
+
+export function discussionType(item) {
+  if (item.interactive) return 'Debate thread';
+  if (item.mode === 'debate') return 'Archived debate';
+  return item.mode === 'council' ? 'Council deliberation' : 'Formal review';
+}
+
 export function pollStatus(poll) {
   return poll.closedAt ? 'Closed' : 'Open';
 }

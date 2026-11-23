@@ -2,7 +2,7 @@
 
 Council adds briefs, proposal handoffs, independent review and durable results to Herdr. Herdr owns execution and terminal visibility.
 
-Read [docs/owner-brief.md](docs/owner-brief.md) for acceptance criteria and file ownership. Supported workflows: `council`, `review`, `delegate`. `debate`, `parallel` and `pipeline` are experimental and disabled.
+Read [docs/owner-brief.md](docs/owner-brief.md) for acceptance criteria and file ownership. Use `convene` for council, review, delegate, debate, parallel, and pipeline. Debate, parallel, and pipeline save advisory evidence.
 
 - Follow the installed `hc --skill` when launching, waiting on or steering terminals. Keep tasks interactive, bounded and visible. No extra agents without an explicit assignment.
 - A command exit code of zero is not task completion. Interpret delivery, status, turn and wait reason; preserve incomplete agents and respect deadlines.

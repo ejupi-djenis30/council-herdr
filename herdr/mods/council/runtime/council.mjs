@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { reportAlignment } from './alignment.mjs';
 import { runDebateCommand } from './debate-command.mjs';
 import { desktopRequest } from './desktop.mjs';
-import { sendInvitations } from './invitations.mjs';
+import { checkInvitationAlignment, sendInvitations } from './invitations.mjs';
 import { runPollCommand } from './poll-command.mjs';
 
 try {
@@ -24,6 +24,9 @@ try {
     case 'invite':
       await sendInvitations(process.cwd(), fileURLToPath(import.meta.url), JSON.parse(args[0]));
       result = { success: true };
+      break;
+    case 'invite-check':
+      result = await checkInvitationAlignment(process.cwd(), fileURLToPath(import.meta.url), JSON.parse(args[0]));
       break;
     case 'alignment': {
       if (args[0] !== 'decline') throw new Error('Use alignment decline to report missing setup.');

@@ -1,16 +1,20 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { HerdrClient } from '../lib/herdr.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
 import { JobManager } from '../lib/jobs.js';
+import { ScheduleManager } from '../lib/schedules.js';
+import { nextFormalRound, resolveVotingSession, retallyAfterBallot, retallyFormalRound } from '../lib/formal-rounds.js';
 import { setupAlignment } from '../lib/alignment-setup.js';
+import { councilVersion, diagnoseCouncilHost } from '../lib/diagnostics.js';
 import { alignmentOf, reportAlignment } from '../herdr/mods/council/runtime/alignment.mjs';
 import { runDebateCommand } from '../herdr/mods/council/runtime/debate-command.mjs';
 import { runPollCommand } from '../herdr/mods/council/runtime/poll-command.mjs';
 
 function printHelp() {
   console.log(`
-Council CLI - Herdr-native Multi-Agent Collaboration Engine (v3.0.0)
+Council CLI - Herdr-native Multi-Agent Collaboration Engine (v${councilVersion})
 
 USAGE:
   council <command> [options]
@@ -19,7 +23,10 @@ COMMANDS:
   mcp                           Start Council MCP stdio server for AI agent hosts
   doctor                        Check environment health (Herdr, hc, agent CLIs)
   status [--session <id>]        List live terminals or inspect an async job
-  start [options]                Start one asynchronous delegate job
+  start [options]                Start any of the six workflows in the background
+  schedule create|list|status|cancel   Schedule one-time or recurring runs
+  round --session <id>           Start the next voting round for a saved formal session
+  retally --session <id>         Refresh the tally of a completed formal round
   result --session <id>          Read the saved result or pending state
   convene [options]             Run a multi-agent collaboration workflow
   delegate [options]            Delegate a single subtask to an agent in Herdr
@@ -31,15 +38,17 @@ COMMANDS:
   poll help                     Manage advisory project polls and submit responses
   debate help                   Read or reply to a Council Desktop debate
   alignment status [target]     Inspect an agent's Council alignment
+  alignment check <target>      Request a setup check and report delivery separately
   alignment decline             Report missing Council setup from your terminal
   alignment setup --host ... --project ...  Preview project setup. Use --apply to write it.
 
 CONVENE OPTIONS:
-  --mode <name>                 Mode: council (default), review, delegate
-                                debate, parallel, pipeline are experimental and disabled
+  --mode <name>                 council, review, delegate, debate, parallel, pipeline
   --task <string>               The task or question to deliberate on
   --context <string>            Background context or file content
   --criteria <string>           Acceptance or decision criteria
+  --subtasks <json-array>       Parallel assignments as an array of strings
+  --stages <json-array>         Pipeline stages with name and optional task, agent, and role
   --agents <a,b,c>              Comma-separated agent names (default: claude,codex,antigravity)
   --permission <read|write>     File permissions: read (default, plan mode) or write
   --timeout <sec>               Timeout in seconds per agent turn (default: 180)
@@ -64,7 +73,11 @@ DELEGATE OPTIONS:
 
 ASYNC START OPTIONS:
   --task <string>               Instruction for the agent
-  --mode delegate               Workflow mode (default: delegate)
+  --task-file <path>            Read the instruction from a UTF-8 file
+  --mode <name>                 council, review, delegate, debate, parallel, pipeline (default: delegate)
+  --agents <a,b,c>              Agents for a multi-agent run
+  --subtasks <json-array>       Parallel assignments
+  --stages <json-array>         Ordered pipeline stages
   --agent <name>                Agent for a new terminal (default: codex)
   --adopt <address>              Use a ready existing Herdr terminal
   --session <id>                Use a stable ID to reconnect with the same options
@@ -103,6 +116,35 @@ function parseArgs(args) {
   return parsed;
 }
 
+function readArrayOption(value, flag) {
+  if (value === undefined) return [];
+  try {
+    const entries = JSON.parse(value);
+    if (Array.isArray(entries)) return entries;
+  } catch {}
+  throw new Error(flag + ' requires a JSON array.');
+}
+
+function readTaskOption(flags) {
+  const file = flags['task-file'];
+  if (file === undefined) return flags.task ?? (flags._.join(' ') || undefined);
+  if (typeof file !== 'string' || !file.trim()) throw new Error('--task-file requires a path.');
+  if (flags.task !== undefined || flags._.length) throw new Error('Provide one task source.');
+  const contents = readFileSync(file);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(contents); }
+  catch { throw new Error('--task-file must contain valid UTF-8 text.'); }
+}
+
+function jobFlags(flags) {
+  return {
+    mode: flags.mode || 'delegate', task: readTaskOption(flags), agent: flags.agent || 'codex', adopt: flags.adopt || null,
+    sessionId: flags.session || null, permission: flags.permission || 'read', timeoutSec: flags.timeout ? Number(flags.timeout) : 180,
+    keepTerminals: Boolean(flags.keep), agents: flags.agents?.split(',').map(agent => agent.trim()),
+    subtasks: readArrayOption(flags.subtasks, '--subtasks'), stages: readArrayOption(flags.stages, '--stages'),
+    context: flags.context, criteria: flags.criteria, representative: flags.representative
+  };
+}
+
 async function main() {
   const rawArgs = process.argv.slice(2);
   const command = rawArgs[0] || 'help';
@@ -133,34 +175,51 @@ async function main() {
       if (action !== 'status' && action !== 'check') throw new Error('Use council alignment status, check, decline, or setup.');
       const address = target || herdr.terminalId;
       if (!address || (action === 'check' && !target)) throw new Error('A Herdr terminal address is required.');
-      if (action === 'check') herdr.requestAlignment(address, { refresh: true });
+      if (action === 'check') {
+        console.log(JSON.stringify(herdr.requestAlignment(address, { refresh: true })));
+        break;
+      }
       const result = herdr.get(address);
       if (!result.success) throw new Error(result.error);
       console.log(JSON.stringify({ address: result.details.address, state: alignmentOf(result.details) }));
       break;
     }
     case 'start': {
-      const mode = flags.mode || 'delegate';
-      const task = flags.task || flags._.join(' ');
-      if (!task) {
-        console.error('Error: --task is required for start.');
-        process.exit(1);
-      }
-      const res = await jobManager.startJob({
-        mode,
-        task,
-        agent: flags.agent || 'codex',
-        adopt: flags.adopt || null,
-        sessionId: flags.session || null,
-        permission: flags.permission || 'read',
-        timeoutSec: flags.timeout ? Number(flags.timeout) : 180,
-        keepTerminals: Boolean(flags.keep)
-      });
+      const res = await jobManager.startJob(jobFlags(flags));
       if (!res.success) {
         console.error(`Start failed: ${res.error}`);
+        if (res.alignmentRequest) {
+          const { status, error } = res.alignmentRequest;
+          console.error(`Readiness notice: ${status}${error ? ` (${error})` : ''}`);
+        }
+        if (res.nextAction) console.error(res.nextAction);
         process.exit(1);
       }
       console.log(JSON.stringify(res, null, 2));
+      break;
+    }
+
+    case 'schedule': {
+      const manager = new ScheduleManager({ herdr });
+      const [action, name] = flags._;
+      if (!['create', 'list', 'status', 'cancel'].includes(action)) {
+        throw new Error('Use schedule create --task <text> [--at <ISO-time>] [--every <seconds>] [--count <runs>], schedule list, schedule status <id>, or schedule cancel <id>.');
+      }
+      const id = flags.id ?? name;
+      const result = action === 'create' ? manager.create({ id, at: flags.at, everySec: flags.every, count: flags.count,
+        job: jobFlags({ ...flags, _: [] }) }) : action === 'list' ? manager.list() : manager[action](id);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.success === false) process.exitCode = 1;
+      break;
+    }
+
+    case 'round':
+    case 'retally': {
+      const id = flags.session ?? flags._[0];
+      const result = command.toLowerCase() === 'retally' ? retallyFormalRound(orchestrator.workspace, id)
+        : await jobManager.startJob(nextFormalRound(orchestrator.workspace, id, jobFlags({ ...flags, session: flags['new-session'], _: [] })));
+      console.log(JSON.stringify(result, null, 2));
+      if (result.success === false) process.exitCode = 1;
       break;
     }
 
@@ -185,14 +244,25 @@ async function main() {
     }
 
     case 'doctor': {
-      console.log('--- Council Environment Health Check ---');
       const doc = herdr.doctor();
+      const liveServer = flags['live-version'] || flags['live-tools'] ? {
+        version: typeof flags['live-version'] === 'string' ? flags['live-version'] : null,
+        tools: typeof flags['live-tools'] === 'string' ? flags['live-tools'].split(',').map(name => name.trim()).filter(Boolean) : null
+      } : undefined;
+      const integration = diagnoseCouncilHost({ host: flags.host, project: flags.project ?? process.cwd(), target: flags.target, herdr, liveServer });
+      if (flags.json) {
+        console.log(JSON.stringify({ environment: doc, integration }, null, 2));
+        break;
+      }
+      console.log('--- Council Environment Health Check ---');
       console.log(`Herdr Core CLI (hc): ${doc.herdrInstalled ? `Available (${doc.hcVersion})` : 'NOT FOUND (Install herdr-core)'}`);
       console.log(`Current Session:     ${doc.inHerdr ? `Inside Herdr terminal (${doc.terminalId})` : 'Outside Herdr (standalone)'}`);
       console.log('\nSupported Agent CLIs:');
       for (const [name, info] of Object.entries(doc.agents)) {
         console.log(`  - ${name.padEnd(12)}: ${info.available ? `Ready (${info.path})` : 'Not on PATH'}`);
       }
+      console.log(`\nCouncil ${integration.expected.version}, skill ${integration.expected.skillRevision}`);
+      for (const issue of integration.issues) console.log(`  - ${issue.code}: ${issue.action}`);
       break;
     }
 
@@ -230,6 +300,9 @@ async function main() {
       const timeoutSec = flags.timeout ? Number(flags.timeout) : 180;
       const keepTerminals = Boolean(flags.keep);
 
+      const subtasks = readArrayOption(flags.subtasks, '--subtasks');
+      const stages = readArrayOption(flags.stages, '--stages');
+
       console.log(`[Council] Convening in ${mode.toUpperCase()} mode with agents: ${agents.join(', ')}...`);
       const result = await orchestrator.runMode({
         mode,
@@ -238,6 +311,8 @@ async function main() {
         task,
         context: flags.context || '',
         criteria: flags.criteria || '',
+        subtasks,
+        stages,
         agents,
         permission,
         timeoutSec,
@@ -352,7 +427,7 @@ async function main() {
     case 'ballot': {
       const sessionId = flags.session || flags._[0];
       const voter = flags.voter || flags._[1];
-      const vote = flags.vote || flags._[2] || 'approve';
+      const vote = flags.vote ?? flags._[2];
       const score = flags.score !== undefined ? Number(flags.score) : 8;
       const rationale = flags.rationale || flags.reason || (flags._.length > 3 ? flags._.slice(3).join(' ') : '');
       const role = flags.role || 'reviewer';
@@ -361,13 +436,13 @@ async function main() {
       const amendments = flags.amendments ? flags.amendments.split(',').map(s => s.trim()) : [];
       const targetArtifactSha256 = flags['target-sha'] || flags.targetSha || '';
 
-      if (!sessionId || !voter || !rationale) {
-        console.error('Error: --session, --voter, and --rationale are required for cast-ballot.');
+      if (!sessionId || !voter || !rationale || typeof vote !== 'string' || !vote.trim()) {
+        console.error('Error: --session, --voter, --vote, and --rationale are required for cast-ballot.');
         console.error('Usage: council cast-ballot --session <id> --voter <name> --vote <approve|reject|amend> --score <1-10> --rationale "<text>"');
         process.exit(1);
       }
 
-      const sDir = orchestrator.workspace.resolveSessionDir(sessionId);
+      const sDir = resolveVotingSession(orchestrator.workspace, sessionId);
       const res = orchestrator.workspace.castBallot(sDir, {
         round,
         voter,
@@ -381,6 +456,8 @@ async function main() {
       });
 
       console.log(`Ballot recorded for ${voter} (round ${round}) at ${res.ballotPath}`);
+      const tally = retallyAfterBallot(orchestrator.workspace, sDir, round);
+      if (tally) console.log(JSON.stringify(tally, null, 2));
       console.log(JSON.stringify(res.ballot, null, 2));
       break;
     }

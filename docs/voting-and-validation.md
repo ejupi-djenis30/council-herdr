@@ -38,7 +38,7 @@ Use the MCP tool `council_cast_ballot` or the CLI from the target project:
 node C:/path/to/council-herdr/bin/council.js cast-ballot --session <session-id-or-directory> --voter council-skeptic --role skeptic --agent codex --vote amend --score 7 --rationale "Bound the connection timeout" --amendments "Cap retries at three" --target-sha <proposal-sha256>
 ```
 
-When submitting from a different working directory, use the explicit session directory. Plain session IDs resolve under that process's `.agent_workspace/`; a directory name collision in the current project does not change that resolution. Casting after a workflow returns does not automatically rerun validation or promotion. Multi-round revision/resumption is not implemented by this command.
+When submitting from a different working directory, use the explicit session directory. Plain session IDs resolve under that process's `.agent_workspace/`; a directory name collision in the current project does not change that resolution. After the participant turns complete, CLI and MCP ballot submissions refresh the recorded tally. Use `retally --session <id>` to check it again, or `round --session <id>` to start a linked review with a new ballot round.
 
 A read-only participant may lack a permitted direct-write channel. It should return its final response normally and leave the result provisional, rather than bypass its sandbox or invent an endorsement.
 

@@ -2,7 +2,9 @@
   "mcpServers": {
     "council": {
       "command": "node",
-      "args": ["bin/council.js", "mcp"]
+      "args": ["bin/council.js", "mcp"],
+      "cwd": ".",
+      "env": { "COUNCIL_MCP_REQUIRE_PROJECT": "1" }
     }
   }
 }

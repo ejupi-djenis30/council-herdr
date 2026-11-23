@@ -1,5 +1,5 @@
 import { div, image, svg } from 'gpui-kit';
-import { h_flex, v_flex, Input } from 'gpui-base';
+import { Button, h_flex, v_flex, Input } from 'gpui-base';
 
 export function label(value, size = 13, color) {
   return div().min_w_0().text_size(size).whitespace_normal().child(String(value))
@@ -28,16 +28,19 @@ export function cardHeading(t, title, icon) {
 export function button(t, id, title, click, variant = 'normal', disabled = false, icon) {
   const primary = variant === 'primary';
   const active = variant === 'active';
-  return h_flex().id(id).h(30).px(9).gap(5).rounded(6).items_center().justify_center()
+  return Button.new(id).h(30).px(9).rounded(6).items_center().justify_center()
     .text_size(12).font_medium().border_1()
     .border_color(active ? t.accent : primary ? t.solid : t.border)
     .bg(primary ? t.solid : active ? t.selected : t.surface)
     .text_color(primary ? t.solid_foreground : t.foreground)
+    .disabled(disabled).selected(active).tab_stop(!disabled)
+    .accessibility_label(title || id).focus(s => s.border_color(primary ? t.solid_foreground : t.accent))
     .when(disabled, node => node.opacity(0.5))
     .when(!disabled, node => node.cursor_pointer().hover(s => s.bg(primary ? t.accent : t.raised))
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation()).on_click(click))
-    .when(Boolean(icon), node => node.child(glyph(icon, 14)))
-    .when(Boolean(title), node => node.child(title));
+    .child(h_flex().gap(5).items_center()
+      .when(Boolean(icon), node => node.child(glyph(icon, 14)))
+      .when(Boolean(title), node => node.child(title)));
 }
 
 export function panel(t) {
@@ -46,13 +49,16 @@ export function panel(t) {
 }
 
 export function sectionTab(t, id, title, selected, click, disabled = false) {
-  return h_flex().id(id).flex_1().min_w_0().h(34).gap(7).items_center().justify_center().px(5).rounded(7)
+  return Button.new(id).flex_1().min_w_0().h(34).items_center().justify_center().px(5).rounded(7)
+    .disabled(disabled).selected(selected).tab_stop(!disabled).role('tab').accessibility_label(title)
+    .border_1().border_color(t.background).focus(s => s.border_color(t.accent))
     .when(selected, node => node.bg(t.selected))
     .text_color(selected ? t.foreground : t.muted).text_size(12).font_semibold()
     .when(!disabled, node => node.cursor_pointer().hover(s => s.bg(t.raised))
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation()).on_click(click))
-    .child(glyph(id, 16).text_color(selected ? t.accent : t.muted))
-    .child(div().min_w_0().truncate().child(title));
+    .child(h_flex().gap(7).min_w_0().items_center()
+      .child(glyph(id, 16).text_color(selected ? t.accent : t.muted))
+      .child(div().min_w_0().truncate().child(title)));
 }
 
 export function columns(wide, primary, secondary, primaryWidth = 270) {
@@ -64,7 +70,8 @@ export function columns(wide, primary, secondary, primaryWidth = 270) {
 }
 
 export function input(t, state, icon) {
-  const control = Input.new(state).w_full().min_w_0().h(34).px(9).text_size(13).text_color(t.foreground);
+  const control = Input.new(state).w_full().min_w_0().h(34).px(9).text_size(13).text_color(t.foreground).tab_stop(true);
+  if (icon === 'search') control.accessibility_label('Search by title, project or ID');
   if (!icon) return control.rounded(6).border_1().border_color(t.input).bg(t.background);
   return h_flex().w_full().min_w_0().items_center().pl(10).rounded(6).border_1()
     .border_color(t.input).bg(t.background)
@@ -73,7 +80,7 @@ export function input(t, state, icon) {
 
 export function field(t, name, state) {
   return v_flex().w_full().min_w_0().gap(4)
-    .child(label(name, 11, t.muted)).child(input(t, state));
+    .child(label(name, 11, t.muted)).child(input(t, state).accessibility_label(name));
 }
 
 export function statusDot(color) {

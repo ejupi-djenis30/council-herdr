@@ -53,6 +53,7 @@ function transport({ initial = snapshot(), ack = { started: true, status: 'idle'
     send(...args) { record('send', args); return { success: true, target: args[0], output: typeof ack === 'string' ? ack : JSON.stringify(ack), error: null }; },
     wait(...args) { record('wait', args); return wait; },
     read(...args) { record('read', args); return read; },
+    captureTurn(target, turn, options) { record('captureTurn', [target, turn, options]); return this.read(target, options.lines); },
     launchAgent(...args) { record('launchAgent', args); return { success: true, address: 't122', details: { address: 't122', turn: 0, first_message: { sent: true } } }; },
     dismiss(...args) { record('dismiss', args); return { success: true }; },
     interrupt(...args) { record('interrupt', args); return { success: true }; },
@@ -101,6 +102,7 @@ test('borrowed baseline 12 and acknowledged done 13 yield persisted output once 
   assert.match(JSON.stringify(result), /ACCEPTANCE_RESULT=42/);
   const job = record(f.sessionDir);
   assert.equal(job.baselineTurn, 12);
+  assert.equal(result.turn, 13);
   assert.equal(job.deliveryState, 'acknowledged');
   assert.equal(job.participant.ownership, 'borrowed');
   assert.equal(job.participant.address, ADDRESS);
@@ -166,6 +168,7 @@ test('a borrowed job queues only a setup notice until the terminal registers, an
 
 for (const [label, wait] of [
   ['stale done 12', waitResult({ turn: 12 })],
+  ['unrelated done 14', waitResult({ turn: 14 })],
   ['startup idle 0', waitResult({ status: 'idle', turn: 0 })],
   ['startup done 0', waitResult({ turn: 0 })],
   ['message', waitResult({ status: 'working', turn: 12, reason: 'message', ended: false })],
@@ -195,6 +198,16 @@ for (const [label, wait] of [
     assert.equal(count(f.calls, 'dismiss'), 0);
   }));
 }
+
+test('owned later turn cannot supply a delegation result', async () => inTemp(async root => {
+  const f = setup(root, { wait: waitResult({ address: 't122', turn: 2 }) });
+  assert.equal((await start(f, { adopt: undefined })).success, true);
+  const result = await runWorker(f);
+  assert.equal(result.success, false);
+  assert.match(result.error, /expected Council turn 1/);
+  assert.equal(count(f.calls, 'read'), 0);
+  assert.equal(count(f.calls, 'dismiss'), 0);
+}));
 
 for (const [label, ack] of [
   ['different turn', { started: true, status: 'idle', turn: 13 }],
@@ -515,7 +528,7 @@ test('corrupt existing record fails closed without replacement or worker dispatc
 }));
 
 for (const [label, overrides] of [
-  ['unsupported mode', { mode: 'review' }],
+  ['unsupported mode', { mode: 'unknown-mode' }],
   ['empty task', { task: '' }],
   ['unsafe session id', { sessionId: '../outside' }],
   ['invalid permission', { permission: 'admin' }]
@@ -773,7 +786,7 @@ test('async MCP reports pending, ready and failed results with consistent tool e
   const missing = await call('council_session_status', { sessionId: 'missing' });
   assert.equal(missing.isError, true);
   assert.equal(missing.body.success, false);
-  const invalid = await call('council_start', { mode: 'review', task: TASK });
+  const invalid = await call('council_start', { mode: 'unknown-mode', task: TASK });
   assert.equal(invalid.isError, true);
   assert.equal(invalid.body.success, false);
 }));

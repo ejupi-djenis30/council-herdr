@@ -26,3 +26,8 @@ jobs:
           package-manager-cache: false
       - run: npm test
       - run: node --check herdr/mods/council/main.js
+      - name: Smoke-test the packaged MCP entry points
+        shell: bash
+        run: |
+          archive=$(npm pack --silent --pack-destination "$RUNNER_TEMP")
+          node .github/scripts/package-smoke.mjs "$RUNNER_TEMP/$archive"

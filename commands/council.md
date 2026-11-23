@@ -10,10 +10,10 @@ description: Delegate bounded work or review a concrete proposal through visible
 - `/council delegate <agent> <task>`: one specialist task.
 - `/council status` or `/council doctor`: inspect parent-environment availability and Herdr terminals.
 
-`debate`, `parallel` and `pipeline` are disabled experimental modes. Existing terminals are not adopted automatically.
+For one specialist, prefer `council_start`, `council_session_status` and `council_result` or the equivalent CLI commands `start`, `status` and `result`. Use the intended project directory for the CLI and carry its absolute path as `project` in project-scoped MCP calls. Specify the terminal address to reuse after verifying it is aligned and idle or done. Keep the session ID and identical task options for reconnecting.
 
-Use connected `council_convene` or `council_delegate` tools, or the bundled CLI by absolute path from the intended project directory. Follow the installed `hc --skill` and run long commands under `hc run --bg`.
+Use `council_convene` for formal council or review. Check that the MCP connection exposes the tools required for the workflow, including `council_alignment`. Use the current CLI by absolute path if the connection is missing tools or cannot select the project. Read the installed `hc --skill` and run long blocking CLI commands under `hc run --bg`.
 
-Default to read permissions. Present real findings, dissent, authorization state and next actions. Screen-only results are provisional. Only valid direct ballots from completed participants authorize promotion; a mechanical tally is not an agent signature or synthesis.
+Default to read permissions. Present verified findings, dissent, authorization state and next actions. Screen-only results are provisional. Only explicit, valid direct ballots from completed participants authorize promotion.
 
-On timeout or blocked/delivery failure, inspect the session and reported addresses. Preserve recoverable agents, do not blindly relaunch tasks, and never automatically dismiss user terminals. See `skills/council/SKILL.md`.
+On timeout, a blocked turn or uncertain delivery, inspect the session and terminal addresses before attempting recovery. Preserve borrowed and incomplete terminals. See `skills/council/SKILL.md`.

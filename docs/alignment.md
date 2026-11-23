@@ -4,16 +4,22 @@ Install the Council skill from `skills/council/` and connect the agent to the ma
 
 ## Configure a project
 
-The installer previews project-scoped files for Claude Code, Junie and OpenCode. With the user's authorization for that project, apply the preview.
+The installer previews project-scoped files for Antigravity, Claude Code, Junie and OpenCode. With the user's authorization for that project, apply the preview.
 
 ```powershell
 node C:/path/to/council-herdr/bin/council.js alignment setup --host opencode --project C:/path/to/project
 node C:/path/to/council-herdr/bin/council.js alignment setup --host opencode --project C:/path/to/project --apply
 ```
 
-Use `--host claude` or `--host junie` for those agents. The installer merges the Council server with existing JSON settings. A commented JSONC file needs a host-native merge using the preview. Use `--replace` after reviewing existing Council entries that need refreshing. [Claude Code MCP](https://code.claude.com/docs/en/mcp) · [Junie MCP setup](https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html) · [OpenCode MCP setup](https://opencode.ai/docs/mcp-servers)
+Use `--host antigravity`, `--host claude`, or `--host junie` for those agents. The installer merges the Council server with existing JSON settings and binds it to the project. A commented JSONC file needs a host-native merge using the preview. Use `--replace` after reviewing existing Council entries that need refreshing. [Antigravity MCP](https://antigravity.google/docs/ide-mcp) · [Claude Code MCP](https://code.claude.com/docs/en/mcp) · [Junie MCP setup](https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html) · [OpenCode MCP setup](https://opencode.ai/docs/mcp-servers)
 
-For Codex and other hosts, install the Council plugin or copy the skill to the host's skill directory, then configure the local stdio server using your existing host's MCP settings. Point it at the current checkout using the absolute entry path and arguments `["<Council checkout>/bin/council.js", "mcp"]`. Reload the host's integrations according to its documentation. [Codex MCP](https://developers.openai.com/codex/mcp) · [Codex skills](https://developers.openai.com/codex/skills)
+The Codex, Claude Code and Antigravity plugin manifests resolve the stdio runner from their installation. When an MCP connection has no default project, pass an absolute `project` for job, poll, debate, council, and review calls, and use the assigned absolute session directory for formal ballots. Reuse the same `project` with job status and result calls. For a manual stdio configuration, use the absolute entry path in `["<Council installation>/bin/council.js", "mcp"]` and set the environment variable `COUNCIL_MCP_PROJECT` to the absolute project path to bind the connection explicitly. Reload the host integration after changing its configuration. [Codex plugin working directory](https://github.com/openai/codex/blob/main/codex-rs/codex-mcp/src/plugin_config.rs#L1410-L1425) · [Antigravity plugin MCP](https://antigravity.google/docs/build-plugins/)
+
+## Diagnose an upgrade
+
+Use `council doctor --host opencode --project <absolute-project> --target <terminal> --json` to inspect the configured Council version, skill revision and fingerprint, and terminal receipt. Leave out `--target` to inspect files only. This command reads configuration without executing the configured runner.
+
+Call `council_status` from the agent host to see the version and tools on its live MCP connection. When comparing an older connection, pass the observed version with `--live-version` or its comma-separated tool names with `--live-tools` to `doctor`. A stale configuration requires updating the runner path, a skill mismatch requires refreshing the skill, a current configuration with an older live server requires reloading the host, and a current setup without a receipt needs an alignment check.
 
 ## Confirm readiness
 

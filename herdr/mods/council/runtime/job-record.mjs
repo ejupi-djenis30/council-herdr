@@ -21,27 +21,39 @@ export function jobExpired(job, now = Date.now()) {
   return now > new Date(job.deadlineAt).getTime();
 }
 
-export function jobInterruption(job, expired) {
+export function jobInterruption(job, expired, workerObservation) {
   if (job.state === 'completed') return null;
   if (job.deliveryState === 'uncertain' || job.state === 'uncertain') return 'uncertain';
   if (job.state === 'failed') {
-    if (job.waitDetails?.status === 'blocked' || job.waitDetails?.reason === 'blocked') return 'blocked';
     if (job.failureKind === 'timed_out' || job.waitDetails?.reason === 'timeout' || job.waitDetails?.isTimeout === true) return 'timed_out';
+    if (job.waitDetails?.status === 'blocked' || job.waitDetails?.reason === 'blocked') return 'blocked';
     return null;
   }
-  return expired ? 'timed_out' : null;
+  if (workerObservation?.state === 'stopped') return 'worker_stopped';
+  if (expired) return 'timed_out';
+  if (job.state === 'deliberating' && job.deliveryState === 'acknowledged' && job.awaitingInput === true) return 'awaiting_input';
+  return null;
 }
 
 export function jobRecovery(outcome, deliveryState) {
   switch (outcome) {
     case 'uncertain':
       return 'Inspect the terminal and its delivery record before submitting the task again.';
+    case 'awaiting_input':
+      return 'Open the participant terminal and address the prompt. Council will keep collecting until the job deadline.';
+    case 'worker_stopped':
+      return deliveryState === 'planned'
+        ? 'Inspect the worker terminal and its session claim before starting another job.'
+        : 'Inspect the participant terminal for the existing task and its answer before starting another job.';
     case 'blocked':
-      return 'Open the terminal and resolve any prompt there. Inspect the resulting turn before starting another job.';
+      return 'Council stopped collecting this turn. Open the terminal and resolve any prompt there. Read the resulting answer in Herdr before starting another job.';
     case 'timed_out':
       return deliveryState === 'acknowledged'
         ? 'Council reached its deadline before saving a capture. The agent may still be working. Inspect the existing terminal before starting another job.'
         : 'Council reached its deadline without a saved result. Inspect the delivery record before submitting the task again.';
+    case 'failed':
+    case 'dispatch_failed':
+      return 'Inspect the saved error and any recorded terminals before starting another job with a new session ID.';
     default:
       return null;
   }

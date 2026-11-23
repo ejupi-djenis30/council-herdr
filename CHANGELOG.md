@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.1
+
+- Enable structured debate, parallel assignments, and sequential pipelines in `convene`, with verified handoffs and saved advisory reports.
+- Keep collecting an acknowledged delegation through Herdr input prompts. Show the pause and original deadline in Desktop, CLI, and MCP.
+- Accept UTF-8 briefs with `start --task-file` and send large prompts to existing Herdr terminals over stdin.
+- Require explicit formal votes and preserve existing ballots when a submission omits the decision.
+- Verify and capture the exact delegated turn after its screen settles, within the original deadline.
+- Launch bundled MCP from the plugin installation directory. Pass an absolute `project` to workspace tools when the connection has no default project. Use `doctor` to inspect versions, tools, and alignment.
+- Lead with resumable delegation in the skill and include the assigned proposal digest in formal reviewer briefs.
+- Show invitation deadlines and delivery outcomes in Desktop, add checks and retries for eligible targets, and improve keyboard navigation.
+
 ## 3.0.0
 
 - Require an agent to register its current Council skill through Council MCP before it receives a delegation, a review brief, or a poll or debate invitation. An agent can report missing setup, and Desktop shows which invitations are waiting for alignment.

@@ -75,6 +75,10 @@ class MockHerdrClient {
     return { success: true, target: name, content };
   }
 
+  captureTurn(name) {
+    return this.read(name);
+  }
+
   dismiss(name) {
     this.dismissed.push(name);
     return { success: true, target: name };
@@ -130,30 +134,6 @@ test('CouncilOrchestrator runs review mode', async () => {
   assert.equal(mockHerdr.launched.length, 3);
   assert.match(res.report, /Peer Review & Simplification Report/);
   assert.equal(mockHerdr.dismissed.length, 3);
-});
-
-test('CouncilOrchestrator rejects experimental debate mode', async () => {
-  const orchestrator = new CouncilOrchestrator({ herdr: new MockHerdrClient() });
-  await assert.rejects(
-    async () => orchestrator.runMode({ mode: 'debate', task: 'REST vs gRPC for internal services' }),
-    /Mode 'debate' is experimental and disabled/
-  );
-});
-
-test('CouncilOrchestrator rejects experimental parallel mode', async () => {
-  const orchestrator = new CouncilOrchestrator({ herdr: new MockHerdrClient() });
-  await assert.rejects(
-    async () => orchestrator.runMode({ mode: 'parallel', task: 'Investigate performance', subtasks: ['Profile CPU'] }),
-    /Mode 'parallel' is experimental and disabled/
-  );
-});
-
-test('CouncilOrchestrator rejects experimental pipeline mode', async () => {
-  const orchestrator = new CouncilOrchestrator({ herdr: new MockHerdrClient() });
-  await assert.rejects(
-    async () => orchestrator.runMode({ mode: 'pipeline', task: 'Build payment webhook' }),
-    /Mode 'pipeline' is experimental and disabled/
-  );
 });
 
 test('CouncilOrchestrator runs delegate mode', async () => {

@@ -5,6 +5,8 @@ const statuses = {
   starting: ['Starting', 'working', 'active'],
   attempting: ['Sending task', 'working', 'active'],
   deliberating: ['In progress', 'working', 'active'],
+  awaiting_input: ['Waiting for input', 'blocked', 'attention'],
+  worker_stopped: ['Worker stopped', 'blocked', 'attention'],
   completed: ['Result ready', 'done', 'ready'],
   uncertain: ['Delivery uncertain', 'blocked', 'attention'],
   timed_out: ['Deadline expired', 'blocked', 'attention'],
@@ -77,12 +79,15 @@ export function delegationView(t, job, { wide, terminal, focus, copy }) {
   const ownership = job.ownership === 'borrowed' ? 'Existing terminal' : job.ownership === 'owned' ? 'Council terminal' : null;
   const program = terminal?.program?.name || terminal?.app || job.agent;
   const route = [program, job.address, ownership].filter(Boolean).join(' · ');
+  const workerState = { live: 'Running', stopped: 'Stopped', unknown: 'Status unavailable' }[job.workerObservation?.state];
+  const worker = [job.workerAddress, workerState, job.workerObservation?.retainedClaim ? 'Session claim retained' : null]
+    .filter(Boolean).join(' · ');
   const delivery = panel(t).child(cardHeading(t, 'Delivery record', 'delegations'))
     .child(detail(t, 'Participant', route || 'Awaiting a terminal'))
     .child(detail(t, 'Task delivery', deliveries[job.deliveryState] ?? 'Unavailable'))
     .when(job.remainingSec !== null, node => node.child(detail(t, 'Deadline', duration(job.remainingSec))))
-    .when(job.expired && job.status === 'uncertain', node => node.child(detail(t, 'Deadline', 'Elapsed')))
-    .when(Boolean(job.workerAddress), node => node.child(detail(t, 'Worker', job.workerAddress)))
+    .when(job.expired && ['uncertain', 'worker_stopped'].includes(job.status), node => node.child(detail(t, 'Deadline', 'Elapsed')))
+    .when(Boolean(worker), node => node.child(detail(t, 'Worker', worker)))
     .when(wait.length > 0, node => node.child(detail(t, 'Last wait event', wait.join(' · '))));
   return v_flex().w_full().gap(10).child(header).child(columns(wide, delivery, evidence(t, job, { copy })));
 }

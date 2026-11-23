@@ -2,7 +2,8 @@
   "mcpServers": {
     "council": {
       "command": "node",
-      "args": ["${workspaceFolder}/bin/council.js", "mcp"]
+      "args": ["${PLUGIN_ROOT}/bin/council.js", "mcp"],
+      "env": { "COUNCIL_MCP_REQUIRE_PROJECT": "1" }
     }
   }
 }

@@ -1,5 +1,6 @@
 import { h_flex, v_flex } from 'gpui-base';
 import { button, label, panel, reviewStatus, statusPill } from './components.js';
+import { discussionType } from './poll-text.js';
 
 function timeText(timestamp) {
   const date = new Date(timestamp);
@@ -54,7 +55,7 @@ export function discussionView(t, debate, { project, openReview, copy, delivery,
       .child(statusPill(t, reviewStatus(debate.status), ['approved', 'open'].includes(debate.status) ? t.done : t.muted))
       .when(debate.mode !== 'debate', row => row.child(button(t, 'open-linked-review', 'View review', openReview, 'normal', false, 'reviews'))))
     .child(label(debate.task, 18, t.foreground).font_semibold())
-    .child(label(project, 11, t.muted))
+    .child(label(`${discussionType(debate)} · ${project}`, 11, t.muted))
     .when(Boolean(delivery), node => node.child(delivery));
   const body = v_flex().w_full().gap(12).child(header);
   if (!debate.messages.length) body.child(panel(t).child(label('Waiting for replies.', 13, t.muted)));

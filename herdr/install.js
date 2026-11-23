@@ -26,6 +26,7 @@ const files = [
   'mod.json', 'components.js', 'delegation-view.js', 'discussion-view.js', 'navigation.js', 'poll-text.js', 'poll-view.js', 'main.js',
   'runtime/alignment.mjs', 'runtime/council.mjs', 'runtime/debate-command.mjs', 'runtime/debate-room.mjs', 'runtime/delegations.mjs', 'runtime/desktop.mjs',
   'runtime/discussion.mjs', 'runtime/invitations.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs', 'runtime/wait-alignment.mjs',
+  'runtime/worker-observation.mjs',
   'runtime/polls.mjs', 'runtime/store-files.mjs',
   ...readdirSync(join(source, 'icons')).filter(name => name.endsWith('.svg')).map(name => `icons/${name}`)
 ];

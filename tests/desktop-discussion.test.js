@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentWorkspace } from '../lib/workspace.js';
 import { desktopRequest } from '../herdr/mods/council/runtime/desktop.mjs';
-import { inviteReadyAgent, readInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
+import { checkInvitationAlignment, inviteReadyAgent, prepareInvitations, readInvitations, sendInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
 import { alignmentKey, alignmentLabel } from '../herdr/mods/council/runtime/alignment.mjs';
+import { discussionType, projectLabels } from '../herdr/mods/council/poll-text.js';
 
 const cli = fileURLToPath(new URL('../bin/council.js', import.meta.url));
 
@@ -199,5 +200,99 @@ test('Desktop tracks the invited poll roster and projects persisted delivery unc
   writeFileSync(join(inviteDir, `${poll.id}.json`), JSON.stringify({ id: poll.id, expiresAt: 1,
     targets: [{ address: 't7', state: 'sending' }, { address: 't8', state: 'queued' }] }));
   assert.deepEqual(readInvitations(cwd, poll.id).map(target => target.state), ['uncertain', 'expired']);
-  assert.deepEqual(desktopRequest(cwd, 'polls', { id: poll.id }).poll.invitations.map(target => target.state), ['uncertain', 'expired']);
+  const detail = desktopRequest(cwd, 'polls', { id: poll.id }).poll;
+  assert.deepEqual(detail.invitations.map(target => target.state), ['uncertain', 'expired']);
+  assert.equal(detail.invitationDelivery.expiresAt, 1);
+  assert.ok(detail.invitations.every(target => !target.retryable));
+});
+
+test('Desktop persists launch failures and retries only a confirmed unsent original terminal', async t => {
+  const cwd = project(t);
+  const { id } = desktopRequest(cwd, 'create', { question: 'Review time?', mode: 'open' });
+  const space = 'sp42';
+  const ticket = desktopRequest(cwd, 'invite-prepare', { id, space, recipients: [
+    { address: 't1', createdAt: 1 }, { address: 't2', createdAt: 2 }, { address: 't3', createdAt: 3 }, { address: 't4' }
+  ] });
+  const delivery = () => desktopRequest(cwd, 'polls', { id }).poll.invitationDelivery;
+  assert.equal(delivery().active, true);
+  assert.ok(delivery().expiresAt > Date.now());
+  assert.equal(desktopRequest(cwd, 'invite-launch-failed', ticket).recorded, true);
+  assert.equal(delivery().active, false);
+  assert.deepEqual(delivery().targets.map(target => [target.state, target.retryable]), [
+    ['dispatch_failed', true], ['dispatch_failed', true], ['dispatch_failed', true], ['dispatch_failed', false]
+  ]);
+  const path = join(cwd, '.agent_workspace', '.invites', `${id}.json`);
+  const recorded = JSON.parse(readFileSync(path, 'utf8'));
+  recorded.targets[0].state = 'sent';
+  recorded.targets[1].state = 'uncertain';
+  writeFileSync(path, JSON.stringify(recorded));
+  for (const address of ['t1', 't2', 't4', 't5']) {
+    assert.throws(() => desktopRequest(cwd, 'invite-prepare', { id, space, address }), /confirmed unsent/);
+  }
+  assert.throws(() => desktopRequest(cwd, 'invite-prepare', { id, space: 'spOther', address: 't3' }), /not ready to retry/);
+  const retry = desktopRequest(cwd, 'invite-prepare', { id, space, address: 't3' });
+  assert.notEqual(retry.dispatchId, ticket.dispatchId);
+  assert.equal(desktopRequest(cwd, 'invite-launch-failed', ticket).recorded, false);
+  await sendInvitations(cwd, '/desktop-council.mjs', ticket);
+  assert.equal(delivery().active, true);
+  assert.deepEqual(delivery().targets.map(target => target.state), ['sent', 'uncertain', 'queued', 'dispatch_failed']);
+  assert.throws(() => desktopRequest(cwd, 'invite-prepare', { id, space, address: 't3' }), /not ready to retry/);
+});
+
+test('expired setup waits keep their reason and a setup check sends no invitation details', async t => {
+  const cwd = project(t);
+  const debate = desktopRequest(cwd, 'debate-create', { question: 'Discuss the private launch decision' });
+  const { id } = debate;
+  const space = 'sp42';
+  const { dispatchId } = prepareInvitations(cwd, { id, space, recipients: [
+    { address: 't1', createdAt: 20 }, { address: 't2', createdAt: 21 }
+  ] }, { lifetime: -1 });
+  const path = join(cwd, '.agent_workspace', '.invites', `${id}.json`);
+  const record = JSON.parse(readFileSync(path, 'utf8'));
+  record.targets[0].state = 'alignment_required';
+  record.targets[1].state = 'not_aligned';
+  writeFileSync(path, JSON.stringify(record));
+  const lock = `${path}.lock`;
+  writeFileSync(lock, 'worker');
+  const claimed = desktopRequest(cwd, 'debates', { id }).debate.invitationDelivery;
+  assert.equal(claimed.claimed, true);
+  assert.ok(claimed.targets.every(target => !target.retryable));
+  assert.throws(() => prepareInvitations(cwd, { id, space, address: 't1' }), /worker still holds/);
+  assert.equal(desktopRequest(cwd, 'invite-launch-failed', { id, dispatchId }).recorded, false);
+  unlinkSync(lock);
+  await sendInvitations(cwd, '/desktop-council.mjs', { id, space, dispatchId });
+  const delivery = desktopRequest(cwd, 'debates', { id }).debate.invitationDelivery;
+  assert.equal(delivery.active, false);
+  assert.equal(delivery.claimed, false);
+  assert.deepEqual(delivery.targets.map(({ state, reason, retryable }) => [state, reason, retryable]), [
+    ['expired', 'alignment_required', true], ['expired', 'not_aligned', true]
+  ]);
+  const terminal = { address: 't1', state: 'live', reported: true, created_ms: 20, pid: 12,
+    status: { state: 'idle', app: 'codex' }, labels: { 'herdr.space': space } };
+  const calls = [];
+  const command = async argv => { calls.push(argv); return { ok: true, details: argv[0] === 'get' ? terminal : { started: true } }; };
+  assert.deepEqual(await checkInvitationAlignment(cwd, '/desktop-council.mjs', { id, space, address: 't1' }, command), { state: 'sent' });
+  assert.deepEqual(calls.map(args => args[0]), ['get', 'label', 'send']);
+  assert.match(calls.at(-1).at(-1), /alignment check/);
+  assert.ok(!calls.at(-1).at(-1).includes(id));
+  terminal.created_ms++;
+  await assert.rejects(checkInvitationAlignment(cwd, '/desktop-council.mjs', { id, space, address: 't1' }, command), /original terminal/);
+  assert.equal(calls.filter(args => args[0] === 'send').length, 1);
+});
+
+test('mixed conversation lists distinguish formal reviews and same-named project origins', t => {
+  const cwd = project(t);
+  const alpha = join(cwd, 'alpha', 'project');
+  const beta = join(cwd, 'beta', 'project');
+  mkdirSync(alpha, { recursive: true });
+  mkdirSync(beta, { recursive: true });
+  const { id } = desktopRequest(alpha, 'debate-create', { question: 'Team discussion' });
+  const workspace = new AgentWorkspace(beta);
+  workspace.initSession({ sessionId: 'review-proposal', mode: 'review', task: 'Review the proposal' });
+  const list = desktopRequest(alpha, 'debates', { projects: [beta] }).debates;
+  const labels = projectLabels([alpha, beta, cwd, alpha]);
+  assert.equal(labels.get(alpha), alpha);
+  assert.equal(labels.get(beta), beta);
+  assert.equal(discussionType(list.find(item => item.id === id)), 'Debate thread');
+  assert.equal(discussionType(list.find(item => item.id === 'review-proposal')), 'Formal review');
 });

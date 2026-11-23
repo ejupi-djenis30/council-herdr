@@ -318,6 +318,7 @@ function delegateHerdr(scenario, options = {}) {
         error: scenario === 'read-failed' ? 'Read failed with stale data.' : null
       };
     },
+    captureTurn(target) { return this.read(target); },
     dismiss(target) {
       if (waitPlan && lastWait[target] && lastWait[target].status !== 'done') cleanupBeforeDone.push(target);
       dismissed.push(target);

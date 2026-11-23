@@ -174,9 +174,9 @@ test('AgentWorkspace elects representative deterministically', () => {
       task: 'Task'
     });
 
-    ws.castBallot(sessionDir, { round: 1, voter: 'bob', role: 'author', score: 9 });
-    ws.castBallot(sessionDir, { round: 1, voter: 'alice', role: 'judge', score: 9 });
-    ws.castBallot(sessionDir, { round: 1, voter: 'charlie', role: 'skeptic', score: 7 });
+    ws.castBallot(sessionDir, { round: 1, voter: 'bob', role: 'author', vote: 'approve', score: 9 });
+    ws.castBallot(sessionDir, { round: 1, voter: 'alice', role: 'judge', vote: 'approve', score: 9 });
+    ws.castBallot(sessionDir, { round: 1, voter: 'charlie', role: 'skeptic', vote: 'approve', score: 7 });
 
     const election = ws.electRepresentative(sessionDir, 1, ['bob', 'alice', 'charlie']);
     // alice and bob both have score 9; lexicographic tie-breaker elects 'alice'
@@ -285,8 +285,8 @@ test('AgentWorkspace persists election audit details in validation record', () =
     const ws = new AgentWorkspace(tmp);
     const { sessionDir } = ws.initSession({ sessionId: 'election-audit', mode: 'council', task: 'Task' });
 
-    ws.castBallot(sessionDir, { round: 1, voter: 'bob', role: 'author', score: 8 });
-    ws.castBallot(sessionDir, { round: 1, voter: 'alice', role: 'judge', score: 9 });
+    ws.castBallot(sessionDir, { round: 1, voter: 'bob', role: 'author', vote: 'approve', score: 8 });
+    ws.castBallot(sessionDir, { round: 1, voter: 'alice', role: 'judge', vote: 'approve', score: 9 });
 
     const election = ws.electRepresentative(sessionDir, 1, ['bob', 'alice']);
     const val = ws.validateChoice(sessionDir, {

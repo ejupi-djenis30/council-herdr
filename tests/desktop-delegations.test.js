@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { desktopRequest } from '../herdr/mods/council/runtime/desktop.mjs';
+import { readDelegation } from '../herdr/mods/council/runtime/delegations.mjs';
 import { JobManager } from '../lib/jobs.js';
 
 function project(t) {
@@ -66,13 +67,14 @@ test('desktop and CLI honor the dispatch sidecar and ignore it after acknowledge
   assert.equal(read(cwd, 'dispatch').error, null);
 });
 
-test('saved timeouts, blocked turns and uncertain delivery have distinct CLI and desktop outcomes', async t => {
+test('failed jobs offer consistent recovery guidance in the CLI and Desktop', async t => {
   const cwd = project(t);
   const cli = new JobManager({ cwd });
   for (const [outcome, deliveryState, waitDetails, guidance] of [
     ['timed_out', 'acknowledged', { reason: 'timeout', status: 'working' }, /may still be working/],
     ['blocked', 'acknowledged', { reason: 'status', status: 'blocked' }, /resolve any prompt/],
-    ['uncertain', 'uncertain', null, /before submitting the task again/]
+    ['uncertain', 'uncertain', null, /before submitting the task again/],
+    ['failed', 'failed', null, /new session ID/]
   ]) {
     const id = outcome.replaceAll('_', '-');
     const dir = record(cwd, id, { state: 'failed', deliveryState, waitDetails });
@@ -94,6 +96,40 @@ test('saved timeouts, blocked turns and uncertain delivery have distinct CLI and
     assert.equal(result.nextAction, view.nextAction);
     assert.deepEqual(readFileSync(path), before);
   }
+});
+
+test('a paused delegation appears in Desktop with its original deadline and matches CLI status', async t => {
+  const cwd = project(t);
+  record(cwd, 'approval', {
+    state: 'deliberating', deliveryState: 'acknowledged', awaitingInput: true,
+    waitDetails: { reason: 'status', status: 'blocked', turn: 3 }
+  });
+  const view = read(cwd, 'approval');
+  const status = await new JobManager({ cwd }).getStatus('approval');
+  assert.equal(view.status, 'awaiting_input');
+  assert.equal(view.status, status.outcome);
+  assert.equal(view.nextAction, status.nextAction);
+  assert.ok(view.remainingSec > 0);
+  assert.equal(view.output, null);
+});
+
+test('opening a delegation checks its worker while the summary stays disk-only', t => {
+  const cwd = project(t);
+  const dir = record(cwd, 'stopped', {
+    state: 'deliberating', deliveryState: 'acknowledged', worker: { status: 'claimed', address: 't77', pid: 234, label: 'session-worker' }
+  });
+  const base = join(cwd, '.agent_workspace');
+  const lookup = address => {
+    assert.equal(address, 't77');
+    return { address, state: 'finished', pid: 234, labels: { 'council.worker': 'session-worker' } };
+  };
+  const before = readFileSync(join(dir, 'job.json'));
+  assert.equal(readDelegation(base, 'stopped', false, () => assert.fail('Summary must not query Herdr')).summary.status, 'deliberating');
+  const { detail } = readDelegation(base, 'stopped', true, lookup);
+  assert.equal(detail.status, 'worker_stopped');
+  assert.equal(detail.workerObservation.state, 'stopped');
+  assert.equal(detail.deliveryState, 'acknowledged');
+  assert.deepEqual(readFileSync(join(dir, 'job.json')), before);
 });
 
 test('delegation view reads saved output without rewriting the job or following a stored path', async t => {

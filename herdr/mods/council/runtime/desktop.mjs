@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { readDelegation } from './delegations.mjs';
 import { createDebate, replyToDebate, roomMessages, roomSchema } from './debate-room.mjs';
 import { discussionMessages, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
-import { readInvitations } from './invitations.mjs';
+import { prepareInvitations, readInvitationDelivery, recordInvitationLaunchFailure } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 
@@ -46,17 +46,18 @@ function readCouncilSession(base, id, selected, discussion, cwd) {
   const taskDir = join(dir, 'task');
   const task = interactive ? session.question : isDirectory(taskDir) ? readText(join(taskDir, 'task.md'), 1024 * 1024)?.trim() : null;
   const summary = {
-    id, mode: session.mode, question: task?.slice(0, 220) || id, createdAt: session.createdAt,
+    id, mode: session.mode, interactive, question: task?.slice(0, 220) || id, createdAt: session.createdAt,
     status: interactive ? 'open' : session.mode === 'debate' ? 'archived' : reviewStatus(saved)
   };
   if (!selected) return { summary, detail: null };
   const detail = { ...summary, task: task?.slice(0, 2400) || id, participants: session.participants ?? [] };
   if (discussion) {
-    const invitations = interactive ? readInvitations(cwd, id) : null;
+    const invitationDelivery = interactive ? readInvitationDelivery(cwd, id) : null;
+    const invitations = invitationDelivery?.targets ?? null;
     const names = new Map(invitations?.map(target => [target.address, target.label]));
     const messages = interactive ? roomMessages(dir, session).map(message => ({ ...message, agent: names.get(message.author) }))
       : discussionMessages(dir, session);
-    return { summary, detail: { ...detail, interactive, messages, invitations } };
+    return { summary, detail: { ...detail, messages, invitations, invitationDelivery } };
   }
   const reportPath = saved ? join(dir, saved.folder, 'report.md') : null;
   return { summary, detail: { ...detail,
@@ -96,7 +97,11 @@ function projectRequest(cwd, action, args) {
   const store = new PollStore(cwd);
   switch (action) {
     case 'polls': {
-      if (args.id) return { poll: { ...store.show(args.id), invitations: readInvitations(cwd, args.id) } };
+      if (args.id) {
+        const poll = store.show(args.id);
+        const invitationDelivery = readInvitationDelivery(cwd, args.id, { closed: Boolean(poll.closedAt) });
+        return { poll: { ...poll, invitations: invitationDelivery?.targets ?? null, invitationDelivery } };
+      }
       return store.list();
     }
     case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readCouncilSession);
@@ -110,6 +115,8 @@ function projectRequest(cwd, action, args) {
     case 'debate-reply':
       replyToDebate(cwd, args.id, { author: 'operator', body: args.text }, { fromPanel: true });
       return projectRequest(cwd, 'debates', { id: args.id }).debate;
+    case 'invite-prepare': return prepareInvitations(cwd, args);
+    case 'invite-launch-failed': return { recorded: recordInvitationLaunchFailure(cwd, args) };
     case 'add-option': return store.addOption(args.id, args.label);
     case 'track': return store.track(args.id, args);
     case 'untrack': return store.untrack(args.id, args.voter);

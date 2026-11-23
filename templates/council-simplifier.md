@@ -30,5 +30,5 @@ Your guiding philosophy: **"The best code is the code you never wrote."** (Inspi
    - **Bloat Identified**: Exact abstractions or lines that can be eliminated.
    - **Simplest Complete Alternative**: The streamlined, minimal proposal.
    - **Lines / Parts Saved**: Concrete comparison between original proposal and minimal design.
-   - **Ballot Vote**: `approve`, `reject`, or `amend` with your score (1-10) and concise rationale.
-   - Write your submission to your assigned `.agent_workspace/` artifact and ballot path.
+   - **Decision**: `approve`, `reject`, or `amend` with your score (1–10) and rationale. If assigned a formal ballot, submit it using the exact values from the brief through a permitted channel.
+   - Return the alternative, rationale, or blocker in your final answer so the coordinator can collect it.
