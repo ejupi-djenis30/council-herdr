@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import { desktopRequest } from '../herdr/mods/council/runtime/desktop.mjs';
 import { nextFormalRound } from '../lib/formal-rounds.js';
 import { JobManager } from '../lib/jobs.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
+import { AgentWorkspace } from '../lib/workspace.js';
 
 const cli = fileURLToPath(new URL('../bin/council.js', import.meta.url));
 
@@ -91,4 +92,27 @@ test('desktop opens the exact linked job after reconnecting or losing a launch a
   assert.equal(detail().roundActions.nextJobId, null);
   await assert.rejects(() => startFormalRound(review, lost), /Check session prior-round-2 in Activity/);
   await assert.rejects(() => startFormalRound(review, dispatch), /conflicting parameters/);
+});
+
+test('a project alias identifies the same round for new and previously saved jobs', async t => {
+  const { cwd, workspace, dispatch } = await fixture(t, 'review');
+  const alias = cwd + '-alias';
+  symlinkSync(cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  t.after(() => unlinkSync(alias));
+  const other = new AgentWorkspace(alias);
+  const newId = 'aliased-round';
+  const request = { sessionId: newId, context: 'Keep the previous scope.' };
+  const canonical = nextFormalRound(workspace, 'prior', request);
+  const throughAlias = nextFormalRound(other, 'prior', request);
+  assert.deepEqual(throughAlias, canonical);
+  const suffix = join('.agent_workspace', 'prior', 'artifacts', 'proposal', 'review-author', 'artifact.md');
+  const formerContext = canonical.context.replace(realpathSync.native(join(cwd, suffix)), join(alias, suffix));
+  assert.notEqual(formerContext, canonical.context);
+  const manager = new JobManager({ cwd, workerLauncher: () => ({ success: true, address: 't99' }) });
+  assert.equal((await manager.startJob({ ...canonical, context: formerContext })).success, true);
+  const args = ['round', '--session', 'prior', '--new-session', newId, '--context', request.context];
+  assert.equal(JSON.parse(dispatch([...args, '--inspect']).stdout).matches, true);
+  assert.equal(JSON.parse(dispatch(args).stdout).reconnect, true);
+  assert.equal(JSON.parse(dispatch([...args, '--task', 'A different task', '--inspect']).stdout).matches, false);
+  assert.equal(JSON.parse(dispatch([...args, '--context', 'Different context', '--inspect']).stdout).matches, false);
 });

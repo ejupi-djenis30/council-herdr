@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { basename, isAbsolute, join } from 'node:path';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 import { probeTerminal } from './worker-observation.mjs';
 
@@ -29,6 +29,12 @@ function readOptional(file, limit) {
   return raw === null ? null : JSON.parse(raw);
 }
 
+function sameScheduleDirectory(path, dir) {
+  if (typeof path !== 'string' || !isAbsolute(path)) return false;
+  try { return realpathSync.native(path) === realpathSync.native(dir); }
+  catch { return false; }
+}
+
 function observeScheduleWorker(lookup, schedule, attempt, address, dir) {
   const name = workerName(schedule, attempt);
   let terminal;
@@ -40,7 +46,7 @@ function observeScheduleWorker(lookup, schedule, attempt, address, dir) {
     try { pid = Number(readText(join(dir, 'worker.lock'), 256)); } catch {}
     const argv = terminal.argv;
     const matchesCommand = Array.isArray(argv) && argv.length === 3 && typeof argv[1] === 'string' &&
-      basename(argv[1]) === 'schedules.js' && typeof argv[2] === 'string' && isAbsolute(argv[2]) && resolve(argv[2]) === dir;
+      basename(argv[1]) === 'schedules.js' && sameScheduleDirectory(argv[2], dir);
     if (terminal.name !== name || !(matchesCommand || (address && pid > 0 && pid === terminal.pid))) return { state: 'unknown' };
   } else if (terminal.labels?.[scheduleLabel] !== `${schedule.jobPrefix}-${attempt}`) {
     return { state: 'unknown' };

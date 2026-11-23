@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScheduleManager, runSchedule } from '../lib/schedules.js';
 import { JobManager } from '../lib/jobs.js';
+import { desktopSchedules } from '../herdr/mods/council/runtime/schedule-record.mjs';
 
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'council-schedule-recovery-'));
@@ -125,4 +126,31 @@ test('an unconfirmed scheduler launch cannot trigger another dispatch on an inco
   assert.equal(schedules.status('uncertain').workerObservation.state, 'live');
   assert.equal(schedules.resume('uncertain').success, false);
   assert.equal(workers.length, 1);
+});
+
+test('CLI and Desktop recognize an unlabelled scheduler through a project alias', t => {
+  const { cwd, workers, herdr } = fixture(t);
+  const project = join(cwd, 'project');
+  const alias = join(cwd, 'alias');
+  mkdirSync(project);
+  symlinkSync(project, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const manager = new ScheduleManager({ cwd: project, herdr });
+  const dir = manager.path('legacy');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'schedule.json'), JSON.stringify({ $schema: 'council.schedule/v1', id: 'legacy',
+    at: new Date().toISOString(), everySec: null, count: 1, jobPrefix: 'scheduled-123456789abc', job: { task: 'Review' } }));
+  const aliasDir = join(alias, '.agent_workspace', '.schedules', 'legacy');
+  const worker = { address: 't100', name: 'schedule-123456789abc', state: 'live',
+    argv: [process.execPath, join(cwd, 'schedules.js'), aliasDir] };
+  workers.push(worker);
+  assert.equal(manager.status('legacy').workerObservation.state, 'live');
+  worker.argv[2] = dir;
+  worker.state = 'finished';
+  assert.equal(desktopSchedules(alias, 'legacy', () => worker).schedule.state, 'worker_stopped');
+  worker.argv[2] = join(cwd, 'unrelated');
+  mkdirSync(worker.argv[2]);
+  assert.equal(manager.resume('legacy').success, false);
+  worker.argv[2] = aliasDir;
+  assert.equal(manager.resume('legacy').success, true);
+  assert.equal(workers.length, 2);
 });

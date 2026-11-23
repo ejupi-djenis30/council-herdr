@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -16,7 +16,7 @@ const basics = { id: 'daily', firstRun, repeating: true, interval: '60', runs: '
 const noLookup = () => null;
 
 function environment(t) {
-  const root = mkdtempSync(join(tmpdir(), 'council-desktop-schedule-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'council-desktop-schedule-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const stub = join(root, 'transport.mjs');
   const log = join(root, 'starts.jsonl');
@@ -68,16 +68,21 @@ test('Desktop creates and reconnects each scheduled workflow through the CLI wit
 
 test('schedule lists preserve project origin, skip worker probes and link only saved occurrence jobs', async t => {
   const { root, dispatch } = environment(t);
+  const alias = join(root, 'alias-a');
   for (const project of ['a', 'b']) {
     const cwd = join(root, project);
     mkdirSync(cwd);
     const target = prepareSchedule(basics);
     await submitSchedule('create', target, args => dispatch(cwd, args), id => desktopSchedules(cwd, id, noLookup));
+    if (project === 'a') {
+      symlinkSync(cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      await submitSchedule('create', target, args => dispatch(alias, args), id => desktopSchedules(alias, id, noLookup));
+    }
     let lookedUp = false;
     assert.equal(desktopSchedules(cwd, null, () => { lookedUp = true; }).schedules[0].project, cwd);
     assert.equal(lookedUp, false);
   }
-  const list = desktopRequest(root, 'schedules', { projects: [], spaceFolders: [root] });
+  const list = desktopRequest(root, 'schedules', { projects: [alias], spaceFolders: [root] });
   assert.deepEqual(list.schedules.map(item => item.project).sort(), ['a', 'b'].map(project => join(root, project)));
   const cwd = join(root, 'a');
   const read = id => desktopSchedules(cwd, id, noLookup);
