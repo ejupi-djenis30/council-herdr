@@ -308,6 +308,29 @@ test('a changed borrowed turn prevents sending and releases its claim as a confi
   assert.equal((await manager.startJob({ ...options, sessionId: 'second' })).success, true);
 }));
 
+test('an aligned replacement at the selected address cannot receive the borrowed assignment', async () => inTemp(async root => {
+  const details = { address: 't121', state: 'live', reported: true, pid: 42, created_ms: 9001, turn: 12,
+    status: { state: 'done', app: 'junie' } };
+  const label = () => { details.labels = { [alignmentKey]: alignmentLabel(details, 'aligned').split('=')[1] }; };
+  const replace = () => { details.pid++; details.created_ms++; label(); };
+  label();
+  const herdr = new HerdrClient({ cwd: root });
+  herdr.get = () => ({ success: true, details });
+  herdr.exec = () => assert.fail('the original assignment must not be sent to the replacement');
+  const manager = new JobManager({ cwd: root, herdr, workerLauncher: () => ({ success: true, address: 't122' }) });
+  for (const sessionId of ['before-worker', 'before-send']) {
+    const start = await manager.startJob({ adopt: details.address, sessionId, task: 'Review build checks' });
+    assert.equal(start.success, true);
+    const hooks = {};
+    if (sessionId === 'before-worker') replace();
+    else hooks.beforeDelivery = replace;
+    const sessionDir = join(root, '.agent_workspace', sessionId);
+    const result = await new JobWorker({ sessionDir, herdr, hooks }).execute();
+    assert.equal(result.success, false);
+    assert.match(result.error, /agent in t121 changed before delivery/);
+  }
+}));
+
 test('JobWorker locks prevent concurrent execution and release locks on completion', async () => inTemp(async root => {
   const workspace = new AgentWorkspace(root);
   const manager = new JobManager({ cwd: root, workspace, workerLauncher: () => ({ success: true }) });

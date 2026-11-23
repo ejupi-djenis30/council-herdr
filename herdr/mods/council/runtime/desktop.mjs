@@ -3,9 +3,10 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { reportProgress, runRelations, workspaceActivity } from './activity.mjs';
 import { matchesDesktopTask, readDelegation } from './delegations.mjs';
 import { closeDebate, createDebate, readDebate, readDebateRoom, replyToDebate, roomSchema } from './debate-room.mjs';
-import { currentFormalVerdict, reviewStatus, discussionMessages, proposalReference, readAdvisoryRun, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
+import { completedFormalRound, currentFormalVerdict, reviewStatus, discussionMessages, proposalReference, readAdvisoryRun, readDiscussionSession, readJson, readSubmittedBallots, verifiedFormalProposal } from './discussion.mjs';
 import { pendingInvitationIds, planInvitations, prepareInvitations, readInvitationDelivery, retryInvitation } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
+import { desktopSchedules } from './schedule-record.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 import { TeamStore } from './team.mjs';
 
@@ -15,6 +16,24 @@ const sessionViews = {
   debates: ['council', 'review', 'debate'],
   delegations: ['delegate', 'parallel', 'pipeline']
 };
+
+function roundActions(base, dir, session, saved) {
+  const completed = completedFormalRound(dir, session, saved);
+  if (!completed) return null;
+  const nextSessionId = `${session.sessionId}-round-${completed.round + 1}`;
+  let nextJobId = null;
+  try {
+    const nextDir = join(base, nextSessionId);
+    const raw = isDirectory(nextDir) && readText(join(nextDir, 'job.json'), 16 * 1024 * 1024);
+    const job = raw && JSON.parse(raw);
+    if (job?.$schema === 'council.job/v1' && job.sessionId === nextSessionId && job.mode === session.mode &&
+        job.workflow?.previousSession === session.sessionId && job.workflow.round === completed.round + 1 &&
+        Date.parse(job.createdAt) >= Date.parse(session.createdAt)) nextJobId = nextSessionId;
+  } catch {
+    // An unreadable follow-up must not obscure the source review.
+  }
+  return { round: completed.round, nextSessionId, canStartNext: Boolean(verifiedFormalProposal(dir, completed)), nextJobId };
+}
 
 function readCouncilSession(base, id, selected, view, cwd) {
   const dir = join(base, id);
@@ -52,6 +71,7 @@ function readCouncilSession(base, id, selected, view, cwd) {
   }
   const reportPath = saved ? join(dir, saved.folder, 'report.md') : null;
   return { summary, detail: { ...detail,
+    roundActions: roundActions(base, dir, session, saved),
     tally: saved?.verdict.tally ?? null, validation: saved?.verdict.validation ?? null,
     ballots: readSubmittedBallots(dir, session, proposal), proposal,
     reportPath: reportPath && isFile(reportPath) ? reportPath : failure?.reportPath ?? null,
@@ -89,6 +109,7 @@ function sessions(cwd, selected, collection, item, readRecord) {
 function projectRequest(cwd, action, args) {
   const store = new PollStore(cwd);
   switch (action) {
+    case 'schedules': return desktopSchedules(cwd, args.id);
     case 'team': return new TeamStore(cwd).list();
     case 'team-set': {
       const team = new TeamStore(cwd);
@@ -227,7 +248,7 @@ function discoverProjects(cwd, args, errors) {
 
 export function desktopRequest(cwd, action, args) {
   const pendingInvites = action === 'pending-invitations';
-  if ((!pendingInvites && !Object.hasOwn(sessionViews, action) && action !== 'polls') || args.id != null || !Array.isArray(args.projects)) {
+  if ((!pendingInvites && !Object.hasOwn(sessionViews, action) && !['polls', 'schedules'].includes(action)) || args.id != null || !Array.isArray(args.projects)) {
     return projectRequest(cwd, action, args);
   }
   const items = [];

@@ -7,6 +7,7 @@ export const sections = [
   { id: 'activity', title: 'Workspace', description: 'Track runs, plans, and project changes' },
   { id: 'polls', title: 'Polls', description: 'Collect votes and record decisions' },
   { id: 'delegations', title: 'Delegations', description: 'Follow agent tasks and their results' },
+  { id: 'schedules', title: 'Schedules', description: 'Plan recurring work and inspect each run' },
   { id: 'debates', title: 'Debate', description: 'Read the conversation between agents' },
   { id: 'reviews', title: 'Reviews', description: 'Inspect verdicts and direct ballots' },
   { id: 'team', title: 'Team', description: 'Set roles and see which models are active' }
@@ -15,7 +16,7 @@ export const sections = [
 function openSection(id) {
   closeOverlay(props().overlay);
   openOverlay({
-    mod: 'council', kind: 'window', key: 'council', width: id === 'activity' ? 900 : 760, height: 750,
+    mod: 'council', kind: 'window', key: 'council', width: 900, height: 750,
     props: { initialTab: id }
   });
 }

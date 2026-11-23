@@ -6,9 +6,9 @@ Council is a native collaboration panel for an active Herdr workspace. Ask its a
 
 ## What you see
 
-The **Council** entry in the sidebar uses a purple conversation mark and opens a native menu for **Workspace**, **Polls**, **Delegations**, **Debate**, **Reviews**, and **Team**. Select **All local spaces** in the record lists to include projects from other open spaces and their terminal folders. Details use side-by-side cards on wider windows and stack on narrower windows.
+The **Council** sidebar menu opens **Workspace**, **Polls**, **Delegations**, **Schedules**, **Debate**, **Reviews**, and **Team**. Record lists can include projects from all open spaces on the current machine. Details use side-by-side cards on wider windows and stack on narrower windows.
 
-**Workspace** follows the focused local terminal's folder, with explicit folder pinning in spaces that contain multiple projects. Its Runs view links to Council jobs and pending decisions. Plan reads stable headings, task checkboxes and dependencies from an optional `PLAN.md`. Changes shows observed Git paths, worktrees and recent commits. Delegations show recorded milestones, separate reported updates and links between related Team calls. Add updates in a run detail or with the activity CLI/MCP tools.
+**Workspace** follows the focused terminal's folder on the space's machine. You can pin a folder in a space that contains multiple projects. Runs links to Council jobs and pending decisions. Plan reads stable headings, task checkboxes and dependencies from an optional `PLAN.md`. Changes shows Git paths, worktrees and recent commits. Delegations show recorded milestones, reported updates and links between related Team calls. Add updates in a run detail or with the activity CLI/MCP tools.
 
 ## How it behaves
 
@@ -22,13 +22,13 @@ In the poll and debate forms, choose agents under **Invite agents**. Each row sh
 
 Delegations reads asynchronous jobs started in the project from CLI or MCP. Filter for Active, Needs attention, or Ready. A detail shows the assigned terminal, acknowledgement, remaining time, recorded wait event, and any error. The Terminal capture card appears alongside the delivery record. It can copy saved output and the path to the full capture. Opening a live terminal leaves the panel visible. An elapsed deadline or uncertain delivery is shown even when a worker has saved no result.
 
-In **Delegations**, select **Delegate task** to send a bounded assignment to an agent. In **Team**, select **Call member** to start a turn with the member's saved agent, model and project access. Both forms open the saved session. The Team tab shows the last known power state and links to the latest turn. Completed managed models shut down after Council archives the result and start again on an explicit call.
+In **Delegations**, select **Start workflow** to delegate to one agent, convene a council, start a review or debate, distribute parallel assignments, or run an ordered pipeline. Select **Schedules** to schedule any of these workflows and inspect individual occurrences. A completed review offers **Refresh tally** and, when its proposal is available, **Start next round**. In **Team**, **Call member** starts a turn with the member's saved agent, model and project access. The Team tab links to the latest turn.
 
 ## Built from
 
 `mods/council/mod.json` registers the dashboard window. `navigation.js` draws the native sidebar launcher and popup. `poll-view.js` renders the tally and roster, `poll-text.js` formats invitations and summaries, and `discussion-view.js` draws the debate thread. Herdr supplies project folders from `spaces()` and `panes()`, the live roster from `agents()`, and navigation through `agent.focus`.
 
-The window runs `runtime/council.mjs desktop <action>` through `herdr.exec` in the active local project directory and reads JSON from stdout. The Node helper reads Council session records and stores poll and team data inside `.agent_workspace/`. Delegations reads `job.json` and its dispatch sidecar with the same result and dispatch checks as the CLI. The repository CLI and MCP import the same stores. The bundled polling CLI also works when invoked directly from the target project directory:
+The window runs `runtime/council.mjs desktop <action>` through `herdr.exec` in the selected project directory on its machine. The helper reads Council session records and stores poll and team data inside `.agent_workspace/`. Delegations reads `job.json` and its dispatch record with the same checks as the CLI. The CLI and MCP import the same stores. Run the bundled poll CLI directly from the target project directory:
 
 ```bash
 node /path/to/herdr-app/mods/council/runtime/council.mjs poll help
@@ -52,8 +52,8 @@ Merge `keys.json` if Shift+F8 is free. You can also open the window with `herdr-
 ## Watch out
 
 - Use Herdr Desktop with Node.js 20 or newer. The bundled runtime works independently of the checkout. For a manual copy, Node must be on Herdr's PATH or named in the installed mod's optional `config.json` as `{"node":"/absolute/path/to/node"}`.
-- The active space must be local. Refresh runs every five seconds. The project filesystem must support hard links. Linked storage directories are rejected.
-- The mod uses the filesystem, local Node process, clipboard, and Herdr terminal delivery. Poll and debate participation uses local terminal IDs and project write access. A read-only agent can reply in its conversation. Formal reviews use Council's separate rules.
+- For a paired space, install Council on the peer. The helper resolves the peer's Herdr app home and uses its configured engine. Put Node on the peer core's PATH when using a custom app home. Refresh runs every five seconds. The project filesystem must support hard links.
+- The mod uses the project machine's filesystem, Node process, and Herdr terminal delivery. The clipboard belongs to the Desktop window. Poll and debate participants use addresses on their own core and need project write access to post.
 - The editor supports up to 20 options and 32 tracked agents. The installed mod identifier is `council`.
 
 ## Done when

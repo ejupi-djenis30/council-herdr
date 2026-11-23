@@ -1,7 +1,7 @@
 {
   "name": "council-herdr",
-  "version": "3.6.0",
-  "description": "Native Herdr Desktop polls and debates, with Council agent readiness checks, delegation, and review through CLI and MCP.",
+  "version": "3.7.0",
+  "description": "Run, schedule, and review agent workflows in Herdr Desktop, the Council CLI, and MCP.",
   "type": "module",
   "main": "bin/council.js",
   "bin": {

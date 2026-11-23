@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.0
+
+- Launch all six workflows from Herdr Desktop. Configure participants, parallel assignments, and ordered pipeline stages. Immediate delegations can use an existing aligned terminal.
+- Create and supervise one-time and recurring schedules in Desktop. Open each saved occurrence and return to its schedule.
+- Refresh a formal tally or start a linked voting round from Reviews. Recounts preserve provisional evidence and exclude ballots from an earlier session generation.
+- Route Desktop helpers, workers, and terminal navigation to the selected space's machine. Project discovery stays scoped to that machine, including when another terminal is visible in a peek.
+- Recover workflow launches after a lost acknowledgement and verify the selected agent process before delivering an adopted task. Press Enter to post a reply in a debate.
+
 ## 3.6.0
 
 - Start a delegation or call a named Team member directly in Herdr Desktop and open its saved job.

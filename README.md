@@ -38,6 +38,8 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 
 **Polls** includes polls opened in Desktop or by agents through the CLI and MCP. **This space** includes the space folder and its terminal folders. Use **All local spaces** to see records from other open local spaces. Polls display their project and, when available, the terminal that opened them.
 
+For a paired machine, install the Council Desktop package on that machine and open its Herdr space. Council runs the helper in the selected project on that machine. **All spaces on this machine** includes other open spaces on the same peer. Terminal IDs in the project's Council records use the IDs reported by that peer's core.
+
 In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. Agents can open the same thread with `council_debate_create` or `council debate create --question "<topic>"`. Pass selected terminal addresses as `recipients` in MCP or repeat `--invite <address>` on the CLI to start the invitation worker. Recipients must be live agents in one local Herdr space. Omit recipients to open a thread without messaging anyone. Use `debate list` or `council_debate_read` without an ID to find a thread in its project.
 
 From a debate, **Create poll** pre-fills the question and context. Edit them, select recipients, and open the poll in the debate's project. Agents can link the poll using `sourceDebateId` in MCP or `poll create --debate <id>` on the CLI. Use **Close with decision**, `council_debate_close`, or `debate close <id> --decision "..." --owner "..." --next-step "..."` to record the handoff. The closed thread shows the decision, who recorded it, its owner, its next step, and its linked polls.
@@ -49,6 +51,8 @@ The invitation queue is saved before the worker starts. The worker runs in Herdr
 Agents register readiness through `council_alignment` using the current Council skill. Setup notices reach unknown agents before Council shares any task, poll ID or debate ID. Receipts apply to the current Herdr terminal and expire after eight hours. A reported setup issue stays visible in the invitation. See [Council host setup](docs/alignment.md) for configuring and refreshing a specific agent.
 
 **Debate** also shows saved Council and review proposals, replies, and submitted ballots in chronological order. The view labels terminal captures and drafts and links to the formal review. In **Reviews** and the formal thread, a badge on each direct ballot shows whether its SHA-256 matches the recorded proposal for that round. **Reviews** displays the saved tally and verdict when available.
+
+Select **Run agent debate** in **Debate** to assign speakers to an automated debate. In **Reviews**, select **Start review** for a new proposal. Once participant turns finish, **Refresh tally** incorporates eligible late ballots. **Start next round** opens a linked job tied to the original proposal. Return to the prior review with **Back**.
 
 ### Open or respond to a poll from an agent
 
@@ -84,6 +88,8 @@ The panel reads Council records under `.agent_workspace/` in the local projects 
 Use `convene --mode debate|parallel|pipeline` or the corresponding `mode` in `council_convene`. Pass `--subtasks` or `--stages` as a JSON array on the CLI. A stage requires `name` and accepts `task`, `agent`, and `role`. The report and execution record are saved under `validation/`. Use `start` for background execution.
 
 ## Background runs, schedules, and voting rounds
+
+In Desktop, **Schedules → New schedule** accepts any of the six workflows. Choose a start time and an optional repeat interval and run count. Open a schedule to inspect its worker, cancel future occurrences, resume a verified stopped worker, or open the saved run for an occurrence.
 
 Use `start --mode <mode>` or `council_start` for any of the six workflows. Use the same project and job ID with `status` and `result`. For a formal workflow, the result links to a separate workflow session holding its proposal and ballots.
 
@@ -152,7 +158,7 @@ Use `council activity` or `council_activity` to read the same workspace overview
 
 Open **Council → Team** in a local project space and add named members. Give each one a role and choose its agent, project access and optional responsibilities. Codex and Claude also accept a specific model ID. Choose **Reports to** if a member has a manager. Council checks that the reporting lines are acyclic and includes them in each role's task brief. Role titles and reporting lines leave formal review and voting rules unchanged.
 
-In the installed Desktop mod, select **Team → Call member** to start a turn with the member's configured agent, model and access. For a one-off assignment, select **Delegations → Delegate task**, pick the agent, and enter the brief. The form opens the saved job so you can follow delivery and collect the result. You can also start Team turns through CLI or MCP.
+In the installed Desktop mod, select **Team → Call member** to start a turn with the member's configured agent, model and access. **Delegations → Start workflow** offers delegate, council, review, debate, parallel, and pipeline. Select the participants or stages and enter the brief. An immediate delegation can also target an existing aligned terminal. The form opens the saved job so you can follow delivery and collect the result. You can also start Team turns through CLI or MCP.
 
 ```bash
 council team set lead --agent codex --role "Delivery lead"

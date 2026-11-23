@@ -60,16 +60,21 @@ function readJob(dir, id) {
   return job;
 }
 
-export function matchesDesktopTask(base, { sessionId, member, task, timeoutSec, agent, permission }) {
+export function matchesDesktopTask(base, { sessionId, member, mode = 'delegate', task, timeoutSec, adopt, agent, permission, keepTerminals, workflow }) {
   if (typeof sessionId !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/.test(sessionId)) return false;
   const dir = join(base, sessionId);
   if (!isDirectory(base) || !isDirectory(dir)) return false;
   const job = readJob(dir, sessionId);
-  if (!job || job.mode !== 'delegate' || job.participant?.ownership !== 'owned') return false;
+  if (!job || job.mode !== mode) return false;
+  if (mode !== 'delegate') {
+    return Boolean(!member && job.workflow && workflow &&
+      job.fingerprint === computeFingerprint({ mode, task, timeoutSec, agent, permission, keepTerminals }, workflow));
+  }
+  if (job.participant?.ownership !== (adopt ? 'borrowed' : 'owned')) return false;
   const profile = job.participant.team;
   if ((profile?.id ?? null) !== (member ?? null)) return false;
-  return job.fingerprint === computeFingerprint({ task, timeoutSec, agent: profile?.agent ?? agent,
-    permission: profile?.permission ?? permission, team: profile });
+  return job.fingerprint === computeFingerprint({ task, timeoutSec, adopt, agent: profile?.agent ?? agent,
+    permission: profile?.permission ?? permission, keepTerminals, team: profile });
 }
 
 export function readDelegation(base, id, selected, lookupWorker) {
@@ -123,6 +128,7 @@ export function readDelegation(base, id, selected, lookupWorker) {
   const detail = {
     ...summary,
     participantCreatedMs: Number.isSafeInteger(participant?.identity?.createdMs) ? participant.identity.createdMs : null,
+    participantPid: Number.isSafeInteger(participant?.identity?.pid) ? participant.identity.pid : null,
     ...(workflowSessionId && /^[a-zA-Z0-9_-]{1,240}$/.test(workflowSessionId) &&
       isDirectory(join(base, workflowSessionId)) && isFile(join(base, workflowSessionId, 'session.json')) ? {
         workflowTab: ['council', 'review', 'debate'].includes(job.mode) ? 'debates' : 'delegations'

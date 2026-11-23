@@ -230,7 +230,7 @@ export function workspaceView(t, data, ui, actions) {
       .child(v_flex().gap(2).flex_1().min_w_0()
         .child(label(leaf(data.project), 19, t.foreground).font_semibold())
         .child(label([
-          data.git.branch ? `Branch ${data.git.branch}` : 'Local folder',
+          data.git.branch ? `Branch ${data.git.branch}` : 'Project folder',
           data.folder !== data.project ? `Following ${leaf(data.folder)}` : null
         ].filter(Boolean).join(' · '), 11, t.muted).truncate().tooltip(data.project)))
       .child(button(t, 'copy-workspace-path', '', (_e, cx) => actions.copyPath(cx, data.project), 'normal', false, 'copy').tooltip('Copy project path')))

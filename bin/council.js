@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { HerdrClient } from '../lib/herdr.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
-import { JobManager } from '../lib/jobs.js';
+import { computeFingerprint, JobManager } from '../lib/jobs.js';
+import { workflowInputs } from '../lib/workflow-job.js';
 import { ScheduleManager } from '../lib/schedules.js';
 import { nextFormalRound, resolveVotingSession, retallyAfterBallot, retallyFormalRound } from '../lib/formal-rounds.js';
 import { setupAlignment } from '../lib/alignment-setup.js';
@@ -28,7 +29,7 @@ COMMANDS:
   status [--session <id>]        List live terminals or inspect an async job
   start [options]                Start any of the six workflows in the background
   schedule create|list|status|cancel|resume   Manage scheduled runs and recover a stopped worker
-  round --session <id>           Start the next voting round for a saved formal session
+  round --session <id>           Start the next voting round (--inspect checks for a matching job)
   retally --session <id>         Refresh the tally of a completed formal round
   result --session <id>          Read the saved result or pending state
   convene [options]             Run a multi-agent collaboration workflow
@@ -110,6 +111,11 @@ function parseArgs(args) {
     const arg = args[i];
     if (arg.startsWith('--')) {
       const key = arg.slice(2);
+      const equals = key.indexOf('=');
+      if (equals > 0) {
+        parsed[key.slice(0, equals)] = key.slice(equals + 1);
+        continue;
+      }
       if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
         parsed[key] = args[i + 1];
         i++;
@@ -245,8 +251,19 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
     case 'round':
     case 'retally': {
       const id = flags.session ?? flags._[0];
-      const result = command.toLowerCase() === 'retally' ? retallyFormalRound(orchestrator.workspace, id)
-        : await jobManager.startJob(nextFormalRound(orchestrator.workspace, id, jobFlags({ ...flags, session: flags['new-session'], _: [] })));
+      let result;
+      if (command === 'retally') {
+        result = retallyFormalRound(orchestrator.workspace, id);
+      } else {
+        const options = nextFormalRound(orchestrator.workspace, id, jobFlags({ ...flags, session: flags['new-session'], _: [] }));
+        if (flags.inspect) {
+          const { job } = jobManager.readJobRecord(options.sessionId);
+          const fingerprint = computeFingerprint(options, workflowInputs(options, options.mode));
+          result = { sessionId: options.sessionId, matches: job?.sessionId === options.sessionId && job.fingerprint === fingerprint };
+        } else {
+          result = await jobManager.startJob(options);
+        }
+      }
       console.log(JSON.stringify(result, null, 2));
       if (result.success === false) process.exitCode = 1;
       break;

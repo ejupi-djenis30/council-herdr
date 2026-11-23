@@ -95,6 +95,8 @@ Use the poll ID and project folder from the invitation. Read its options and con
 
 ## Open or reply to a Desktop debate
 
+Herdr Desktop shows the project's saved CLI and MCP threads under **Debate**. For a thread, report the returned `sessionId` and project so the operator can find it. For an automated workflow, report the job ID and the project. On a paired machine, use the terminal addresses reported by that project's own Herdr core.
+
 Open a thread with `council_debate_create` or `debate create --question "<topic>" --context "<opening message>"`. Pass the intended absolute project to MCP or run the CLI in that project. When asked to invite specific participants to a debate or poll, pass their live terminal addresses as `recipients` or repeat `--invite <address>`. Use the saved ID to check invitation delivery. If the worker acknowledgement is missing, inspect the original queue in Desktop. Omit recipients when opening a discussion without invitations.
 
 Find threads using `debate list` or `council_debate_read` without a debate ID. Record the agreed decision, owner and next step through `council_debate_close` or `debate close <id> --decision "..." --owner "..." --next-step "..."`. Use your own terminal identity.

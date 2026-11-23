@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDirectory, isFile, readBytes, readText } from './store-files.mjs';
 
@@ -7,6 +7,10 @@ const sessionModes = ['council', 'review', 'debate', 'delegate', 'parallel', 'pi
 const safeName = /^[a-z0-9][a-z0-9-]*$/i;
 const sha256 = /^[a-f0-9]{64}$/i;
 const messageLimit = 8000;
+const formalDefinitions = {
+  council: { proposal: { phase: 'draft', author: 'council-author' }, voters: ['council-author', 'council-skeptic', 'council-simplifier'] },
+  review: { proposal: { phase: 'proposal', author: 'review-author' }, voters: ['review-reviewer', 'review-simplifier'] }
+};
 
 function string(value) {
   return typeof value === 'string' ? value : null;
@@ -60,6 +64,39 @@ export function readDiscussionSession(dir, id) {
   const session = readJson(join(dir, 'session.json'));
   return session?.sessionId === id && sessionModes.includes(session.mode) && Number.isFinite(Date.parse(session.createdAt))
     ? session : null;
+}
+
+export function completedFormalRound(dir, session, saved) {
+  const definition = session && Object.hasOwn(formalDefinitions, session.mode) ? formalDefinitions[session.mode] : null;
+  if (!definition) return null;
+  const recorded = readJson(join(dir, 'validation', 'round.json'));
+  const previous = (saved === undefined ? currentFormalVerdict(dir, session) : saved)?.verdict;
+  const legacy = previous?.tally?.expectedCount === definition.voters.length
+    ? { sessionId: session.sessionId, mode: session.mode, round: previous.validation.round,
+      sha256: previous.validation.expectedSha256, representative: previous.validation.representative } : null;
+  // Markers from before session timestamps were introduced need a verdict from this run.
+  const recordedMatches = recorded && (recorded.sessionCreatedAt === session.createdAt ||
+    (recorded.sessionCreatedAt === undefined && legacy && recorded.round === legacy.round && recorded.sha256 === legacy.sha256));
+  const round = recordedMatches ? recorded : legacy;
+  const roster = session.participants;
+  if (!round || round.sessionId !== session.sessionId || round.mode !== session.mode || !Number.isSafeInteger(round.round) ||
+      round.round < 1 || !/^[a-f0-9]{64}$/.test(round.sha256) || !Array.isArray(roster) ||
+      !definition.voters.every(voter => roster.some(person => person?.name === voter))) return null;
+  return { ...round, ...definition, roster };
+}
+
+export function verifiedFormalProposal(dir, round) {
+  const root = join(dir, 'artifacts');
+  const phase = join(root, round.proposal.phase);
+  const author = join(phase, round.proposal.author);
+  const file = join(author, 'artifact.md');
+  try {
+    if (!isDirectory(root) || !isDirectory(phase) || !isDirectory(author) || !isFile(file) ||
+        readJson(join(author, 'meta.json'))?.sha256 !== round.sha256) return null;
+    return createHash('sha256').update(readFileSync(file)).digest('hex') === round.sha256 ? file : null;
+  } catch {
+    return null;
+  }
 }
 
 function current(timestamp, session) {

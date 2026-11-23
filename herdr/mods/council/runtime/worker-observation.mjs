@@ -15,7 +15,7 @@ export function sameActiveWorker(before, after) {
     current.address === previous.address && current.pid === previous.pid);
 }
 
-function probeTerminal(address, timeout) {
+export function probeTerminal(address, timeout) {
   const result = spawnSync('hc', ['get', '--json', address], { timeout, encoding: 'utf8', windowsHide: true });
   return result.status === 0 ? JSON.parse(result.stdout) : null;
 }
