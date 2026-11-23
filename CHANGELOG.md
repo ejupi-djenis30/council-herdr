@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.1
+
+- Let agents open debate threads through CLI or MCP and display the creator and replies in Herdr Desktop.
+- Show automated debate arguments and recommendations, synchronous workflow results, and incomplete runs.
+- Surface runs and open decisions from projects in the current Herdr space, including work started from background terminals and subfolders. Keep pinned views scoped to their project.
+
 ## 3.5.0
 
 - Enable structured debate, parallel assignments, and sequential pipelines in `convene`, with verified handoffs and saved advisory reports.

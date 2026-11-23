@@ -6,8 +6,8 @@ import { attachPlanChanges, plansComponent, readPlan } from './activity-plan.mjs
 import { readDelegation } from './delegations.mjs';
 import { isDirectory } from './store-files.mjs';
 
-const current = new Set(['starting', 'attempting', 'deliberating']);
-const attention = new Set(['blocked', 'uncertain', 'timed_out', 'dispatch_failed', 'failed', 'invalid']);
+const current = new Set(['starting', 'attempting', 'deliberating', 'pending_result']);
+const attention = new Set(['blocked', 'uncertain', 'timed_out', 'dispatch_failed', 'failed', 'invalid', 'incomplete', 'awaiting_input', 'worker_stopped']);
 const sessionKey = /^[a-zA-Z0-9_-]{1,240}$/;
 const activityLimit = 18;
 
@@ -55,11 +55,12 @@ export function runRelations(job, summaries) {
   };
 }
 
-function summarizeRuns(base, all, errors) {
+function summarizeRuns(all, errors) {
   const counts = { active: 0, attention: 0, ready: 0 };
   const latest = job => {
     try {
-      const progress = readProgress(join(base, job.id), 5);
+      if (job.standalone || job.tab === 'reviews') return null;
+      const progress = readProgress(join(job.project, '.agent_workspace', job.id), 5);
       if (progress.unreadable) errors.push({ source: 'Progress', detail: `${job.id}: unreadable note` });
       return progress.notes.at(-1) ?? null;
     } catch (error) {
@@ -73,7 +74,8 @@ function summarizeRuns(base, all, errors) {
     return { ...job, group: runGroup(job), note, activityAt: note && Date.parse(note.at) > (Date.parse(at) || 0) ? note.at : at };
   }).sort((a, b) => (Date.parse(b.activityAt) || 0) - (Date.parse(a.activityAt) || 0) || a.id.localeCompare(b.id))
     .filter(job => ++counts[job.group] <= activityLimit)
-    .map(job => ({ ...job, related: job.teamSource || job.teamMember ? runRelations(job, all) : null }));
+    .map(job => ({ ...job, related: job.teamSource || job.teamMember
+      ? runRelations(job, all.filter(item => item.project === job.project)) : null }));
   return { counts, runs };
 }
 
@@ -87,20 +89,35 @@ function decisionsFrom(polls, debates, reviews) {
 
 export function workspaceActivity(cwd, read, options) {
   const { project, folder, git: probe } = activityScope(cwd, options);
-  const base = join(project, '.agent_workspace');
-  const errors = [];
-  const get = name => {
+  const projects = [...new Set([project, ...options.projects])];
+  const errors = options.errors.map(item => ({ source: item.project, detail: item.error }));
+  const get = (directory, name) => {
     try {
-      const result = read(project, name);
+      const result = read(directory, name);
       for (const error of result.errors ?? []) errors.push({ source: name, detail: `${error.id ?? 'Record'}: ${error.error}` });
-      return result[name] ?? [];
+      return (result[name] ?? []).map(item => ({ ...item, project: directory }));
     } catch (error) {
       errors.push({ source: name, detail: error.message });
       return [];
     }
   };
-  const { counts, runs } = summarizeRuns(base, get('delegations'), errors);
-  const decisions = decisionsFrom(get('polls'), get('debates'), get('reviews'));
+  const runsByProject = [];
+  const decisions = [];
+  for (const directory of projects) {
+    const jobs = get(directory, 'delegations');
+    const debates = get(directory, 'debates');
+    const reviews = debates.filter(item => ['council', 'review'].includes(item.mode));
+    const threads = debates.filter(item => item.interactive);
+    const workflowIds = new Set(jobs.map(job => job.workflowSessionId).filter(Boolean));
+    runsByProject.push(...jobs.filter(job => !job.standalone || !workflowIds.has(job.id)),
+      ...debates.filter(item => !item.interactive && !workflowIds.has(item.id)).map(item => item.standalone
+        ? { ...item, tab: 'debates' }
+        : { ...item, tab: 'reviews', outcome: item.status,
+          status: { pending: 'pending_result', incomplete: 'incomplete' }[item.status] ?? 'completed' }));
+    decisions.push(...decisionsFrom(get(directory, 'polls'), threads, reviews));
+  }
+  decisions.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const { counts, runs } = summarizeRuns(runsByProject, errors);
   const git = readGitActivity(project, probe);
   if (git.statusIssue) errors.push({ source: 'Git', detail: git.statusIssue });
   let plan = null;
@@ -109,14 +126,14 @@ export function workspaceActivity(cwd, read, options) {
     if (declared) {
       plan = attachPlanChanges(declared, git.files);
       for (const component of plan.components) {
-        component.reports = runs.filter(run => run.note?.component === component.id)
+        component.reports = runs.filter(run => run.project === project && run.note?.component === component.id)
           .slice(0, 6).map(run => ({ id: run.id, member: run.teamMember, ...run.note }));
       }
     }
   } catch (error) {
     errors.push({ source: 'PLAN.md', detail: error.message });
   }
-  return { $schema: 'council.activity/v1', project, folder, counts, runs, decisions: decisions.slice(0, activityLimit),
+  return { $schema: 'council.activity/v1', project, projects, folder, counts, runs, decisions: decisions.slice(0, activityLimit),
     decisionCount: decisions.length, plan, git, errors: errors.slice(0, 25) };
 }
 

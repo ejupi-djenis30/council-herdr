@@ -5,6 +5,7 @@ const statuses = {
   starting: ['Starting', 'working', 'active'],
   attempting: ['Sending task', 'working', 'active'],
   deliberating: ['In progress', 'working', 'active'],
+  pending_result: ['Awaiting result', 'working', 'active'],
   awaiting_input: ['Waiting for input', 'blocked', 'attention'],
   worker_stopped: ['Worker stopped', 'blocked', 'attention'],
   completed: ['Result ready', 'done', 'ready'],
@@ -13,6 +14,7 @@ const statuses = {
   blocked: ['Agent blocked', 'blocked', 'attention'],
   dispatch_failed: ['Dispatch failed', 'blocked', 'attention'],
   failed: ['Failed', 'blocked', 'attention'],
+  incomplete: ['Incomplete', 'blocked', 'attention'],
   invalid: ['Record incomplete', 'blocked', 'attention']
 };
 
@@ -121,7 +123,7 @@ function reports(t, job, actions) {
       .child(label(note.text, 12, t.foreground))));
 }
 
-export function delegationView(t, job, { wide, terminal, focus, open, copy, addNote, composer }) {
+export function delegationView(t, job, { wide, terminal, focus, open, openWorkflow, copy, addNote, composer }) {
   const status = delegationStatus(t, job.status);
   const header = panel(t)
     .child(h_flex().justify_between().items_center().gap(8)
@@ -133,6 +135,8 @@ export function delegationView(t, job, { wide, terminal, focus, open, copy, addN
     .child(h_flex().gap(6).flex_wrap()
       .when(Boolean(terminal), row => row.child(button(t, 'delegate-terminal', 'Open terminal',
         (_event, cx) => focus(cx, job.address), 'primary', false, 'terminal')))
+      .when(Boolean(openWorkflow), row => row.child(button(t, 'delegate-workflow', 'View contributions',
+        (_event, cx) => openWorkflow(cx), 'normal', false, 'right')))
       .child(button(t, 'delegate-copy-id', 'Copy session ID', (_event, cx) => copy(cx, job.id, 'Session ID copied.'), 'normal', false, 'copy')));
 
   const wait = [job.wait.reason, job.wait.status, job.wait.turn === null ? null : `Turn ${job.wait.turn}`].filter(Boolean);

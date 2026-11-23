@@ -2,7 +2,7 @@ import { div } from 'gpui-kit';
 import { h_flex, v_flex } from 'gpui-base';
 import { button, cardHeading, columns, glyph, iconTile, input, label, panel, progress, reviewStatus, statusPill } from './components.js';
 import { delegationStatus } from './delegation-view.js';
-import { countLabel } from './poll-text.js';
+import { countLabel, discussionType } from './poll-text.js';
 
 const tabs = [['runs', 'Runs', 'delegations'], ['plan', 'Plan', 'reviews'], ['changes', 'Changes', 'activity']];
 const groups = [['active', 'In flight', 'working'], ['attention', 'Needs attention', 'blocked'], ['ready', 'Results ready', 'done']];
@@ -28,11 +28,13 @@ function metric(t, id, title, value, color, click, selected) {
 }
 
 function runCard(t, job, actions) {
+  const key = `${job.project}/${job.id}`;
   const state = job.power === 'unconfirmed' ? { title: 'Shutdown unconfirmed', color: t.blocked }
     : job.power === 'stopping' ? { title: 'Stopping process', color: t.working } : delegationStatus(t, job.status);
   return panel(t).p(11).gap(7)
     .child(h_flex().gap(7).flex_wrap()
       .child(statusPill(t, state.title, state.color))
+      .child(label(job.outcome ? `${discussionType(job)} · ${reviewStatus(job.outcome)}` : discussionType(job), 11, t.muted))
       .when(Boolean(job.teamMember), row => row.child(label(job.teamMember, 11, t.accent).font_semibold()))
       .child(label(job.id, 11, t.dim)))
     .child(label(job.question, 14, t.foreground).font_semibold())
@@ -40,20 +42,20 @@ function runCard(t, job, actions) {
       .child(label(['Reported', job.note.state, job.note.component].filter(Boolean).join(' · '), 11, t.accent))
       .child(label(job.note.text.slice(0, 220), 12, t.foreground))))
     .child(h_flex().gap(6).items_center().flex_wrap()
-      .child(label([job.agent, job.address].filter(Boolean).join(' · '), 11, t.muted).flex_1())
-      .when(Boolean(job.related?.parent), row => row.child(button(t, `caller-${job.id}`,
-        `From ${job.related.parent.member || job.related.parent.id}`, (_e, cx) => actions.open(cx, 'delegations', job.related.parent.id))))
-      .child(button(t, `run-${job.id}`, 'Inspect run', (_e, cx) => actions.open(cx, 'delegations', job.id), 'normal', false, 'right')));
+      .child(label([leaf(job.project), job.agent, job.address].filter(Boolean).join(' · '), 11, t.muted).flex_1())
+      .when(Boolean(job.related?.parent), row => row.child(button(t, `caller-${key}`,
+        `From ${job.related.parent.member || job.related.parent.id}`, (_e, cx) => actions.open(cx, 'delegations', job.related.parent.id, job.project))))
+      .child(button(t, `run-${key}`, 'Inspect run', (_e, cx) => actions.open(cx, job.tab ?? 'delegations', job.id, job.project), 'normal', false, 'right')));
 }
 
 function decisionDesk(t, data, actions) {
   const card = panel(t).child(cardHeading(t, 'Decision desk', 'polls'));
   if (!data.decisions.length) card.child(empty(t, 'No polls, discussions, or reviews awaiting action.'));
   for (const decision of data.decisions.slice(0, 5)) {
-    card.child(v_flex().id(`decision-${decision.tab}-${decision.id}`).gap(5).pt(8)
+    card.child(v_flex().id(`decision-${decision.project}-${decision.tab}-${decision.id}`).gap(5).pt(8)
       .border_t_1().border_color(t.border).cursor_pointer().hover(style => style.bg(t.raised))
-      .on_click((_e, cx) => actions.open(cx, decision.tab, decision.id))
-      .child(label(`${decisionKinds[decision.tab]} · ${reviewStatus(decision.state)}`, 11, t.accent))
+      .on_click((_e, cx) => actions.open(cx, decision.tab, decision.id, decision.project))
+      .child(label([decisionKinds[decision.tab], reviewStatus(decision.state), leaf(decision.project)].filter(Boolean).join(' · '), 11, t.accent))
       .child(h_flex().items_center().gap(6)
         .child(label(decision.question, 12, t.foreground).flex_1())
         .child(glyph('right', 13).text_color(t.dim))));
@@ -82,7 +84,7 @@ function terminalDesk(t, records, actions) {
 function runsView(t, data, ui, actions) {
   const query = ui.search.value().trim().toLowerCase();
   const records = data.runs.filter(job => (ui.group === 'all' || job.group === ui.group) &&
-    [job.question, job.id, job.teamMember, job.agent, job.note?.text].some(value => value?.toLowerCase().includes(query)))
+    [job.question, job.id, job.project, job.teamMember, job.agent, job.note?.text].some(value => value?.toLowerCase().includes(query)))
     .sort((a, b) => runPriority[a.group] - runPriority[b.group]);
   const list = v_flex().min_w_0().gap(8)
     .child(h_flex().items_center().gap(6)
@@ -90,7 +92,7 @@ function runsView(t, data, ui, actions) {
       .child(button(t, 'all-workspace-runs', 'All runs', (_e, cx) => actions.showRuns(cx, 'all'), ui.group === 'all' ? 'active' : 'normal')))
     .children(records.slice(0, ui.limit).map(job => runCard(t, job, actions)));
   if (!records.length) list.child(panel(t).child(empty(t, query ? 'No matching runs.' :
-    data.runs.length ? 'No runs in this state.' : 'Start a delegation or call a Team role to see a run here.')));
+    data.runs.length ? 'No runs in this state.' : 'Council workflows started by you or by an agent appear here.')));
   if (records.length > ui.limit) list.child(button(t, 'more-workspace-runs', 'Show more runs', (_e, cx) => actions.more(cx)));
   if (Object.values(data.counts).some(count => count > 18)) {
     list.child(button(t, 'delegate-history', query ? 'Search full delegation history' : 'Full delegation history',
@@ -233,7 +235,7 @@ export function workspaceView(t, data, ui, actions) {
         ].filter(Boolean).join(' · '), 11, t.muted).truncate().tooltip(data.project)))
       .child(button(t, 'copy-workspace-path', '', (_e, cx) => actions.copyPath(cx, data.project), 'normal', false, 'copy').tooltip('Copy project path')))
     .when(ui.projects.length > 1, node => node.child(h_flex().gap(4).flex_wrap()
-      .child(button(t, 'track-focus', 'Follow focus', (_e, cx) => actions.project(cx, null), ui.pinned ? 'normal' : 'active'))
+      .child(button(t, 'track-focus', 'This space', (_e, cx) => actions.project(cx, null), ui.pinned ? 'normal' : 'active'))
       .children(ui.projects.slice(0, 12).map((path, index) =>
         button(t, `workspace-folder-${index}`, leaf(path), (_e, cx) => actions.project(cx, path),
           ui.pinned === path ? 'active' : 'normal').tooltip(path)))));

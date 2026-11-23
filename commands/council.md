@@ -13,7 +13,7 @@ Use the first argument as the operation and preserve the remaining arguments. Fo
 - `review <task>`: use `council-review` with `mode: review`.
 - `council <task>`: run `council_convene` with `mode: council`.
 - `team list|call|set`: use `council-team` and preserve the configured member ID.
-- `debate <task>`, `parallel`, `pipeline`: convene the named mode. Keep explicit assignments or ordered stages. `debate show` and `debate reply` use the Desktop discussion tools.
+- `debate <task>`, `parallel`, `pipeline`: convene the named mode. Keep explicit assignments or ordered stages. `debate create`, `debate show`, and `debate reply` use the Desktop discussion tools.
 - `schedule`, `round` and `retally`: manage future runs and formal voting in the requested project.
 - `activity`, `status`, `result`, `doctor` and `poll`: use the selected operation in the requested project.
 

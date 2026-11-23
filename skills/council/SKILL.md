@@ -19,9 +19,9 @@ The first word after the Council skill mention selects the workflow. Accept **de
 | `$council status --session qa-1` / `$council result --session qa-1` | Inspect the existing job with `council_session_status` / `council_result`. CLI: `council status` / `council result` with the same session. |
 | `$council activity` / `$council activity --session qa-1` | Read project or run activity through `council_activity` or the matching CLI command. Use `council_report_progress` for an explicit report. |
 | `$council status` / `$council doctor` | Inspect Herdr terminals or the environment. Use `council_status` or the matching CLI command. |
-| `$council poll show <id>` / `$council debate show <id>` | Inspect the advisory poll or Desktop discussion in its project. Use the matching tool or CLI command. |
+| `$council poll show <id>` / `$council debate create --question "..."` | Inspect a poll or open a discussion thread. Use the matching tool or CLI command in the intended project. |
 
-Preserve explicit task text, target, project, session ID, permission, timeout and terminal retention. Default to read access and keep the assignment bounded. If a supplied option conflicts with the selected workflow, explain the conflict before starting. Formal modes use three ordered roles. If the user supplies an incomplete roster, ask for the missing roles before launch. Use an explicit task with `debate` to convene the automated workflow. Use `debate show` or `debate reply` to participate in a Desktop thread.
+Preserve explicit task text, target, project, session ID, permission, timeout and terminal retention. Default to read access and keep the assignment bounded. If a supplied option conflicts with the selected workflow, explain the conflict before starting. Formal modes use three ordered roles. If the user supplies an incomplete roster, ask for the missing roles before launch. Use an explicit task with `debate` to convene the automated workflow. Use `debate create`, `debate show`, or `debate reply` for a Desktop thread.
 
 1. Identify the intended project. Run the CLI from that directory. For project-scoped MCP tools, pass its absolute path as `project`, including on status, result and reconnect calls. A server configured to run in the project can use its working directory as the default. Read the installed `hc --skill`. Check the selected host and its authentication before launching an agent. `doctor` checks executable availability.
 2. Prefer `council_start`, `council_session_status` and `council_result` for one specialist. Confirm the connection exposes these tools and `council_alignment`. If a required tool is missing or an older server cannot select the intended project, use a current Council CLI from that project. If neither path is available, report the setup gap and keep the task withheld.
@@ -93,7 +93,9 @@ Use the poll ID and project folder from the invitation. Read its options and con
 - Tally and digest checks are mechanical, not an agent synthesis, signature or endorsement.
 - In an assigned delegation, a short handoff or blocker can go in `council_report_progress` with the session ID. Include a real `PLAN.md` component ID when applicable. Treat notes as reported context and rely on the recorded outcome for completion.
 
-## Reply to a Desktop debate invitation
+## Open or reply to a Desktop debate
+
+Open a thread with `council_debate_create` or `debate create --question "<topic>" --context "<opening message>"`. Pass the intended absolute project to MCP or run the CLI in that project. Use the returned session ID and project when directing authorized participants to the discussion.
 
 Use the project path and debate ID from the invitation. Pass the project path to `council_debate_read` and `council_debate_reply`. The bundled CLI equivalents are `debate show <id>` and `debate reply <id> --text "<reply>"`. Run them from the debate project and use your own terminal address. If project permissions prevent submission, reply in your current terminal.
 

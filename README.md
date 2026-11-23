@@ -38,7 +38,7 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 
 **Polls** includes polls opened in Desktop or by agents through the CLI and MCP. **This space** includes the space folder and its terminal folders. Use **All local spaces** to see records from other open local spaces. Polls display their project and, when available, the terminal that opened them.
 
-In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. You can also open a thread without invitations and add your own reply from Desktop. Invited agents can read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. The invitation contains the project, ID, and commands.
+In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. An agent can also open a thread using `council_debate_create` or `council debate create --question "<topic>"`. Use the same project and debate ID to read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. **Debate** shows those threads and the arguments and recommendations saved by automated debates.
 
 From a debate, **Create poll** pre-fills the question and context. Edit them, select recipients, and open the poll in the debate's project. Both views link to each other. Use **Close with decision** to record the decision, its owner, and the next step. The closed thread stays readable with those fields and its linked polls. The CLI and MCP can read the recorded decision.
 

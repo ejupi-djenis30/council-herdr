@@ -39,8 +39,10 @@ function localSpace() {
 function localProjects(active, allSpaces) {
   const localSpaces = allSpaces ? spaces().filter(space => !space.machine) : [active];
   const tabs = new Set(localSpaces.flatMap(space => space.tabs.map(tab => tab.id)));
+  const ids = new Set(localSpaces.map(space => space.id));
   const folders = [...localSpaces.map(space => space.folder),
-    ...panes().filter(pane => pane.terminal && tabs.has(pane.tab)).map(pane => pane.cwd)];
+    ...panes().filter(pane => pane.terminal && tabs.has(pane.tab)).map(pane => pane.cwd),
+    ...terminals().filter(terminal => ids.has(terminal.labels?.['herdr.space'])).map(terminal => terminal.cwd)];
   const seen = new Set();
   return folders.filter(folder => {
     if (!folder || seen.has(folderKey(folder))) return false;
@@ -164,6 +166,7 @@ export default class Council extends View {
     this.newFocus = cx.focus_handle();
     this.workspace = { view: 'runs', group: 'all', component: null, limit: 9, pinned: null, diagnostics: false };
     this.activityTarget = null;
+    this.discoveredProjects = [];
     this.activityFollows = null;
     this.lastFocusedProject = null;
     this.workspaceReturn = null;
@@ -293,6 +296,7 @@ export default class Council extends View {
       this.folder = folder;
       this.spaceId = space?.id;
       this.workspace.pinned = null;
+      this.discoveredProjects = [];
       this.lastFocusedProject = null;
       this.clearFilters();
       this.navigate(cx, this.tab);
@@ -304,7 +308,7 @@ export default class Council extends View {
     if (this.tab === 'activity') {
       const focus = focused();
       const projects = activityProjects(space, focus);
-      const hasProject = folder => projects.some(project => folderKey(project) === folderKey(folder));
+      const hasProject = folder => [...projects, ...this.discoveredProjects].some(project => folderKey(project) === folderKey(folder));
       if (!hasProject(this.workspace.pinned)) this.workspace.pinned = null;
       if (!hasProject(this.lastFocusedProject)) this.lastFocusedProject = null;
       if (focus?.space === this.spaceId && focus.terminal && focus.cwd) {
@@ -312,7 +316,7 @@ export default class Council extends View {
       }
       target = this.workspace.pinned || this.lastFocusedProject || folder;
       const followFocus = !this.workspace.pinned;
-      activityOptions = { followFocus, spaceFolder: folder };
+      activityOptions = { followFocus, spaceFolder: folder, ...(followFocus ? { projects } : {}) };
       if (target !== this.activityTarget || followFocus !== this.activityFollows) {
         this.activityTarget = target;
         this.activityFollows = followFocus;
@@ -332,9 +336,12 @@ export default class Council extends View {
       try {
         const data = selected
           ? await this.request(selected.project, tab, { id: selected.id })
-          : await this.request(listProject || target, tab, activityOptions ??
-            { projects: listProject ? [] : localProjects(space, this.allSpaces) });
+          : await this.request(listProject || target, tab, activityOptions ?? {
+            projects: listProject ? [] : localProjects(space, this.allSpaces),
+            spaceFolders: listProject ? [] : this.allSpaces ? spaces().filter(item => !item.machine).map(item => item.folder) : [folder]
+          });
         if (epoch === this.epoch) {
+          if (tab === 'activity' && activityOptions.followFocus) this.discoveredProjects = data.projects ?? [];
           const changed = this.readError || JSON.stringify(data) !== JSON.stringify(this.data);
           this.readError = '';
           this.data = data;
@@ -802,8 +809,8 @@ export default class Council extends View {
     if (!items.length) {
       const empty = {
         polls: 'Polls opened by you or agents in these projects appear here.',
-        delegations: 'Start a delegation with the Council CLI or MCP to follow it here.',
-        debates: 'Start a thread with New debate. Formal reviews also appear here when they start.',
+        delegations: 'Delegations, parallel runs, and pipelines started in these projects appear here.',
+        debates: 'Debate threads, automated debates, and formal reviews started in these projects appear here.',
         reviews: 'Council and review sessions appear here as soon as they start.'
       };
       return body.child(panel(t).py(20).child(h_flex().gap(11).items_center()
@@ -845,11 +852,11 @@ export default class Council extends View {
         title: isPolls ? pollStatus(item) : reviewStatus(item.status),
         color: (isPolls ? !item.closedAt : item.status === 'approved') ? t.done : t.muted
       };
-      const metadata = isDelegations ? [item.agent ?? (item.ownership === 'borrowed' ? 'Existing terminal' : null), item.address].filter(Boolean).join(' · ')
+      const metadata = isDelegations ? [discussionType(item), item.agent ?? (item.ownership === 'borrowed' ? 'Existing terminal' : null), item.address].filter(Boolean).join(' · ')
         : !isPolls ? discussionType(item) : expected
           ? `${received}/${expected} tracked replied · ${countLabel(item.responseCount, 'response')}`
           : countLabel(item.responseCount, 'response');
-      const origin = [origins.get(item.project), isPolls ? this.pollCreator(item, space) : null].filter(Boolean).join(' · ');
+      const origin = [origins.get(item.project), item.createdBy ? this.pollCreator(item, space) : null].filter(Boolean).join(' · ');
       return Button.new(`${item.project}/${item.id}`).w_full().min_w_0().px(12).py(11).rounded(9).items_center()
         .border_1().border_color(t.border).bg(t.surface).cursor_pointer()
         .accessibility_label([item.question, origin, metadata, status.title].filter(Boolean).join(', '))
@@ -877,18 +884,19 @@ export default class Council extends View {
     if (!this.data && this.readError) return div();
     if (this.tab === 'activity') {
       const project = this.data.project;
-      const projects = activityProjects(space, focused());
+      const projects = [...new Map([...this.discoveredProjects, ...activityProjects(space, focused())]
+        .map(path => [folderKey(path), path])).values()];
       const key = folderKey(project);
       const live = spaceRecipients(space).filter(agent => {
         const folder = folderKey(agent.folder);
-        return folder === key || folder.startsWith(`${key}/`);
+        return !this.workspace.pinned || folder === key || folder.startsWith(`${key}/`);
       });
       const update = (cx, changes) => {
         Object.assign(this.workspace, changes);
         cx.notify();
       };
       return workspaceView(t, this.data, { ...this.workspace, projects, live, wide: this.wide, search: this.activitySearch }, {
-        open: (cx, tab, id) => this.navigate(cx, tab, { id, project }, { returnTo: this.workspaceBookmark() }),
+        open: (cx, tab, id, origin = project) => this.navigate(cx, tab, { id, project: origin }, { returnTo: this.workspaceBookmark() }),
         history: cx => this.openWorkspaceHistory(cx, project),
         create: (cx, tab) => {
           this.navigate(cx, tab, null, { returnTo: this.workspaceBookmark() });
@@ -929,9 +937,14 @@ export default class Council extends View {
       if (!detail) return label('This item is unavailable.', 12, t.muted);
       if (this.tab === 'polls') return this.renderPoll(t, detail, space);
       if (this.tab === 'reviews') return this.renderReview(t, detail);
+      if (this.tab === 'delegations' && detail.standalone) return discussionView(t, detail, {
+        project: projectName(this.selected.project),
+        copy: (cx, value) => this.copy(cx, value, 'File path copied.')
+      });
       if (this.tab === 'debates') return discussionView(t, detail, {
         project: projectName(this.selected.project),
         openReview: (_e, cx) => this.navigate(cx, 'reviews', this.selected, { returnTo: this.workspaceReturn }),
+        creator: this.pollCreator(detail, space),
         copy: (cx, value) => this.copy(cx, value, 'Contribution path copied.'),
         delivery: this.renderInvitations(t, detail, space),
         startPoll: (_e, cx) => this.startCreate(cx, detail),
@@ -956,6 +969,9 @@ export default class Council extends View {
         terminal: teamTerminal ?? this.visibleAgents(space).find(agent => agent.address === detail.address),
         focus: (cx, address) => teamTerminal ? run('terminal.peek', { terminal: address }) : this.focusAgent(cx, address),
         open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.selected.project }, { returnTo: this.workspaceReturn }),
+        openWorkflow: detail.workflowTab ? cx =>
+          this.navigate(cx, detail.workflowTab, { id: detail.workflowSessionId, project: this.selected.project },
+            { returnTo: this.workspaceReturn }) : null,
         addNote: (_e, cx) => {
           const requestId = `desktop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
           this.setForm('progress-note', { text: '', component: '' }, { state: 'working', requestId });

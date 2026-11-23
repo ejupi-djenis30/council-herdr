@@ -18,8 +18,10 @@ export function projectLabels(folders) {
 
 export function discussionType(item) {
   if (item.interactive) return 'Debate thread';
-  if (item.mode === 'debate') return 'Archived debate';
-  return item.mode === 'council' ? 'Council deliberation' : 'Formal review';
+  return {
+    debate: 'Automated debate', council: 'Council deliberation', review: 'Formal review',
+    delegate: 'Delegation', parallel: 'Parallel run', pipeline: 'Pipeline'
+  }[item.mode] ?? 'Council run';
 }
 
 export function pollStatus(poll) {

@@ -1,12 +1,12 @@
 # Workspace activity
 
-**Council → Workspace** follows the focused Herdr terminal’s project. When the terminal enters a subfolder, Workspace looks for the nearest plan or Council storage within the Git worktree and the active space’s folder boundary. Pin a folder to keep an exact scope. Select a run, poll, discussion, or review to inspect the source record. **Back to Workspace** restores the original view and filters, including after following a Team handoff. Select **Read issues** when it appears to inspect a record or Git read problem.
+**Council → Workspace** shows Council runs and open decisions across the current Herdr space, including work started from a background terminal or in a project directly beneath an open folder. **Plan** and **Changes** follow the focused terminal’s project. When a terminal enters a subfolder, the mod looks for its project’s Council storage within the space. Pin a folder to scope the entire view to that project. Select a run, poll, discussion, or review to inspect its record. **Back to Workspace** restores the original view and filters, including after following a Team handoff. Select **Read issues** to inspect a record or Git read problem.
 
 ![Workspace Plan in Herdr, showing dependency lanes, a human approval step, and a reported blocker in the Atlas sample project](../herdr/screenshots/workspace-plan.png)
 
 | Signal | What Workspace shows |
 | --- | --- |
-| **Council record** | Delivery states, deadlines, completion, saved results, and Team process shutdown. New delegations record individual transitions. Older jobs show the milestones available in their saved record. |
+| **Council record** | Agent-created polls and debates, automated workflows and their saved contributions, delivery states, deadlines, and Team process shutdown. Older jobs show the milestones available in their saved record. |
 | **Live in Herdr** | Agents visible in the selected folder. Select a terminal to focus it. |
 | **Reported** | Progress, blockers, and handoffs attached to a delegation via Desktop, CLI, or MCP. The update can point to a plan component. |
 | **Declared** | Components, dependencies, authorship labels, and task states from the project's optional `PLAN.md`. Plan progress counts tasks marked done. |

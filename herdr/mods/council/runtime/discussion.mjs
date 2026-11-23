@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { isDirectory, readBytes, readText } from './store-files.mjs';
+import { isDirectory, isFile, readBytes, readText } from './store-files.mjs';
 
-const sessionModes = ['council', 'review', 'debate'];
+const sessionModes = ['council', 'review', 'debate', 'delegate', 'parallel', 'pipeline'];
 const safeName = /^[a-z0-9][a-z0-9-]*$/i;
 const sha256 = /^[a-f0-9]{64}$/i;
 const messageLimit = 8000;
@@ -102,9 +102,11 @@ function contributionAt(root, phase, person, session) {
   if (meta && (meta.phase !== phase || meta.author !== person.name ||
       meta.sha256 !== createHash('sha256').update(bytes).digest('hex'))) return null;
   return {
-    id: `${phase}-${person.name}`, kind: person.role === 'author' ? 'proposal' : 'reply',
+    id: `${phase}-${person.name}`, kind: {
+      arguments: 'argument', verdict: 'recommendation', subtasks: 'result', delegation: 'result'
+    }[phase] ?? (phase.startsWith('stage-') ? 'result' : person.role === 'author' ? 'proposal' : 'reply'),
     author: person.name, role: string(person.role), agent: string(person.agent), timestamp,
-    source: !meta ? 'draft' : meta.source === 'terminal_screen_fallback' ? 'terminal' : 'artifact',
+    source: !meta ? 'draft' : ['terminal', 'terminal_screen_fallback'].includes(meta.source) ? 'terminal' : 'artifact',
     body: body.slice(0, messageLimit), truncated: body.length > messageLimit, path: artifact,
     sha256: meta?.sha256 ?? null
   };
@@ -147,9 +149,13 @@ export function discussionMessages(dir, session, proposal) {
   const root = join(dir, 'artifacts');
   const messages = [];
   if (isDirectory(root)) {
+    const workflowPhases = session.mode === 'pipeline'
+      ? readdirSync(root, { withFileTypes: true }).filter(entry =>
+        entry.isDirectory() && /^stage-[1-9]\d*$/.test(entry.name)).map(entry => entry.name)
+      : { debate: ['arguments', 'verdict', 'debate'], parallel: ['subtasks'], delegate: ['delegation'] }[session.mode];
     for (const person of participants(session).values()) {
-      const phases = session.mode === 'debate' ? ['debate']
-        : person.role !== 'author' ? ['review'] : session.mode === 'review' ? ['proposal', 'draft'] : ['draft', 'proposal'];
+      const phases = workflowPhases ?? (person.role !== 'author' ? ['review']
+        : session.mode === 'review' ? ['proposal', 'draft'] : ['draft', 'proposal']);
       for (const phase of phases) {
         try {
           const post = contributionAt(root, phase, person, session);
@@ -171,4 +177,29 @@ export function discussionMessages(dir, session, proposal) {
   }
   return messages.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) ||
     Number(a.kind === 'ballot') - Number(b.kind === 'ballot') || a.id.localeCompare(b.id));
+}
+
+export function readAdvisoryRun(dir, session) {
+  const folders = session.mode === 'delegate' ? ['reports', 'validation'] : ['validation'];
+  const records = folders.flatMap(name => {
+    const folder = join(dir, name);
+    if (!isDirectory(folder)) return [];
+    const verdictPath = join(folder, 'verdict.json');
+    const verdict = readJson(verdictPath);
+    if (!verdict || verdict.sessionId !== session.sessionId) return [];
+    const legacyDelegate = session.mode === 'delegate' && name === 'reports' && verdict.mode === undefined && Boolean(verdict.agent);
+    if (!legacyDelegate && (verdict.mode !== session.mode || !['completed', 'incomplete'].includes(verdict.status))) return [];
+    const updatedAt = verdict.completedAt ?? lstatSync(verdictPath).mtime.toISOString();
+    if (!current(updatedAt, session)) return [];
+    const reportPath = join(folder, 'report.md');
+    return [{
+      status: legacyDelegate ? 'completed' : verdict.status, updatedAt,
+      reportPath: isFile(reportPath) ? reportPath : null, error: string(verdict.error)?.slice(0, messageLimit),
+      execution: verdict.execution && typeof verdict.execution === 'object' ? Object.fromEntries(
+        Object.entries(verdict.execution).filter(([name, turn]) => safeName.test(name) && turn && typeof turn === 'object')
+          .map(([name, turn]) => [name, { address: string(turn.address), status: string(turn.status), error: string(turn.error) }])
+      ) : null
+    }];
+  });
+  return records.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0] ?? { status: 'pending_result' };
 }

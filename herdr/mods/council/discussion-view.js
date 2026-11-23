@@ -26,7 +26,8 @@ export function ballotBody(t, ballot) {
 }
 
 const postTitles = {
-  proposal: 'Proposal', reply: 'Reply', ballot: 'Ballot submitted'
+  proposal: 'Proposal', reply: 'Reply', ballot: 'Ballot submitted',
+  argument: 'Argument', recommendation: 'Recommendation', result: 'Result'
 };
 const sources = { terminal: 'Terminal capture', draft: 'Unverified draft' };
 const agentNames = new Map([['claude', 'Claude Code'], ['codex', 'Codex'], ['antigravity', 'Antigravity'], ['junie', 'Junie']]);
@@ -56,14 +57,18 @@ function post(t, message, copy) {
 }
 
 export function discussionView(t, debate, {
-  project, openReview, copy, delivery, composer, startPoll, startClose, openPoll, copyDecision, closing, saving
+  project, creator, openReview, copy, delivery, composer, startPoll, startClose, openPoll, copyDecision, closing, saving
 }) {
   const header = panel(t)
     .child(h_flex().w_full().gap(8).items_center().justify_between()
-      .child(statusPill(t, reviewStatus(debate.status), ['approved', 'open'].includes(debate.status) ? t.done : t.muted))
-      .when(debate.mode !== 'debate', row => row.child(button(t, 'open-linked-review', 'View review', openReview, 'normal', false, 'reviews'))))
+      .child(statusPill(t, reviewStatus(debate.status), ['approved', 'open', 'completed'].includes(debate.status) ? t.done : t.muted))
+      .when(Boolean(openReview) && ['review', 'council'].includes(debate.mode),
+        row => row.child(button(t, 'open-linked-review', 'View review', openReview, 'normal', false, 'reviews')))
+      .when(Boolean(debate.reportPath), row => row.child(button(t, 'copy-workflow-report', 'Copy report path',
+        (_e, cx) => copy(cx, debate.reportPath), 'normal', false, 'copy'))))
     .child(label(debate.task, 18, t.foreground).font_semibold())
-    .child(label(`${discussionType(debate)} · ${project}`, 11, t.muted))
+    .child(label([discussionType(debate), project, creator].filter(Boolean).join(' · '), 11, t.muted))
+    .when(Boolean(debate.error), node => node.child(label(debate.error, 13, t.blocked)))
     .when(Boolean(delivery), node => node.child(delivery));
   if (debate.interactive) {
     header.child(h_flex().gap(6).flex_wrap()
@@ -91,7 +96,12 @@ export function discussionView(t, debate, {
       .child(label(poll.question, 13, t.foreground).flex_1())
       .child(statusPill(t, poll.closedAt ? 'Closed' : 'Open', poll.closedAt ? t.muted : t.done))
       .child(button(t, `open-${poll.id}`, 'View poll', (_e, cx) => openPoll(cx, poll.id), 'normal', saving)))));
-  if (!debate.messages.length) body.child(panel(t).child(label(debate.closedAt ? 'No replies were recorded.' : 'Waiting for replies.', 13, t.muted)));
+  if (debate.execution) body.child(panel(t)
+    .child(cardHeading(t, 'Participants', 'terminal'))
+    .children(Object.entries(debate.execution).map(([name, turn]) => label(
+      [name, turn.address, turn.error ?? turn.status].filter(Boolean).join(' · '), 12, t.muted))));
+  if (!debate.messages.length) body.child(panel(t).child(label(debate.standalone ? 'No contributions saved yet.'
+    : debate.closedAt ? 'No replies were recorded.' : 'Waiting for replies.', 13, t.muted)));
   else body.children(debate.messages.map(message => post(t, message, copy)));
   if (composer) body.child(composer);
   return body;

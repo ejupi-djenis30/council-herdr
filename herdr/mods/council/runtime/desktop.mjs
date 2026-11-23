@@ -1,9 +1,9 @@
-import { readdirSync, realpathSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { reportProgress, runRelations, workspaceActivity } from './activity.mjs';
 import { readDelegation } from './delegations.mjs';
 import { closeDebate, createDebate, readDebate, readDebateRoom, replyToDebate, roomSchema } from './debate-room.mjs';
-import { discussionMessages, proposalReference, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
+import { discussionMessages, proposalReference, readAdvisoryRun, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
 import { pendingInvitationIds, planInvitations, prepareInvitations, readInvitationDelivery, retryInvitation } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
@@ -39,37 +39,53 @@ function reviewStatus(saved) {
     : ['approved', 'validated', 'conditional'].includes(validation?.verdict) ? 'unconfirmed' : validation?.verdict ?? 'pending';
 }
 
-function readCouncilSession(base, id, selected, discussion, cwd) {
+const formalModes = new Set(['council', 'review']);
+const sessionViews = {
+  reviews: ['council', 'review'],
+  debates: ['council', 'review', 'debate'],
+  delegations: ['delegate', 'parallel', 'pipeline']
+};
+
+function readCouncilSession(base, id, selected, view, cwd) {
   const dir = join(base, id);
   const session = readDiscussionSession(dir, id);
-  if (!session || (!discussion && session.mode === 'debate')) return null;
-  const saved = session.mode === 'debate' ? null : verdictFor(dir, session);
+  if (!session || !sessionViews[view].includes(session.mode)) return null;
+  const formal = formalModes.has(session.mode);
+  const saved = formal ? verdictFor(dir, session) : null;
   const interactive = session.mode === 'debate' && session.$schema === roomSchema;
   const room = interactive ? (selected ? readDebate(cwd, id) : readDebateRoom(cwd, id)) : null;
+  const advisory = !formal && !interactive ? readAdvisoryRun(dir, session) : null;
+  const failure = formal && !saved ? readAdvisoryRun(dir, session) : null;
   const taskDir = join(dir, 'task');
   const task = interactive ? session.question : isDirectory(taskDir) ? readText(join(taskDir, 'task.md'), 1024 * 1024)?.trim() : null;
   const summary = {
     id, mode: session.mode, interactive, question: task?.slice(0, 220) || id, createdAt: session.createdAt,
-    status: interactive ? (room.closedAt ? 'closed' : 'open') : session.mode === 'debate' ? 'archived' : reviewStatus(saved),
-    ...(room ? { closedAt: room.closedAt } : {})
+    status: interactive ? (room.closedAt ? 'closed' : 'open')
+      : advisory?.status ?? (failure?.status === 'incomplete' ? 'incomplete' : reviewStatus(saved)),
+    ...(room ? { closedAt: room.closedAt, createdBy: room.createdBy } : {}),
+    ...(advisory ? { standalone: true, updatedAt: advisory.updatedAt ?? session.createdAt } : {}),
+    ...(formal ? { updatedAt: saved?.verdict.validation.validatedAt ?? failure?.updatedAt ?? session.createdAt } : {})
   };
   if (!selected) return { summary, detail: null };
   const proposal = proposalReference(dir, session, saved?.verdict.validation);
   const detail = { ...summary, task: task?.slice(0, 2400) || id, participants: session.participants ?? [] };
-  if (discussion) {
+  if (view !== 'reviews') {
     const invitationDelivery = interactive ? readInvitationDelivery(cwd, id, { closed: Boolean(room.closedAt) }) : null;
     const invitations = invitationDelivery?.targets ?? null;
     const names = new Map(invitations?.map(target => [target.address, target.label]));
     const messages = interactive ? room.messages.map(message => ({ ...message, agent: names.get(message.author) }))
       : discussionMessages(dir, session, proposal);
     const polls = interactive ? new PollStore(cwd).list({ sourceDebateId: id }).polls : [];
-    return { summary, detail: { ...detail, interactive, messages, invitations, invitationDelivery, polls, decision: room?.decision ?? null } };
+    return { summary, detail: { ...detail, messages, invitations, invitationDelivery, polls, decision: room?.decision ?? null,
+      reportPath: advisory?.reportPath ?? failure?.reportPath ?? null, error: advisory?.error ?? failure?.error ?? null,
+      execution: advisory?.execution ?? null } };
   }
   const reportPath = saved ? join(dir, saved.folder, 'report.md') : null;
   return { summary, detail: { ...detail,
     tally: saved?.verdict.tally ?? null, validation: saved?.verdict.validation ?? null,
     ballots: readSubmittedBallots(dir, session, proposal), proposal,
-    reportPath: reportPath && isFile(reportPath) ? reportPath : null
+    reportPath: reportPath && isFile(reportPath) ? reportPath : failure?.reportPath ?? null,
+    ...(failure?.error ? { error: failure.error } : {})
   } };
 }
 
@@ -117,19 +133,25 @@ function projectRequest(cwd, action, args) {
       }
       return store.list();
     }
-    case 'reviews': return sessions(cwd, args.id, 'reviews', 'review', readCouncilSession);
-    case 'debates': return sessions(cwd, args.id, 'debates', 'debate', (base, id, selected) => readCouncilSession(base, id, selected, true, cwd));
+    case 'reviews': return sessions(cwd, args.id, 'reviews', 'review',
+      (base, id, selected) => readCouncilSession(base, id, selected, 'reviews', cwd));
+    case 'debates': return sessions(cwd, args.id, 'debates', 'debate',
+      (base, id, selected) => readCouncilSession(base, id, selected, 'debates', cwd));
     case 'delegations': {
-      const result = sessions(cwd, args.id, 'delegations', 'delegation', readDelegation);
+      const result = sessions(cwd, args.id, 'delegations', 'delegation', (base, id, selected) =>
+        readDelegation(base, id, selected) ?? readCouncilSession(base, id, selected, 'delegations', cwd));
       const job = result.delegation;
       if (job?.teamMember || job?.teamSource) {
         job.related = runRelations(job, sessions(cwd, null, 'delegations', 'delegation', readDelegation).delegations);
       }
       return result;
     }
-    case 'activity': return args.id != null
-      ? projectRequest(cwd, 'delegations', { id: args.id })
-      : workspaceActivity(cwd, (project, section) => projectRequest(project, section, {}), args);
+    case 'activity': {
+      if (args.id != null) return projectRequest(cwd, 'delegations', { id: args.id });
+      const errors = [];
+      const projects = Array.isArray(args.projects) ? discoverProjects(cwd, args, errors) : [];
+      return workspaceActivity(cwd, (project, section) => projectRequest(project, section, {}), { ...args, projects, errors });
+    }
     case 'activity-report':
       reportProgress(cwd, args, 'operator');
       return projectRequest(cwd, 'delegations', { id: args.sessionId });
@@ -139,7 +161,7 @@ function projectRequest(cwd, action, args) {
       const plan = planInvitations(args.space, args.recipients);
       const beforePublish = plan ? id => prepareInvitations(cwd, id, plan) : undefined;
       if (action === 'debate-create') {
-        const room = createDebate(cwd, args, { beforePublish });
+        const room = createDebate(cwd, args, { beforePublish, fromPanel: true });
         return projectRequest(cwd, 'debates', { id: room.sessionId }).debate;
       }
       const participants = args.recipients === undefined ? args.participants : plan?.targets ?? [];
@@ -163,21 +185,57 @@ function projectRequest(cwd, action, args) {
   }
 }
 
-export function desktopRequest(cwd, action, args) {
-  const pendingInvites = action === 'pending-invitations';
-  if ((!pendingInvites && !['polls', 'reviews', 'debates', 'delegations'].includes(action)) || args.id != null || !Array.isArray(args.projects)) {
-    return projectRequest(cwd, action, args);
-  }
-  const items = [];
-  const errors = [];
-  const scanned = new Set();
+function containedBy(root, folder) {
+  const path = relative(root, folder);
+  return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`);
+}
+
+const ignoredProjectFolders = new Set(['node_modules', 'vendor', 'target', 'dist', 'build']);
+
+function discoverProjects(cwd, args, errors) {
+  const scanned = new Map();
+  const visited = new Set();
+  const key = path => process.platform === 'win32' ? path.toLowerCase() : path;
+  const scan = path => scanned.set(key(path), path);
+  const roots = (Array.isArray(args.spaceFolders) ? args.spaceFolders : [args.spaceFolder]).flatMap(folder => {
+    if (typeof folder !== 'string' || !isAbsolute(folder)) return [];
+    try { return [realpathSync.native(folder)]; } catch { return []; }
+  });
   for (const folder of [cwd, ...args.projects]) {
     if (typeof folder !== 'string' || !isAbsolute(folder)) continue;
     try {
       const project = realpathSync.native(folder);
-      const key = process.platform === 'win32' ? project.toLowerCase() : project;
-      if (scanned.has(key)) continue;
-      scanned.add(key);
+      if (visited.has(key(project))) continue;
+      visited.add(key(project));
+      scan(project);
+      for (let parent = dirname(project); parent !== dirname(parent) && roots.some(root => containedBy(root, parent)); parent = dirname(parent)) {
+        if (isDirectory(join(parent, '.agent_workspace'))) scan(parent);
+      }
+      if (roots.length) {
+        // Agents can set an explicit project below their terminal folder without changing its cwd.
+        for (const child of readdirSync(project, { withFileTypes: true })) {
+          if (!child.isDirectory() || child.name.startsWith('.') || ignoredProjectFolders.has(child.name.toLowerCase())) continue;
+          const candidate = join(project, child.name);
+          const workspace = lstatSync(join(candidate, '.agent_workspace'), { throwIfNoEntry: false });
+          if (workspace?.isDirectory()) scan(candidate);
+        }
+      }
+    } catch (error) {
+      errors.push({ project: folder, error: error.message });
+    }
+  }
+  return [...scanned.values()];
+}
+
+export function desktopRequest(cwd, action, args) {
+  const pendingInvites = action === 'pending-invitations';
+  if ((!pendingInvites && !Object.hasOwn(sessionViews, action) && action !== 'polls') || args.id != null || !Array.isArray(args.projects)) {
+    return projectRequest(cwd, action, args);
+  }
+  const items = [];
+  const errors = [];
+  for (const project of discoverProjects(cwd, args, errors)) {
+    try {
       if (pendingInvites) {
         items.push(...pendingInvitationIds(project, args.space).map(id => ({ id, project })));
         continue;
@@ -186,7 +244,7 @@ export function desktopRequest(cwd, action, args) {
       items.push(...result[action].map(item => ({ ...item, project })));
       errors.push(...result.errors.map(error => ({ ...error, project })));
     } catch (error) {
-      errors.push({ project: folder, error: error.message });
+      errors.push({ project, error: error.message });
     }
   }
   items.sort((a, b) => Boolean(a.closedAt) - Boolean(b.closedAt) || String(b.createdAt).localeCompare(String(a.createdAt)));

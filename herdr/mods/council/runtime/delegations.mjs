@@ -84,9 +84,11 @@ export function readDelegation(base, id, selected, lookupWorker) {
   const task = field(job.task) ?? id;
   const participant = job.participant;
   const ownership = ['borrowed', 'owned'].includes(participant?.ownership) ? participant.ownership : null;
+  const workflowSessionId = field(job.result?.workflowSessionId) ?? field(job.workflow?.sessionId);
   const summary = {
     id,
     mode: job.mode,
+    ...(job.workflow ? { workflowSessionId } : {}),
     question: task.slice(0, 220),
     createdAt: field(job.createdAt),
     updatedAt: field(job.updatedAt),
@@ -107,6 +109,10 @@ export function readDelegation(base, id, selected, lookupWorker) {
   catch { progress = { notes: [], count: 0, unreadable: 1 }; }
   const detail = {
     ...summary,
+    ...(workflowSessionId && /^[a-zA-Z0-9_-]{1,240}$/.test(workflowSessionId) &&
+      isDirectory(join(base, workflowSessionId)) && isFile(join(base, workflowSessionId, 'session.json')) ? {
+        workflowTab: ['council', 'review', 'debate'].includes(job.mode) ? 'debates' : 'delegations'
+      } : {}),
     task: task.slice(0, 2400),
     deliveryState: field(job.deliveryState),
     expired,

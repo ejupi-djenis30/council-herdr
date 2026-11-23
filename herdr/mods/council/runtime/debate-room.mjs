@@ -19,9 +19,10 @@ function json(path) {
   return value === null ? null : JSON.parse(value);
 }
 
-export function createDebate(cwd, { question, context = '' }, { beforePublish } = {}) {
+export function createDebate(cwd, { question, context = '', createdBy }, { beforePublish, fromPanel = false } = {}) {
   const title = requiredText(question, 'Debate topic', 240);
   const brief = context ? requiredText(context, 'Opening message', 2000) : '';
+  const creator = fromPanel ? 'operator' : createdBy == null ? null : speaker(createdBy);
   const root = join(cwd, '.agent_workspace');
   isDirectory(root, { create: true });
   const id = `debate-${randomUUID()}`;
@@ -30,11 +31,11 @@ export function createDebate(cwd, { question, context = '' }, { beforePublish } 
   mkdirSync(join(dir, 'messages'));
   const room = {
     $schema: roomSchema, sessionId: id, mode: 'debate', question: title, context: brief,
-    createdAt: new Date().toISOString(), createdBy: 'operator'
+    createdAt: new Date().toISOString(), ...(creator ? { createdBy: creator } : {})
   };
   beforePublish?.(id);
   writeFileSync(join(dir, 'session.json'), JSON.stringify(room), { flag: 'wx' });
-  return room;
+  return { ...room, project: cwd };
 }
 
 function roomSnapshot(cwd, id) {
@@ -44,7 +45,10 @@ function roomSnapshot(cwd, id) {
   if (!isDirectory(root) || !isDirectory(dir)) throw new Error('Debate was not found in this project.');
   const room = json(join(dir, 'session.json'));
   if (room?.$schema !== roomSchema || room.sessionId !== id || room.mode !== 'debate' ||
-      typeof room.question !== 'string' || !Number.isFinite(Date.parse(room.createdAt))) throw new Error('Debate is unavailable.');
+      typeof room.question !== 'string' || !Number.isFinite(Date.parse(room.createdAt)) ||
+      (room.createdBy !== undefined && (typeof room.createdBy !== 'string' || !speakerId.test(room.createdBy)))) {
+    throw new Error('Debate is unavailable.');
+  }
   const events = join(dir, 'events');
   const revisions = eventFiles(events);
   if (revisions.some((name, index) => Number.parseInt(name, 10) !== index + 1)) {
@@ -68,7 +72,7 @@ export function readDebateRoom(cwd, id) {
 export function readDebate(cwd, id) {
   const { dir, events, revisions, room } = roomSnapshot(cwd, id);
   const messages = room.context ? [{
-    id: 'opening', kind: 'message', author: 'operator', timestamp: room.createdAt, body: room.context
+    id: 'opening', kind: 'message', author: room.createdBy || 'agent', timestamp: room.createdAt, body: room.context
   }] : [];
   function add(message) {
     if (message?.sessionId === id && typeof message.id === 'string' && messageFile.test(`${message.id}.json`) &&
@@ -113,9 +117,14 @@ function updateRoom(cwd, id, next) {
   throw new Error('The debate is being updated concurrently. Retry the operation.');
 }
 
-export function replyToDebate(cwd, id, { author, body }, { fromPanel = false } = {}) {
+function speaker(author, fromPanel = false) {
   const sender = requiredText(author, 'Your Herdr terminal address', 80).toLowerCase();
   if (!speakerId.test(sender) || (sender === 'operator' && !fromPanel)) throw new Error('Use your own Herdr terminal address.');
+  return sender;
+}
+
+export function replyToDebate(cwd, id, { author, body }, { fromPanel = false } = {}) {
+  const sender = speaker(author, fromPanel);
   const content = requiredText(body, 'Reply', 2000);
   return updateRoom(cwd, id, room => {
     if (room.closedAt) throw new Error('This debate is closed.');

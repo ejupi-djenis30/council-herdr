@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { AgentWorkspace } from '../lib/workspace.js';
+import { CouncilOrchestrator } from '../lib/modes.js';
+import { JobManager } from '../lib/jobs.js';
 import { desktopRequest } from '../herdr/mods/council/runtime/desktop.mjs';
 import { checkInvitationAlignment, inviteReadyAgent, readInvitations, sendInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
 import { alignmentKey, alignmentLabel } from '../herdr/mods/council/runtime/alignment.mjs';
@@ -54,6 +56,88 @@ test('desktop discovers agent polls across projects and edits only the selected 
   const remote = invoke(operator, 'council_poll_read', { project: agent, pollId: detail.id });
   assert.equal(remote.responses[0].answer, 'Reply from Desktop');
   assert.throws(() => desktopRequest(operator, 'polls', { id: detail.id }), /not found/);
+});
+
+test('agents can open debate threads through CLI and MCP and see them in their Herdr space', t => {
+  const space = project(t);
+  const repository = join(space, 'repo');
+  const terminalFolder = join(repository, 'src', 'parser');
+  mkdirSync(terminalFolder, { recursive: true });
+  const viaCli = command(repository, ['debate', 'create', '--question', 'Parser rollout', '--context', 'Opening from the CLI']);
+  const viaMcp = invoke(space, 'council_debate_create', {
+    project: repository, question: 'Parser tests', context: 'Opening from MCP'
+  });
+  assert.equal(viaMcp.project, repository);
+  invoke(space, 'council_debate_reply', { project: repository, debateId: viaMcp.sessionId, text: 'Test recovery.' });
+
+  const scope = { projects: [terminalFolder], spaceFolder: space };
+  const { debates, errors } = desktopRequest(space, 'debates', scope);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(new Set(debates.map(item => item.id)), new Set([viaCli.sessionId, viaMcp.sessionId]));
+  assert.ok(debates.every(item => item.project === repository && item.createdBy === 't17' && item.status === 'open'));
+  const { debate } = desktopRequest(repository, 'debates', { id: viaMcp.sessionId });
+  assert.deepEqual(debate.messages.map(message => [message.author, message.body]),
+    [['t17', 'Opening from MCP'], ['t17', 'Test recovery.']]);
+  const { decisions } = desktopRequest(space, 'activity', scope);
+  assert.ok(decisions.some(item => item.id === viaMcp.sessionId && item.tab === 'debates' && item.project === repository));
+  const containerScope = { projects: [space], spaceFolder: space };
+  assert.equal(desktopRequest(space, 'debates', containerScope).debates.length, 2, 'explicit child project with no terminal pane');
+  assert.ok(desktopRequest(space, 'activity', containerScope).projects.includes(repository));
+  assert.equal(desktopRequest(space, 'activity', { followFocus: false }).decisions.length, 0, 'pinning keeps the exact scope');
+});
+
+test('Desktop shows synchronous workflow runs and their saved contributions before and after completion', t => {
+  const cwd = project(t);
+  const workspace = new AgentWorkspace(cwd);
+  const expected = [
+    ['debate', 'debate-side-a', 'arguments', 'argument', 'debates', 'debate'],
+    ['parallel', 'parallel-worker-1', 'subtasks', 'result', 'delegations', 'delegation'],
+    ['pipeline', 'pipeline-stage-1', 'stage-1', 'result', 'delegations', 'delegation'],
+    ['delegate', 'delegate-codex-1234', 'delegation', 'result', 'delegations', 'delegation']
+  ];
+  for (const [mode, name, phase, kind, tab, detailKey] of expected) {
+    const { sid, sessionDir } = workspace.initSession({
+      sessionId: `agent-${mode}`, mode, task: `Agent ${mode}`, participants: [{ name, agent: 'codex', role: 'author' }]
+    });
+    const inspect = () => desktopRequest(cwd, tab, { id: sid })[detailKey];
+    const running = desktopRequest(cwd, 'activity', {}).runs.find(item => item.id === sid);
+    assert.equal(running.group, 'active');
+    assert.equal(inspect().status, 'pending_result');
+    workspace.writeArtifact(sessionDir, { phase, author: name, agent: 'codex', content: 'Saved evidence', metadata: { source: 'terminal' } });
+    assert.deepEqual(inspect().messages.map(item => [item.kind, item.body, item.source]), [[kind, 'Saved evidence', 'terminal']]);
+    const output = workspace.saveFinalDeliverables(sessionDir, {
+      markdownReport: 'Result', verdictJson: { sessionId: sid, mode, status: 'completed', completedAt: new Date().toISOString() },
+      validationPassed: mode === 'delegate'
+    });
+    assert.equal(inspect().reportPath, output.reportPath);
+    assert.equal(desktopRequest(cwd, 'activity', {}).runs.find(item => item.id === sid).group, 'ready');
+  }
+});
+
+test('Workspace links background workflow jobs to their contributions without duplicating runs', async t => {
+  const cwd = project(t);
+  const manager = new JobManager({ cwd, herdr: {}, workerLauncher: () => ({ success: true }) });
+  await manager.startJob({ sessionId: 'compare-options', task: 'Compare options', mode: 'debate' });
+  const job = manager.readJobRecord('compare-options').job;
+  const workflowSessionId = job.workflow.sessionId;
+  new AgentWorkspace(cwd).initSession({ sessionId: workflowSessionId, task: job.task, mode: 'debate' });
+  const { runs } = desktopRequest(cwd, 'activity', {});
+  assert.deepEqual(runs.map(item => [item.id, item.workflowSessionId]), [['compare-options', workflowSessionId]]);
+  assert.equal(desktopRequest(cwd, 'delegations', { id: job.sessionId }).delegation.workflowTab, 'debates');
+  assert.equal(desktopRequest(cwd, 'debates', { id: workflowSessionId }).debate.status, 'pending_result');
+});
+
+test('an agent-started workflow that fails before any contributions is visible in Needs attention', async t => {
+  const cwd = project(t);
+  const orchestrator = new CouncilOrchestrator({ cwd, herdr: {
+    launchAgent: () => ({ success: false, error: 'Fixture rejected launch' })
+  } });
+  await orchestrator.runMode({ mode: 'delegate', task: 'Inspect the parser', sessionId: 'agent-blocked' });
+  const { runs } = desktopRequest(cwd, 'activity', {});
+  assert.deepEqual(runs.map(item => [item.id, item.group]), [['agent-blocked', 'attention']]);
+  const { delegation } = desktopRequest(cwd, 'delegations', { id: 'agent-blocked' });
+  assert.equal(delegation.status, 'incomplete');
+  assert.equal(delegation.error, 'Fixture rejected launch');
 });
 
 test('Debate shows current proposals, replies and ballots before a verdict', t => {

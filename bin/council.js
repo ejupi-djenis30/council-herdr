@@ -39,7 +39,7 @@ COMMANDS:
   dismiss <targets...>          Kill and remove terminal(s) from Herdr
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
   poll help                     Manage advisory project polls and submit responses
-  debate help                   Read or reply to a Council Desktop debate
+  debate help                   Open, read, or reply to a Council Desktop debate
   team help                     Configure named roles and call on-demand team members
   activity [--session <id>]     Inspect workspace activity and the session timeline
   activity report [options]     Record a reported progress note
