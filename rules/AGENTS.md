@@ -1,6 +1,6 @@
 # Council rules
 
-Council coordinates bounded `delegate`, `council` and `review` workflows through Herdr. `debate`, `parallel` and `pipeline` are disabled experimental modes.
+Council runs six workflows through Herdr. Use `delegate` for one specialist, `council` or `review` for formal voting, `debate` to compare positions, `parallel` for independent assignments, and `pipeline` for ordered handoffs. Each mode supports blocking and background execution.
 
 1. Read the installed `hc --skill`. Keep agents visible, interactive and scoped; no extra agents without authorization.
 2. Complete the author before reviewer launch. Hand off exact proposal content/path and digest. Prefer direct artifacts; label screen fallbacks honestly.

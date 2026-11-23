@@ -17,6 +17,44 @@ export function readJson(path) {
   return raw === null ? null : JSON.parse(raw);
 }
 
+export function currentFormalVerdict(dir, session) {
+  const { sessionId: id } = session;
+  const createdAt = Date.parse(session.createdAt);
+  const candidates = ['reports', 'validation'].flatMap(folder => {
+    const results = join(dir, folder);
+    if (!isDirectory(results)) return [];
+    const verdict = readJson(join(results, 'verdict.json'));
+    const validation = verdict?.validation;
+    const timestamp = Date.parse(validation?.validatedAt);
+    if (verdict?.sessionId !== id || verdict.mode !== session.mode ||
+        validation?.$schema !== 'council.validation/v1' || !verdict.tally ||
+        !Number.isFinite(createdAt) || !Number.isFinite(timestamp) || timestamp < createdAt) return [];
+    return [{ folder, verdict, timestamp }];
+  });
+  // A reused ID may have an older report alongside its current validation.
+  candidates.sort((a, b) => b.timestamp - a.timestamp ||
+    Number(b.folder === 'validation') - Number(a.folder === 'validation'));
+  const latest = candidates[0];
+  if (!latest) return null;
+  const { validation, tally } = latest.verdict;
+  if (tally.round !== undefined && (tally.round !== validation.round ||
+      !Number.isSafeInteger(tally.round) || tally.round < 1)) return null;
+  const marker = readJson(join(dir, 'validation', 'round.json'));
+  if (marker?.sessionCreatedAt === session.createdAt && (marker.mode !== session.mode || marker.sessionId !== id ||
+      marker.round !== validation.round || marker.sha256 !== validation.expectedSha256)) return null;
+  return latest;
+}
+
+export function reviewStatus(saved) {
+  const validation = saved?.verdict.validation;
+  const tally = saved?.verdict.tally;
+  const authorized = saved?.folder === 'reports' && validation.passed === true &&
+    ['validated', 'conditional'].includes(validation.verdict) && validation.artifactIntegrity === true &&
+    validation.mutationDetected === false && tally.passed === true && tally.quorumMet === true && tally.invalidCount === 0;
+  return authorized ? 'approved'
+    : ['approved', 'validated', 'conditional'].includes(validation?.verdict) ? 'unconfirmed' : validation?.verdict ?? 'pending';
+}
+
 export function readDiscussionSession(dir, id) {
   if (!isDirectory(dir)) return null;
   const session = readJson(join(dir, 'session.json'));
@@ -123,8 +161,8 @@ export function proposalReference(dir, session, validation) {
     const task = join(dir, 'task');
     const target = isDirectory(task) ? readJson(join(task, 'proposal-target.json')) : null;
     if (target?.createdAt === session.createdAt) {
-      return target.sessionId === session.sessionId && target.round === 1 && digest(target.sha256)
-        ? { sha256: target.sha256, round: 1, source: 'handoff' } : null;
+      return target.sessionId === session.sessionId && Number.isSafeInteger(target.round) && target.round > 0 && digest(target.sha256)
+        ? { sha256: target.sha256, round: target.round, source: 'handoff' } : null;
     }
   } catch {
     // A damaged handoff leaves the proposal comparison unavailable.

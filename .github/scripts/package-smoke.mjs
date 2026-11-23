@@ -56,7 +56,8 @@ try {
     assert.equal(responses.get(1).serverInfo.version, version, host);
     const tools = new Set(responses.get(2).tools.map(tool => tool.name));
     for (const name of ['council_alignment', 'council_start', 'council_session_status', 'council_result',
-      'council_poll_create', 'council_poll_read', 'council_poll_vote', 'council_debate_read', 'council_debate_reply']) {
+      'council_schedules', 'council_poll_create', 'council_poll_read', 'council_poll_vote', 'council_poll_manage',
+      'council_debate_create', 'council_debate_read', 'council_debate_reply', 'council_debate_close']) {
       assert.ok(tools.has(name), `${host}: ${name} missing`);
     }
     assert.equal(responses.get(3).isError, true, host);

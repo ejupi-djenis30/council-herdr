@@ -22,7 +22,7 @@ In the poll and debate forms, choose agents under **Invite agents**. Each row sh
 
 Delegations reads asynchronous jobs started in the project from CLI or MCP. Filter for Active, Needs attention, or Ready. A detail shows the assigned terminal, acknowledgement, remaining time, recorded wait event, and any error. The Terminal capture card appears alongside the delivery record. It can copy saved output and the path to the full capture. Opening a live terminal leaves the panel visible. An elapsed deadline or uncertain delivery is shown even when a worker has saved no result.
 
-**Team** configures named roles, agent and model choices, and optional reporting lines for the current project. Run `council team call` through the Council CLI or use `council_team_call` through MCP to start an on-demand turn. The tab shows the last known power state and links to the saved turn. Completed managed models shut down after Council archives the result and start again on an explicit call.
+In **Delegations**, select **Delegate task** to send a bounded assignment to an agent. In **Team**, select **Call member** to start a turn with the member's saved agent, model and project access. Both forms open the saved session. The Team tab shows the last known power state and links to the latest turn. Completed managed models shut down after Council archives the result and start again on an explicit call.
 
 ## Built from
 
@@ -34,7 +34,7 @@ The window runs `runtime/council.mjs desktop <action>` through `herdr.exec` in t
 node /path/to/herdr-app/mods/council/runtime/council.mjs poll help
 ```
 
-From the repository, run `node herdr/install.js --menu --shortcut`. The installer copies the complete mod, records the Node executable, and adds the launcher to a personal layout. When the selected layout is shipped with Herdr, choose the `council-<name>` copy printed by the installer.
+From the repository, run `node herdr/install.js --menu --shortcut`. The installer includes the Council execution engine, records the Node executable, and adds the launcher to a personal layout. For a manual Gallery copy, add `"cli": "/absolute/path/to/bin/council.js"` to the mod's `config.json` to enable native task launches. When the selected layout is shipped with Herdr, choose the `council-<name>` copy printed by the installer.
 
 For a manual Gallery installation, copy the complete `mods/council/` directory, including `runtime/` and `icons/`, into the Herdr app home's `mods/`. In a personal layout, insert this block after the workspace brand in the sidebar column. Use Herdr's layout clone command first if your layout ships with Herdr.
 

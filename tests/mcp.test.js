@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CouncilMcpServer } from '../lib/mcp-server.js';
 
 test('CouncilMcpServer handles initialize request', async () => {
@@ -61,8 +64,10 @@ test('CouncilMcpServer lists resources and prompts', async () => {
   assert.equal(promptList.result.prompts.length, 2);
 });
 
-test('CouncilMcpServer executes tools via tools/call', async () => {
-  const server = new CouncilMcpServer();
+test('CouncilMcpServer executes tools via tools/call', async t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'council-mcp-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const server = new CouncilMcpServer({ cwd });
   let response = null;
   server.send = (msg) => { response = msg; };
 
@@ -142,10 +147,4 @@ test('CouncilMcpServer executes tools via tools/call', async () => {
   assert.equal(ballotResult.ballot.score, 7);
   assert.equal(ballotResult.ballot.$schema, 'council.ballot/v1');
 
-  // Clean up test workspace
-  try {
-    const { rmSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    rmSync(join(server.workspace.baseDir, testSid), { recursive: true, force: true });
-  } catch {}
 });

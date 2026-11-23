@@ -1,43 +1,13 @@
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { reportProgress, runRelations, workspaceActivity } from './activity.mjs';
-import { readDelegation } from './delegations.mjs';
+import { matchesDesktopTask, readDelegation } from './delegations.mjs';
 import { closeDebate, createDebate, readDebate, readDebateRoom, replyToDebate, roomSchema } from './debate-room.mjs';
-import { discussionMessages, proposalReference, readAdvisoryRun, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
+import { currentFormalVerdict, reviewStatus, discussionMessages, proposalReference, readAdvisoryRun, readDiscussionSession, readJson, readSubmittedBallots } from './discussion.mjs';
 import { pendingInvitationIds, planInvitations, prepareInvitations, readInvitationDelivery, retryInvitation } from './invitations.mjs';
 import { PollStore } from './polls.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 import { TeamStore } from './team.mjs';
-
-function verdictFor(dir, session) {
-  const { sessionId: id } = session;
-  const createdAt = Date.parse(session.createdAt);
-  const candidates = ['reports', 'validation'].flatMap(folder => {
-    const results = join(dir, folder);
-    if (!isDirectory(results)) return [];
-    const verdict = readJson(join(results, 'verdict.json'));
-    const validation = verdict?.validation;
-    const timestamp = Date.parse(validation?.validatedAt);
-    if (verdict?.sessionId !== id || verdict.mode !== session.mode ||
-        validation?.$schema !== 'council.validation/v1' || !verdict.tally ||
-        !Number.isFinite(createdAt) || !Number.isFinite(timestamp) || timestamp < createdAt) return [];
-    return [{ folder, verdict, timestamp }];
-  });
-  // A reused ID may have an older report alongside its current validation.
-  candidates.sort((a, b) => b.timestamp - a.timestamp ||
-    Number(b.folder === 'validation') - Number(a.folder === 'validation'));
-  return candidates[0];
-}
-
-function reviewStatus(saved) {
-  const validation = saved?.verdict.validation;
-  const tally = saved?.verdict.tally;
-  const authorized = saved?.folder === 'reports' && validation.passed === true &&
-    ['validated', 'conditional'].includes(validation.verdict) && validation.artifactIntegrity === true &&
-    validation.mutationDetected === false && tally.passed === true && tally.quorumMet === true && tally.invalidCount === 0;
-  return authorized ? 'approved'
-    : ['approved', 'validated', 'conditional'].includes(validation?.verdict) ? 'unconfirmed' : validation?.verdict ?? 'pending';
-}
 
 const formalModes = new Set(['council', 'review']);
 const sessionViews = {
@@ -51,7 +21,7 @@ function readCouncilSession(base, id, selected, view, cwd) {
   const session = readDiscussionSession(dir, id);
   if (!session || !sessionViews[view].includes(session.mode)) return null;
   const formal = formalModes.has(session.mode);
-  const saved = formal ? verdictFor(dir, session) : null;
+  const saved = formal ? currentFormalVerdict(dir, session) : null;
   const interactive = session.mode === 'debate' && session.$schema === roomSchema;
   const room = interactive ? (selected ? readDebate(cwd, id) : readDebateRoom(cwd, id)) : null;
   const advisory = !formal && !interactive ? readAdvisoryRun(dir, session) : null;
@@ -137,6 +107,7 @@ function projectRequest(cwd, action, args) {
       (base, id, selected) => readCouncilSession(base, id, selected, 'reviews', cwd));
     case 'debates': return sessions(cwd, args.id, 'debates', 'debate',
       (base, id, selected) => readCouncilSession(base, id, selected, 'debates', cwd));
+    case 'task-match': return { matches: matchesDesktopTask(join(cwd, '.agent_workspace'), args) };
     case 'delegations': {
       const result = sessions(cwd, args.id, 'delegations', 'delegation', (base, id, selected) =>
         readDelegation(base, id, selected) ?? readCouncilSession(base, id, selected, 'delegations', cwd));
@@ -174,7 +145,7 @@ function projectRequest(cwd, action, args) {
       return projectRequest(cwd, 'debates', { id: args.id }).debate;
     case 'invite-retry': return retryInvitation(cwd, args);
     case 'debate-close':
-      closeDebate(cwd, args.id, args);
+      closeDebate(cwd, args.id, args, { fromPanel: true });
       return projectRequest(cwd, 'debates', { id: args.id }).debate;
     case 'add-option': return store.addOption(args.id, args.label);
     case 'track': return store.track(args.id, args);
@@ -190,7 +161,15 @@ function containedBy(root, folder) {
   return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`);
 }
 
-const ignoredProjectFolders = new Set(['node_modules', 'vendor', 'target', 'dist', 'build']);
+const ignoredProjectFolders = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', 'coverage', '__pycache__']);
+// The panel starts a fresh helper for each refresh. Always inspect named folders and their
+// direct children, then spend a single shared budget on nested projects across the space.
+const nestedDirectoryLimit = 128;
+
+function projectFolders(entries) {
+  return entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.') &&
+    !ignoredProjectFolders.has(entry.name.toLowerCase()));
+}
 
 function discoverProjects(cwd, args, errors) {
   const scanned = new Map();
@@ -201,7 +180,14 @@ function discoverProjects(cwd, args, errors) {
     if (typeof folder !== 'string' || !isAbsolute(folder)) return [];
     try { return [realpathSync.native(folder)]; } catch { return []; }
   });
-  for (const folder of [cwd, ...args.projects]) {
+  const nested = [];
+  const enqueued = new Set();
+  function enqueue(path) {
+    if (nested.length >= nestedDirectoryLimit || enqueued.has(key(path))) return;
+    enqueued.add(key(path));
+    nested.push(path);
+  }
+  for (const folder of [cwd, ...args.projects, ...roots]) {
     if (typeof folder !== 'string' || !isAbsolute(folder)) continue;
     try {
       const project = realpathSync.native(folder);
@@ -209,19 +195,31 @@ function discoverProjects(cwd, args, errors) {
       visited.add(key(project));
       scan(project);
       for (let parent = dirname(project); parent !== dirname(parent) && roots.some(root => containedBy(root, parent)); parent = dirname(parent)) {
-        if (isDirectory(join(parent, '.agent_workspace'))) scan(parent);
+        if (lstatSync(join(parent, '.agent_workspace'), { throwIfNoEntry: false })?.isDirectory()) scan(parent);
       }
       if (roots.length) {
-        // Agents can set an explicit project below their terminal folder without changing its cwd.
-        for (const child of readdirSync(project, { withFileTypes: true })) {
-          if (!child.isDirectory() || child.name.startsWith('.') || ignoredProjectFolders.has(child.name.toLowerCase())) continue;
+        const inSpace = roots.some(root => containedBy(root, project));
+        for (const child of projectFolders(readdirSync(project, { withFileTypes: true }))) {
           const candidate = join(project, child.name);
           const workspace = lstatSync(join(candidate, '.agent_workspace'), { throwIfNoEntry: false });
           if (workspace?.isDirectory()) scan(candidate);
+          if (inSpace) enqueue(candidate);
         }
       }
     } catch (error) {
       errors.push({ project: folder, error: error.message });
+    }
+  }
+  for (const path of nested) {
+    if (visited.has(key(path))) continue;
+    try {
+      const entries = readdirSync(path, { withFileTypes: true });
+      if (entries.some(entry => entry.name === '.agent_workspace' && entry.isDirectory())) scan(path);
+      if (nested.length < nestedDirectoryLimit) {
+        for (const child of projectFolders(entries)) enqueue(join(path, child.name));
+      }
+    } catch (error) {
+      if (!['ENOENT', 'EACCES', 'EPERM'].includes(error.code)) errors.push({ project: path, error: error.message });
     }
   }
   return [...scanned.values()];

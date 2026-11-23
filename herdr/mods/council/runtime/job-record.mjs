@@ -1,3 +1,23 @@
+import { createHash } from 'node:crypto';
+
+/**
+ * Compute deterministic input fingerprint for job idempotency and conflict detection
+ */
+export function computeFingerprint(options = {}, workflow = null) {
+  const normalized = {
+    mode: options.mode || 'delegate',
+    task: String(options.task || '').trim(),
+    agent: String(options.agent || 'codex').toLowerCase().trim(),
+    adopt: options.adopt ? String(options.adopt).trim() : null,
+    permission: options.permission || 'read',
+    timeoutSec: Number(options.timeoutSec || 180),
+    keepTerminals: Boolean(options.keepTerminals || options.keep),
+    ...(workflow ? { workflow } : {}),
+    ...(options.team ? { team: options.team.id } : {})
+  };
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
 export function isJobRecord(job) {
   return Boolean(job && typeof job === 'object' && job.$schema === 'council.job/v1');
 }
@@ -31,7 +51,8 @@ export function jobInterruption(job, expired, workerObservation) {
   }
   if (workerObservation?.state === 'stopped') return 'worker_stopped';
   if (expired) return 'timed_out';
-  if (job.state === 'deliberating' && job.deliveryState === 'acknowledged' && job.awaitingInput === true) return 'awaiting_input';
+  if (job.state === 'deliberating' && job.awaitingInput === true &&
+      (job.deliveryState === 'acknowledged' || (job.workflow && job.deliveryState === 'attempting'))) return 'awaiting_input';
   return null;
 }
 

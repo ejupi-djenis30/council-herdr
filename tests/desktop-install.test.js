@@ -4,7 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { submitTask } from '../herdr/mods/council/task-launch.js';
 
 const install = fileURLToPath(new URL('../herdr/install.js', import.meta.url));
 
@@ -47,6 +48,79 @@ test('a fresh install bundles an independent runtime and preserves a conflicting
   const duplicate = run([install, '--app-home', appHome], project);
   assert.equal(duplicate.status, 1);
   assert.match(duplicate.stderr, /already exists/);
+});
+
+test('Desktop starts a delegation and a Team turn through its installed engine and recovers a lost acknowledgement', async t => {
+  const { root, appHome, project, mod } = environment(t);
+  const installed = run([install, '--app-home', appHome], project);
+  assert.equal(installed.status, 0, installed.stderr);
+  const cli = join(mod, 'engine', 'bin', 'council.js');
+  const log = join(root, 'worker-launches');
+  const stub = join(root, 'mock-hc.mjs');
+  writeFileSync(stub, `import child from 'node:child_process';
+    import { appendFileSync } from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    child.spawnSync = (command, args) => {
+      if (command !== 'hc' || args[0] !== 'run') throw Error('Unexpected command ' + command);
+      appendFileSync(process.env.COUNCIL_TEST_LAUNCH_LOG, JSON.stringify(args) + '\\n');
+      return { status: 0, stdout: '{"address":"t900"}', stderr: '' };
+    };
+    syncBuiltinESMExports();`);
+  const dispatch = args => {
+    const child = spawnSync(process.execPath, ['--import', pathToFileURL(stub).href, cli, ...args], {
+      cwd: project, encoding: 'utf8', timeout: 10000,
+      env: { ...process.env, HC_TERMINAL_ID: '', COUNCIL_TEST_LAUNCH_LOG: log }
+    });
+    return { code: child.status, stdout: child.stdout, stderr: child.stderr };
+  };
+  const desktop = (action, request) => {
+    const result = run([join(mod, 'runtime', 'council.mjs'), 'desktop', action, JSON.stringify(request)], project);
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const match = request => desktop('task-match', request);
+  const prefix = '--inspect the parser '.repeat(125);
+  const task = { sessionId: 'desktop-inspect', agent: 'junie', permission: 'read', task: prefix + 'today', timeout: '360' };
+  assert.equal(await submitTask(task, dispatch, match), task.sessionId);
+  assert.equal(await submitTask(task, dispatch, match), task.sessionId);
+  assert.equal(desktop('delegations', { id: task.sessionId }).delegation.task, task.task.slice(0, 2400));
+  const changed = { ...task, task: prefix + 'tomorrow' };
+  let lookups = 0;
+  await assert.rejects(submitTask(changed, dispatch, () => { lookups++; return { matches: true }; }),
+    error => /fingerprint mismatch/.test(error.message) && !error.message.includes('Retrying'));
+  assert.equal(lookups, 0, 'an explicit conflict reaches the operator directly');
+  const disconnected = () => { throw Error('Disconnected.'); };
+  assert.equal(await submitTask(task, disconnected, match), task.sessionId);
+  for (const other of [changed, { ...task, permission: 'write' }, { ...task, timeout: '30' }, { ...task, agent: 'claude' }]) {
+    await assert.rejects(submitTask(other, disconnected, match), /Disconnected.*desktop-inspect/);
+  }
+  assert.equal(dispatch(['team', 'set', 'qa', '--agent', 'claude', '--permission', 'write', '--model', 'custom', '--role', 'QA']).code, 0);
+  const call = { ...task, sessionId: 'desktop-qa', member: 'qa' };
+  assert.equal(await submitTask(call, args => {
+    assert.equal(dispatch(args).code, 0);
+    throw Error('Launcher timed out after saving the job.');
+  }, match), call.sessionId);
+  await assert.rejects(submitTask({ ...call, timeout: '30' }, disconnected, match), /Disconnected/);
+  await assert.rejects(submitTask({ ...call, member: 'other' }, disconnected, match), /Disconnected/);
+  const saved = JSON.parse(readFileSync(join(project, '.agent_workspace', call.sessionId, 'job.json'), 'utf8'));
+  assert.equal(saved.timeoutSec, 360);
+  assert.equal(saved.agent, 'claude');
+  assert.equal(saved.permission, 'write');
+  assert.equal(saved.participant.team.model, 'custom');
+  const launches = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(launches.length, 2);
+  assert.ok(launches.every(args => args.includes(join(mod, 'engine', 'lib', 'job-worker.js'))));
+});
+
+test('an unconfirmed Desktop submission preserves its session ID and rejects invalid briefs locally', async () => {
+  const task = { sessionId: 'desktop-parse', task: 'Inspect parser', agent: 'junie', permission: 'read', timeout: '180' };
+  let calls = 0;
+  const dispatch = () => { calls++; throw Error('Transport disconnected.'); };
+  const noRecord = request => { assert.equal(request.sessionId, task.sessionId); return { matches: false }; };
+  await assert.rejects(submitTask(task, dispatch, noRecord), /Transport disconnected.*desktop-parse.*same session/);
+  await assert.rejects(submitTask({ ...task, task: ' ' }, dispatch, noRecord), /Enter a task/);
+  await assert.rejects(submitTask({ ...task, timeout: '-1' }, dispatch, noRecord), /deadline/);
+  assert.equal(calls, 1);
 });
 
 test('managed upgrades retain the previous build and refuse local edits', t => {

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { jobTimeline, readProgress } from './activity-log.mjs';
-import { isJobRecord, jobExpired, jobInterruption, jobRecordProblem, jobRecovery } from './job-record.mjs';
+import { computeFingerprint, isJobRecord, jobExpired, jobInterruption, jobRecordProblem, jobRecovery } from './job-record.mjs';
 import { isDirectory, isFile, readText } from './store-files.mjs';
 import { observeWorker, sameActiveWorker } from './worker-observation.mjs';
 
@@ -60,6 +60,18 @@ function readJob(dir, id) {
   return job;
 }
 
+export function matchesDesktopTask(base, { sessionId, member, task, timeoutSec, agent, permission }) {
+  if (typeof sessionId !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/.test(sessionId)) return false;
+  const dir = join(base, sessionId);
+  if (!isDirectory(base) || !isDirectory(dir)) return false;
+  const job = readJob(dir, sessionId);
+  if (!job || job.mode !== 'delegate' || job.participant?.ownership !== 'owned') return false;
+  const profile = job.participant.team;
+  if ((profile?.id ?? null) !== (member ?? null)) return false;
+  return job.fingerprint === computeFingerprint({ task, timeoutSec, agent: profile?.agent ?? agent,
+    permission: profile?.permission ?? permission, team: profile });
+}
+
 export function readDelegation(base, id, selected, lookupWorker) {
   const dir = join(base, id);
   if (!isDirectory(dir)) return null;
@@ -95,7 +107,8 @@ export function readDelegation(base, id, selected, lookupWorker) {
     status,
     agent: ownership === 'owned' ? field(participant?.agent) ?? field(job.agent) : field(participant?.reportedApp),
     ownership,
-    address: field(participant?.canonicalAddress) ?? field(participant?.address),
+    address: field(participant?.canonicalAddress) ?? field(participant?.address) ??
+      (job.workflow && status === 'awaiting_input' ? field(job.waitDetails?.terminal) : null),
     teamMember: field(participant?.team?.id),
     teamSource: field(job.teamSource),
     power: field(participant?.power),
@@ -109,6 +122,7 @@ export function readDelegation(base, id, selected, lookupWorker) {
   catch { progress = { notes: [], count: 0, unreadable: 1 }; }
   const detail = {
     ...summary,
+    participantCreatedMs: Number.isSafeInteger(participant?.identity?.createdMs) ? participant.identity.createdMs : null,
     ...(workflowSessionId && /^[a-zA-Z0-9_-]{1,240}$/.test(workflowSessionId) &&
       isDirectory(join(base, workflowSessionId)) && isFile(join(base, workflowSessionId, 'session.json')) ? {
         workflowTab: ['council', 'review', 'debate'].includes(job.mode) ? 'debates' : 'delegations'

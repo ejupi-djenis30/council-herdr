@@ -1,10 +1,11 @@
 import { parseArgs } from 'node:util';
 import { PollStore } from './polls.mjs';
+import { inspectPoll, openPoll } from './agent-discussion.mjs';
 
 const HELP = `Usage:
   council poll list
   council poll show <poll-id>
-  council poll create --question "..." [--context "..."] [--mode choice|mixed|open] [--option "..." --option "..."]
+  council poll create --question "..." [--context "..."] [--mode choice|mixed|open] [--option "..." --option "..."] [--debate <id>] [--invite <address> ...]
   council poll add-option <poll-id> --label "..."
   council poll track <poll-id> --voter <id> [--label "..."]
   council poll untrack <poll-id> --voter <id>
@@ -15,7 +16,8 @@ Run from the same project directory. Voting defaults to HC_TERMINAL_ID when avai
 Polls collect advisory responses and decisions.`;
 
 const flags = {
-  create: { question: { type: 'string' }, context: { type: 'string' }, mode: { type: 'string' }, option: { type: 'string', multiple: true } },
+  create: { question: { type: 'string' }, context: { type: 'string' }, mode: { type: 'string' },
+    option: { type: 'string', multiple: true }, debate: { type: 'string' }, invite: { type: 'string', multiple: true } },
   'add-option': { label: { type: 'string' } },
   track: { voter: { type: 'string' }, label: { type: 'string' } },
   untrack: { voter: { type: 'string' } },
@@ -37,8 +39,8 @@ export function runPollCommand(args, cwd = process.cwd()) {
 
   switch (action) {
     case 'list': return store.list();
-    case 'show': return store.show(id);
-    case 'create': return store.create({ ...values, options: values.option, createdBy: process.env.HC_TERMINAL_ID });
+    case 'show': return inspectPoll(cwd, id);
+    case 'create': return openPoll(cwd, { ...values, options: values.option, sourceDebateId: values.debate, recipients: values.invite });
     case 'add-option': return store.addOption(id, values.label);
     case 'track': return store.track(id, values);
     case 'untrack': return store.untrack(id, values.voter);

@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, renameSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { alignmentChallenge, alignmentNotice, alignmentOf } from './alignment.mjs';
 import { PollStore } from './polls.mjs';
@@ -194,6 +195,37 @@ function defaultCommand(args, timeout) {
       resolve({ ok: !error, details });
     });
   });
+}
+
+// Capture identity before publication so a reused address cannot receive an old invitation.
+export async function publishWithInvitations(cwd, addresses, publish, command = defaultCommand) {
+  if (addresses === undefined) return publish({});
+  if (!Array.isArray(addresses) || addresses.length > 32 ||
+      addresses.some(address => typeof address !== 'string' || !terminalId.test(address))) {
+    throw new Error('Select up to 32 local Herdr terminal addresses for invitations.');
+  }
+  if (!addresses.length) return publish({});
+  const recipients = await Promise.all([...new Set(addresses)].map(async address => {
+    const { ok, details } = await command(['get', '--json', address], 10000);
+    if (!ok || details?.state !== 'live' || details.address !== address || !details.reported || !details.status?.app) {
+      throw new Error(`No live reporting agent at ${address}. Check its Herdr address.`);
+    }
+    return { address, label: details.name || details.status.app, createdAt: details.created_ms, space: details.labels?.['herdr.space'] };
+  }));
+  const space = recipients[0].space;
+  if (!space || recipients.some(recipient => recipient.space !== space)) throw new Error('Choose agents from one Herdr space.');
+  const plan = planInvitations(space, recipients);
+  const record = publish({ participants: plan.targets, beforePublish: id => prepareInvitations(cwd, id, plan) });
+  const id = record.sessionId ?? record.id;
+  const entry = fileURLToPath(new URL('./council.mjs', import.meta.url));
+  const args = ['run', '--bg', '--json', '--no-parent', '--no-notify', '--outlive-parent', '--rm',
+    '--name', `council-invite-${id.replace(/-/g, '').slice(-17)}`, '--cwd', cwd, '--', process.execPath, entry, 'invite', id];
+  // The open record and queue survive a lost launch reply. Desktop reconciles the original queue.
+  let worker;
+  try { worker = await command(args, 15000); } catch {}
+  return { ...record, invitationDelivery: readInvitationDelivery(cwd, id),
+    workerAddress: worker?.ok ? worker.details?.address ?? null : null,
+    ...(!worker?.ok || !worker.details?.address ? { nextAction: 'Invitations are saved. Open Council Desktop in the recipient space to check delivery.' } : {}) };
 }
 
 export async function checkInvitationAlignment(cwd, entry, { id, space, address }, command = defaultCommand) {

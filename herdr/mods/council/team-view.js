@@ -1,6 +1,7 @@
 import { div } from 'gpui-kit';
 import { h_flex, v_flex } from 'gpui-base';
 import { button, cardHeading, field, iconTile, label, panel, statusPill } from './components.js';
+import { taskAgents } from './task-launch.js';
 
 const states = { off: 'Off', running: 'Running', starting: 'Starting', stopping: 'Stopping', attention: 'Needs attention' };
 
@@ -35,6 +36,23 @@ export function teamEditor(t, roster, form, actions) {
     }), 'primary', actions.saving)).child(button(t, 'cancel-team', 'Cancel', (_e, cx) => actions.cancel(cx), 'normal', actions.saving)));
 }
 
+export function taskEditor(t, form, actions) {
+  const member = form.member;
+  const choose = key => (cx, value) => { form[key] = value; cx.notify(); };
+  return panel(t).child(cardHeading(t, member ? `Call ${member.role}` : 'Delegate task', 'delegations'))
+    .child(label(form.project, 12, t.muted))
+    .when(Boolean(member), node => node.child(label([member?.agent, member?.model,
+      member?.permission === 'write' ? 'Write access' : 'Read only'].filter(Boolean).join(' · '), 12, t.foreground)))
+    .when(!member, node => node
+      .child(choices(t, 'Agent', taskAgents.map(agent => [agent, agent]), form.agent, choose('agent'), actions.saving))
+      .child(choices(t, 'Project access', [['read', 'Read only'], ['write', 'Write']], form.permission, choose('permission'), actions.saving)))
+    .child(field(t, 'Task', form.task))
+    .child(field(t, 'Deadline (seconds)', form.timeout))
+    .child(h_flex().gap(7)
+      .child(button(t, 'start-task', member ? 'Call member' : 'Start delegation', (_e, cx) => actions.submit(cx), 'primary', actions.saving))
+      .child(button(t, 'cancel-task', 'Cancel', (_e, cx) => actions.cancel(cx), 'normal', actions.saving)));
+}
+
 export function teamView(t, roster, actions) {
   const colors = { off: t.muted, running: t.accent, attention: t.blocked };
   const cards = roster.members.map(member => panel(t)
@@ -49,10 +67,10 @@ export function teamView(t, roster, actions) {
       .child(h_flex().gap(8).items_center().flex_wrap()
         .child(label(member.reportsTo ? `Reports to ${member.reportsTo}` : 'No manager', 12, t.muted))
         .child(div().flex_1())
+        .child(button(t, `call-${member.id}`, 'Call member', (_e, cx) => actions.call(cx, member)))
         .when(Boolean(member.sessionId), node => node.child(button(t, `turn-${member.id}`, 'Latest turn',
           (_e, cx) => actions.open(cx, member.sessionId))))));
   return v_flex().gap(8)
     .when(!cards.length, body => body.child(panel(t).child(cardHeading(t, 'No team members', 'team'))))
-    .children(cards)
-    .child(label('Start a turn with council team call or the council_team_call tool.', 12, t.muted));
+    .children(cards);
 }

@@ -4,7 +4,7 @@ import {
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { isDirectory } from './mods/council/runtime/store-files.mjs';
@@ -23,13 +23,21 @@ const legacy = {
   'poll-view.js': 'd43e5ceb1269ced3636102c710eacced220b7c2f1d45aa83287ad8ab1c5925bd'
 };
 const files = [
-  'mod.json', 'components.js', 'delegation-view.js', 'discussion-view.js', 'navigation.js', 'poll-text.js', 'poll-view.js', 'team-view.js', 'workspace-view.js', 'main.js',
+  'mod.json', 'components.js', 'delegation-view.js', 'discussion-view.js', 'navigation.js', 'poll-text.js', 'poll-view.js', 'task-launch.js', 'team-view.js', 'workspace-view.js', 'main.js',
   'runtime/activity.mjs', 'runtime/activity-command.mjs', 'runtime/activity-git.mjs', 'runtime/activity-log.mjs', 'runtime/activity-plan.mjs',
   'runtime/alignment.mjs', 'runtime/council.mjs', 'runtime/debate-command.mjs', 'runtime/debate-room.mjs', 'runtime/delegations.mjs', 'runtime/desktop.mjs',
   'runtime/discussion.mjs', 'runtime/invitations.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs', 'runtime/wait-alignment.mjs',
-  'runtime/worker-observation.mjs',
+  'runtime/worker-observation.mjs', 'runtime/agent-discussion.mjs',
   'runtime/polls.mjs', 'runtime/store-files.mjs', 'runtime/team.mjs',
   ...readdirSync(join(source, 'icons')).filter(name => name.endsWith('.svg')).map(name => `icons/${name}`)
+];
+// Keep the worker, CLI and the paths they put in agent briefs together after installation.
+const engineFiles = [
+  'package.json', 'bin/council.js',
+  ...readdirSync(join(repo, 'lib')).filter(name => name.endsWith('.js')).map(name => `lib/${name}`),
+  ...readdirSync(join(repo, 'skills'), { withFileTypes: true }).filter(entry => entry.isDirectory())
+    .map(entry => `skills/${entry.name}/SKILL.md`),
+  ...files.filter(file => file.startsWith('runtime/')).map(file => `herdr/mods/council/${file}`)
 ];
 
 function json(path) {
@@ -40,17 +48,21 @@ function hash(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-function filesInMod(folder) {
-  return readdirSync(folder, { withFileTypes: true }).flatMap(entry => {
-    if (['runtime', 'icons'].includes(entry.name) && entry.isDirectory()) {
-      return readdirSync(join(folder, entry.name)).map(name => `${entry.name}/${name}`);
-    }
-    return generated.has(entry.name) || entry.name === receiptName ? [] : [entry.name];
-  });
-}
-
 function sameFiles(folder, expected) {
-  const present = filesInMod(folder);
+  const directories = new Set();
+  for (const file of Object.keys(expected)) {
+    for (let parent = posix.dirname(file); parent !== '.' && !directories.has(parent); parent = posix.dirname(parent)) {
+      directories.add(parent);
+    }
+  }
+  function filesIn(relative) {
+    return readdirSync(join(folder, relative), { withFileTypes: true }).flatMap(entry => {
+      if (!relative && (generated.has(entry.name) || entry.name === receiptName)) return [];
+      const file = posix.join(relative, entry.name);
+      return entry.isDirectory() && directories.has(file) ? filesIn(file) : [file];
+    });
+  }
+  const present = filesIn('');
   return present.length === Object.keys(expected).length && present.every(file => {
     const path = join(folder, file);
     return Object.hasOwn(expected, file) && lstatSync(path).isFile() && hash(path) === expected[file];
@@ -85,11 +97,17 @@ function install(appHome, upgrade) {
   const staging = mkdtempSync(join(appHome, '.council-stage-'));
   try {
     const prepared = join(staging, 'council');
-    mkdirSync(join(prepared, 'runtime'), { recursive: true });
-    mkdirSync(join(prepared, 'icons'));
-    for (const file of files) copyFileSync(join(source, file), join(prepared, file));
+    const copies = [
+      ...files.map(file => [join(source, file), file]),
+      ...engineFiles.map(file => [join(repo, file), `engine/${file}`])
+    ];
+    for (const [origin, file] of copies) {
+      const path = join(prepared, file);
+      mkdirSync(dirname(path), { recursive: true });
+      copyFileSync(origin, path);
+    }
     writeFileSync(join(prepared, 'config.json'), JSON.stringify({ node: process.execPath }, null, 2));
-    const checksums = Object.fromEntries([...files, 'config.json'].map(file => [file, hash(join(prepared, file))]));
+    const checksums = Object.fromEntries([...copies.map(([, file]) => file), 'config.json'].map(file => [file, hash(join(prepared, file))]));
     writeFileSync(join(prepared, receiptName), JSON.stringify({ owner, files: checksums }, null, 2));
 
     let backup;

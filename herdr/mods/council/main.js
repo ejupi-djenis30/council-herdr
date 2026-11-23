@@ -7,7 +7,8 @@ import { pollParticipants, pollResults } from './poll-view.js';
 import { delegationStatus, delegationView } from './delegation-view.js';
 import { ballotBody, discussionView } from './discussion-view.js';
 import { launcher, menu, sections } from './navigation.js';
-import { teamEditor, teamView } from './team-view.js';
+import { submitTask } from './task-launch.js';
+import { taskEditor, teamEditor, teamView } from './team-view.js';
 import { workspaceView } from './workspace-view.js';
 
 const modes = [
@@ -189,7 +190,8 @@ export default class Council extends View {
         if (!config || (config.node !== undefined && (typeof config.node !== 'string' || !config.node.trim()))) {
           throw new Error('Council config.json needs a Node.js executable path.');
         }
-        this.config = { node: config.node ?? 'node', entry: `${root}/runtime/council.mjs` };
+        this.config = { node: config.node ?? 'node', entry: `${root}/runtime/council.mjs`,
+          cli: config.cli || `${root}/engine/bin/council.js` };
         this.refresh(cx);
         this.resumeInvitations(cx);
         cx.timer.every(5000, cx => this.refresh(cx));
@@ -375,7 +377,8 @@ export default class Council extends View {
     cx.spawn(async () => {
       try {
         const pending = await this.request(space.folder, 'pending-invitations', {
-          space: space.id, projects: localProjects(space, true)
+          space: space.id, projects: localProjects(space, true),
+          spaceFolders: spaces().filter(item => !item.machine).map(item => item.folder)
         });
         for (const { id, project } of pending['pending-invitations']) {
           if (localSpace()?.id !== space.id) break;
@@ -920,6 +923,9 @@ export default class Council extends View {
         copyPath: (cx, path) => this.copy(cx, path, 'Path copied.')
       });
     }
+    if (this.form?.kind === 'task') return taskEditor(t, this.form, {
+      saving: this.saving, submit: cx => this.launchTask(cx), cancel: cx => this.cancelForm(cx)
+    });
     if (this.tab === 'team') {
       if (this.form?.kind === 'team') return teamEditor(t, this.data, this.form, {
         saving: this.saving,
@@ -928,6 +934,7 @@ export default class Council extends View {
       });
       return teamView(t, this.data, {
         edit: (cx, member) => this.editTeamMember(cx, member),
+        call: (cx, member) => this.newTask(cx, member),
         open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.folder })
       });
     }
@@ -962,12 +969,13 @@ export default class Council extends View {
             id: detail.id, text: this.reply.value()
           }), 'primary', this.saving || !this.reply.value().trim())) : null
       });
-      const teamTerminal = detail.team && detail.team.power !== 'off'
-        ? terminals().find(terminal => terminal.address === detail.address && terminal.state === 'live') : null;
+      const ownedTerminal = detail.ownership === 'owned' && detail.team?.power !== 'off' && detail.participantCreatedMs != null
+        ? terminals().find(terminal => terminal.address === detail.address && terminal.state === 'live' &&
+          terminal.created_ms === detail.participantCreatedMs) : null;
       return delegationView(t, detail, {
         wide: this.wide,
-        terminal: teamTerminal ?? this.visibleAgents(space).find(agent => agent.address === detail.address),
-        focus: (cx, address) => teamTerminal ? run('terminal.peek', { terminal: address }) : this.focusAgent(cx, address),
+        terminal: ownedTerminal ?? this.visibleAgents(space).find(agent => agent.address === detail.address),
+        focus: (cx, address) => ownedTerminal ? run('terminal.peek', { terminal: address }) : this.focusAgent(cx, address),
         open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.selected.project }, { returnTo: this.workspaceReturn }),
         openWorkflow: detail.workflowTab ? cx =>
           this.navigate(cx, detail.workflowTab, { id: detail.workflowSessionId, project: this.selected.project },
@@ -992,6 +1000,48 @@ export default class Council extends View {
       reportsTo: member?.reportsTo ?? '', permission: member?.permission ?? 'read'
     });
     cx.notify();
+  }
+
+  newTask(cx, member = null) {
+    this.setForm('task', { task: '', timeout: '180' }, {
+      member, project: this.listProject || this.folder, agent: 'codex', permission: 'read',
+      sessionId: `desktop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+    });
+    cx.notify();
+  }
+
+  launchTask(cx) {
+    const space = localSpace();
+    const form = this.form;
+    if (form?.kind !== 'task' || this.saving || !space?.folder || space.machine ||
+        space.id !== this.spaceId || space.folder !== this.folder) return;
+    const params = { sessionId: form.sessionId, member: form.member?.id, agent: form.agent,
+      permission: form.permission, task: form.task.value(), timeout: form.timeout.value() };
+    const { project } = form;
+    this.saving = true;
+    this.loading = false;
+    this.error = '';
+    const epoch = ++this.epoch;
+    cx.notify();
+    cx.spawn(async cx => {
+      try {
+        const id = await submitTask(params, async args => {
+          let installed;
+          try { installed = await readTextFile(this.config.cli); } catch {}
+          if (!installed) throw new Error('Install the Council Desktop engine with the package installer, or set cli in the mod’s config.json to the absolute path of Council’s bin/council.js.');
+          return exec(this.config.node, [this.config.cli, ...args], { cwd: project, timeout: 30000 });
+        }, assignment => this.request(project, 'task-match', assignment));
+        if (epoch === this.epoch) this.navigate(cx, 'delegations', { id, project }, { returnTo: this.workspaceReturn });
+      } catch (error) {
+        if (epoch === this.epoch) this.error = error.message;
+      } finally {
+        if (epoch === this.epoch) {
+          this.saving = false;
+          this.refresh(cx);
+          cx.notify();
+        }
+      }
+    });
   }
 
   render() {
@@ -1023,6 +1073,8 @@ export default class Council extends View {
           .when(Boolean(space?.folder) && this.tab !== 'activity', node => node.child(label(space.name || space.folder, 12, t.muted).truncate())))
         .when(current && ['polls', 'debates'].includes(this.tab) && !this.selected && !this.form, node =>
           node.child(button(t, 'new', this.tab === 'polls' ? 'New poll' : 'New debate', (_e, cx) => this.startCreate(cx), 'primary', false, 'add').track_focus(this.newFocus)))
+        .when(current && this.tab === 'delegations' && !this.selected && !this.form, node =>
+          node.child(button(t, 'new-task', 'Delegate task', (_e, cx) => this.newTask(cx), 'primary', false, 'add').track_focus(this.newFocus)))
         .when(current && this.tab === 'team' && Boolean(this.data) && !this.form, node =>
           node.child(button(t, 'add-member', 'Add member', (_e, cx) => this.editTeamMember(cx), 'primary', false, 'add')))
         .when(current && Boolean(this.selected || this.listProject), node =>

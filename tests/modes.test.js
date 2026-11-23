@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CouncilOrchestrator, SUPPORTED_MODES } from '../lib/modes.js';
 import { AgentWorkspace } from '../lib/workspace.js';
+
+const cwd = mkdtempSync(join(tmpdir(), 'council-modes-'));
+test.after(() => rmSync(cwd, { recursive: true, force: true }));
 
 class MockHerdrClient {
   constructor(options = {}) {
@@ -103,7 +107,7 @@ test('CouncilOrchestrator rejects missing task', async () => {
 
 test('CouncilOrchestrator runs council mode and cleans up terminals', async () => {
   const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
+  const orchestrator = new CouncilOrchestrator({ cwd, herdr: mockHerdr });
 
   const res = await orchestrator.runMode({
     mode: 'council',
@@ -121,7 +125,7 @@ test('CouncilOrchestrator runs council mode and cleans up terminals', async () =
 
 test('CouncilOrchestrator runs review mode', async () => {
   const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
+  const orchestrator = new CouncilOrchestrator({ cwd, herdr: mockHerdr });
 
   const res = await orchestrator.runMode({
     mode: 'review',
@@ -138,7 +142,7 @@ test('CouncilOrchestrator runs review mode', async () => {
 
 test('CouncilOrchestrator runs delegate mode', async () => {
   const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
+  const orchestrator = new CouncilOrchestrator({ cwd, herdr: mockHerdr });
 
   const res = await orchestrator.runDelegate({
     agent: 'codex',
@@ -155,24 +159,11 @@ test('CouncilOrchestrator runs delegate mode', async () => {
 
 test('CouncilOrchestrator detects and respects directly cast ballots without marker fallback', async () => {
   const mockHerdr = new MockHerdrClient();
-  const orchestrator = new CouncilOrchestrator({ herdr: mockHerdr });
+  const orchestrator = new CouncilOrchestrator({ cwd, herdr: mockHerdr });
   const testSid = `test-direct-ballot-${Date.now().toString(36)}`;
   const sDir = orchestrator.workspace.resolveSessionDir(testSid);
 
-  // Directly cast a ballot prior to the voting stage for council-skeptic
-  const expectedSha = orchestrator.workspace.sha256('Mock proposal content for author');
-
-  orchestrator.workspace.castBallot(sDir, {
-    round: 1,
-    voter: 'council-skeptic',
-    role: 'skeptic',
-    agent: 'codex',
-    vote: 'reject',
-    score: 2,
-    rationale: 'Direct ballot: fatal race condition in storage engine',
-    targetArtifactSha256: expectedSha
-  });
-
+  let expectedSha;
   const progressEvents = [];
   const res = await orchestrator.runMode({
     mode: 'council',
@@ -180,7 +171,15 @@ test('CouncilOrchestrator detects and respects directly cast ballots without mar
     task: 'Evaluate storage engine design',
     agents: ['claude', 'codex', 'antigravity'],
     keepTerminals: false,
-    onProgress: (ev) => progressEvents.push(ev)
+    onProgress(ev) {
+      progressEvents.push(ev);
+      if (ev.stage === 'author_completed') expectedSha = ev.sha256;
+      if (ev.stage === 'waiting_reviewer' && ev.name === 'council-skeptic') {
+        orchestrator.workspace.castBallot(sDir, { round: 1, voter: ev.name, role: 'skeptic', agent: 'codex',
+          vote: 'reject', score: 2, rationale: 'Direct ballot: fatal race condition in storage engine',
+          targetArtifactSha256: expectedSha });
+      }
+    }
   });
 
   assert.equal(res.success, true);
@@ -198,9 +197,4 @@ test('CouncilOrchestrator detects and respects directly cast ballots without mar
     res.tally.dissent.some(d => d.rationale.includes('fatal race condition')),
     'Direct ballot rationale should be included in tally dissent'
   );
-
-  // Clean up
-  try {
-    rmSync(sDir, { recursive: true, force: true });
-  } catch {}
 });

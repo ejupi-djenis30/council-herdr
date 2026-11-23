@@ -26,7 +26,7 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 
 - **Choose a layout.** The installer adds the menu to the active personal layout and archives the old file. For a layout shipped with Herdr, select the new `council-<name>` layout in Herdr using the name printed by the installer. Use `--menu --layout <name>` to target a different layout.
 - **Update** a managed installation with `node herdr/install.js --upgrade --menu`. The old build is archived under the Herdr app home's `council-backups/`. An installation with local edits requires a manual backup before replacing it.
-- **Install from the gallery bundle** by copying `herdr/mods/council/` into the app home's `mods/` directory. The installed mod works independently of the checkout and uses `node` from Herdr's environment. See the [recipe](herdr/RECIPE.md) for manual menu setup and configuration.
+- **Install from the gallery bundle** by copying `herdr/mods/council/` into the app home's `mods/` directory. For native task launches, use the installer above to include the Council engine, or configure the manual copy with the absolute path to Council's CLI. [Gallery setup](herdr/RECIPE.md)
 - **Use a custom app home** by passing `--app-home <path>` or setting `HERDR_APP_HOME`. To remove Council, remove the menu block and shortcut from your Herdr configuration before moving the mod out of `mods/`. Polls, delegations, and reviews live in their project folders.
 
 ## Run a poll
@@ -38,9 +38,9 @@ Open a local space and select **Council** under the Herdr logo. The menu opens *
 
 **Polls** includes polls opened in Desktop or by agents through the CLI and MCP. **This space** includes the space folder and its terminal folders. Use **All local spaces** to see records from other open local spaces. Polls display their project and, when available, the terminal that opened them.
 
-In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. An agent can also open a thread using `council_debate_create` or `council debate create --question "<topic>"`. Use the same project and debate ID to read and reply through `council_debate_read` and `council_debate_reply` or the bundled CLI. **Debate** shows those threads and the arguments and recommendations saved by automated debates.
+In **Debate**, select **New debate**, enter a topic, pick the agents to invite, and select **Start debate**. Agents can open the same thread with `council_debate_create` or `council debate create --question "<topic>"`. Pass selected terminal addresses as `recipients` in MCP or repeat `--invite <address>` on the CLI to start the invitation worker. Recipients must be live agents in one local Herdr space. Omit recipients to open a thread without messaging anyone. Use `debate list` or `council_debate_read` without an ID to find a thread in its project.
 
-From a debate, **Create poll** pre-fills the question and context. Edit them, select recipients, and open the poll in the debate's project. Both views link to each other. Use **Close with decision** to record the decision, its owner, and the next step. The closed thread stays readable with those fields and its linked polls. The CLI and MCP can read the recorded decision.
+From a debate, **Create poll** pre-fills the question and context. Edit them, select recipients, and open the poll in the debate's project. Agents can link the poll using `sourceDebateId` in MCP or `poll create --debate <id>` on the CLI. Use **Close with decision**, `council_debate_close`, or `debate close <id> --decision "..." --owner "..." --next-step "..."` to record the handoff. The closed thread shows the decision, who recorded it, its owner, its next step, and its linked polls.
 
 The invitation queue is saved before the worker starts. The worker runs in Herdr after the panel closes. If it stops, Council resumes pending deliveries when you reopen its panel in the original space, within the original 15-minute window. The panel checks for interrupted workers while open and displays each queue’s deadline. Use **Check setup** to ask the original terminal to register Council. After the window ends, **Retry** opens a fresh window for a confirmed unsent invitation. An invitation marked **Delivery uncertain** needs a check in the agent's terminal. Earlier queues without a saved space remain visible for manual inspection.
 
@@ -52,7 +52,7 @@ Agents register readiness through `council_alignment` using the current Council 
 
 ### Open or respond to a poll from an agent
 
-Use `council_poll_create`, `council_poll_read`, and `council_poll_vote` through MCP. Pass the same absolute `project` path for all three. To use the bundled poll CLI, run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands.
+Use `council_poll_create`, `council_poll_read`, and `council_poll_vote` through MCP. Use `council_poll_manage` to add an option, track or untrack a participant, or close the poll. Pass the same absolute `project` path throughout. Poll creation accepts the same invitation addresses as debate creation. To use the bundled poll CLI, run the installed `runtime/council.mjs` by absolute path from the target project directory. The repository CLI accepts the same commands.
 
 ```powershell
 node C:/path/to/council-herdr/bin/council.js poll list
@@ -87,7 +87,7 @@ Use `convene --mode debate|parallel|pipeline` or the corresponding `mode` in `co
 
 Use `start --mode <mode>` or `council_start` for any of the six workflows. Use the same project and job ID with `status` and `result`. For a formal workflow, the result links to a separate workflow session holding its proposal and ballots.
 
-- **Schedules.** Use `council schedule create --id weekly-review --at 2030-01-07T09:00:00Z --every 604800 --mode review --task "Review recent changes"`. Omit `--every` for a one-time run, or set `--count` to limit a recurrence. Use `schedule list`, `schedule status <id>`, and `schedule cancel <id>` to manage future runs. MCP uses `council_schedule_create` and `council_schedules`. A scheduler that wakes late starts one occurrence and skips intervening slots.
+- **Schedules.** Use `council schedule create --id weekly-review --at 2030-01-07T09:00:00Z --every 604800 --mode review --task "Review recent changes"`. Omit `--every` for a one-time run, or set `--count` to limit a recurrence. Use `schedule status <id>` to inspect the worker and its next action. If Council verifies that the worker stopped, `schedule resume <id>` continues from the saved slot. Use `schedule cancel <id>` to cancel future runs. MCP uses `council_schedule_create` and `council_schedules`. A scheduler that wakes late starts one occurrence and skips intervening slots.
 - **Late ballots.** After the participant turns finish, CLI and MCP ballot submissions refresh the saved tally against the original digest. Use `council retally --session <id>` or `council_retally` to refresh manually. Prior reports remain in the session’s validation history.
 - **New rounds.** Use `council round --session <id>` or `council_round` to start a linked background review with the previous proposal and digest in its brief. Each round collects its own direct ballots.
 
@@ -152,7 +152,7 @@ Use `council activity` or `council_activity` to read the same workspace overview
 
 Open **Council → Team** in a local project space and add named members. Give each one a role and choose its agent, project access and optional responsibilities. Codex and Claude also accept a specific model ID. Choose **Reports to** if a member has a manager. Council checks that the reporting lines are acyclic and includes them in each role's task brief. Role titles and reporting lines leave formal review and voting rules unchanged.
 
-Use the Council CLI inside the project's Herdr space or the matching MCP server to start a turn. The same model can fill several roles. For example, using the installed CLI:
+In the installed Desktop mod, select **Team → Call member** to start a turn with the member's configured agent, model and access. For a one-off assignment, select **Delegations → Delegate task**, pick the agent, and enter the brief. The form opens the saved job so you can follow delivery and collect the result. You can also start Team turns through CLI or MCP.
 
 ```bash
 council team set lead --agent codex --role "Delivery lead"
@@ -168,6 +168,8 @@ Calls for a role already in use wait for its previous process to exit within the
 ## Results and approvals
 
 Sessions live under `.agent_workspace/<session-id>/` in the target project. Inputs, briefs, proposals, reviews, direct ballots and validation records are separate artifacts. Reviewers receive the author's proposal before starting.
+
+Each blocking workflow starts in a fresh session. Reuse a background job ID and its original options to reconnect. When a participant needs permission, answer the prompt in its Herdr terminal. Council follows the same process through its return to working and the next completed turn, within the original deadline. If the host skips the working transition or resumes before Council can observe it, its terminal stays available for inspection.
 
 - Only valid **direct ballots**, bound to the session, expected voter, round and exact proposal digest, contribute to authorizing quorum. The participant's turn must complete successfully.
 - Screen output and vote markers are informational. A quoted vote cannot authorize approval on somebody else's behalf. Insufficient direct ballots leave the result provisional and unauthorized.

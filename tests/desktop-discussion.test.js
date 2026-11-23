@@ -10,7 +10,8 @@ import { AgentWorkspace } from '../lib/workspace.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
 import { JobManager } from '../lib/jobs.js';
 import { desktopRequest } from '../herdr/mods/council/runtime/desktop.mjs';
-import { checkInvitationAlignment, inviteReadyAgent, readInvitations, sendInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
+import { checkInvitationAlignment, inviteReadyAgent, publishWithInvitations, readInvitations, sendInvitations } from '../herdr/mods/council/runtime/invitations.mjs';
+import { createDebate } from '../herdr/mods/council/runtime/debate-room.mjs';
 import { alignmentKey, alignmentLabel } from '../herdr/mods/council/runtime/alignment.mjs';
 import { discussionType, projectLabels } from '../herdr/mods/council/poll-text.js';
 
@@ -38,6 +39,72 @@ function invoke(cwd, name, args) {
   assert.notEqual(result.isError, true, result.content[0].text);
   return JSON.parse(result.content[0].text);
 }
+
+test('failed direct CLI and MCP delegations are visible as incomplete in Desktop', t => {
+  const cwd = project(t);
+  // The empty PATH makes Herdr unconditionally unavailable without touching any real agent.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+  env.PATH = cwd;
+  const options = { cwd, env, encoding: 'utf8', timeout: 10000 };
+  const direct = spawnSync(process.execPath, [cli, 'delegate', '--session', 'from-cli', '--task', 'Inspect'], options);
+  assert.equal(direct.status, 1);
+  assert.match(direct.stderr, /Delegation failed \(from-cli\)/);
+  const request = { id: 1, method: 'tools/call', params: { name: 'council_delegate',
+    arguments: { project: cwd, sessionId: 'from-mcp', agent: 'codex', task: 'Inspect' } } };
+  const mcp = spawnSync(process.execPath, [cli, 'mcp'], { ...options, input: JSON.stringify(request) + '\n' });
+  assert.equal(JSON.parse(mcp.stdout).result.isError, true);
+  for (const id of ['from-cli', 'from-mcp']) {
+    const job = desktopRequest(cwd, 'delegations', { id }).delegation;
+    assert.equal(job.status, 'incomplete');
+    assert.ok(job.error);
+  }
+});
+
+test('an agent can find, link, manage and close a discussion across CLI, MCP and Desktop', t => {
+  const cwd = project(t);
+  const outside = project(t);
+  const { sessionId: debateId } = command(cwd, ['debate', 'create', '--question', 'Which rollout?']);
+  assert.equal(invoke(outside, 'council_debate_read', { project: cwd }).debates[0].id, debateId);
+  assert.equal(command(cwd, ['debate', 'list']).debates[0].id, debateId);
+  const { id: pollId } = invoke(outside, 'council_poll_create', { project: cwd, sourceDebateId: debateId,
+    question: 'When?', options: ['Monday', 'Tuesday'] });
+  const manage = (action, fields) => invoke(outside, 'council_poll_manage', { action, project: cwd, pollId, ...fields });
+  assert.equal(manage('add-option', { label: 'Friday' }).options.at(-1).label, 'Friday');
+  assert.equal(manage('track', { voter: 't20' }).participants[0].voter, 't20');
+  assert.deepEqual(manage('untrack', { voter: 't20' }).participants, []);
+  assert.equal(manage('close', { outcome: 'Friday' }).outcome, 'Friday');
+  assert.equal(command(cwd, ['debate', 'show', debateId]).polls[0].id, pollId);
+  const decision = { decision: 'Ship Friday', owner: 'QA', nextStep: 'Verify the build' };
+  const closed = invoke(outside, 'council_debate_close', { project: cwd, debateId, ...decision, author: 'operator' });
+  assert.equal(closed.closedBy, 't17');
+  assert.deepEqual(command(cwd, ['debate', 'close', debateId, '--decision', decision.decision, '--owner', 'QA', '--next-step', decision.nextStep]), closed);
+  assert.deepEqual(desktopRequest(cwd, 'debates', { id: debateId }).debate.decision, closed);
+});
+
+test('agent invitations bind explicit recipients before publication and preserve queues on a lost worker acknowledgement', async t => {
+  const space = project(t);
+  const cwd = join(space, 'packages', 'parser');
+  mkdirSync(cwd, { recursive: true });
+  const calls = [];
+  const transport = async args => {
+    calls.push(args);
+    const address = args.at(-1);
+    return args[0] === 'get' ? { ok: true, details: { address, state: 'live', reported: true, status: { app: 'junie' },
+      labels: { 'herdr.space': address === 't3' ? 'other' : 'space' }, created_ms: 17 } } : { ok: false };
+  };
+  const publish = ({ beforePublish }) => createDebate(cwd, { question: 'Check the migration' }, { beforePublish });
+  await assert.rejects(publishWithInvitations(cwd, ['t2', 't3'], publish, transport), /one Herdr space/);
+  assert.equal(desktopRequest(cwd, 'debates', {}).debates.length, 0);
+  const room = await publishWithInvitations(cwd, ['t2', 't2'], publish, transport);
+  assert.equal(room.workerAddress, null);
+  assert.match(room.nextAction, /saved/);
+  assert.equal(calls.filter(args => args[0] === 'run').length, 1);
+  assert.deepEqual(room.invitationDelivery.targets.map(({ address, createdAt, state }) => [address, createdAt, state]), [['t2', 17, 'queued']]);
+  assert.deepEqual(command(cwd, ['debate', 'show', room.sessionId]).invitationDelivery.targets, room.invitationDelivery.targets);
+  assert.deepEqual(desktopRequest(cwd, 'pending-invitations', { space: 'space' }).ids, [room.sessionId]);
+  assert.deepEqual(desktopRequest(space, 'pending-invitations', { space: 'space', projects: [space], spaceFolders: [space] })
+    ['pending-invitations'], [{ id: room.sessionId, project: cwd }]);
+});
 
 test('desktop discovers agent polls across projects and edits only the selected origin', t => {
   const operator = project(t);

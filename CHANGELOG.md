@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.6.0
+
+- Start a delegation or call a named Team member directly in Herdr Desktop and open its saved job.
+- Invite selected agents to debates and polls from CLI or MCP. Find threads by project, link polls, manage participants, and record a closing decision with its author, owner, and next step.
+- Discover existing threads and activity in nested projects. Show direct delegation failures in Desktop.
+- Continue all six workflows across verified human approval prompts. Background status identifies the participant waiting for input.
+- Inspect scheduler worker health and resume a verified stopped scheduler from its saved slot. Recovery reconnects to a job already created for that occurrence.
+- Show ballots against the active proposal in linked voting rounds and use the current verdict for background results and Desktop.
+- Reserve fresh session directories to protect prior votes and reports. Run workflow test fixtures in temporary projects to keep them out of the user's activity feed. Update packaged agent rules to describe all six available modes.
+
 ## 3.5.1
 
 - Let agents open debate threads through CLI or MCP and display the creator and replies in Herdr Desktop.

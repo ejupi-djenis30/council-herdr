@@ -17,10 +17,10 @@ try {
       break;
     }
     case 'poll':
-      result = runPollCommand(args);
+      result = await runPollCommand(args);
       break;
     case 'debate':
-      result = runDebateCommand(args);
+      result = await runDebateCommand(args);
       break;
     case 'activity':
       result = runActivityCommand(args);

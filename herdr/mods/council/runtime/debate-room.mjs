@@ -135,7 +135,8 @@ export function replyToDebate(cwd, id, { author, body }, { fromPanel = false } =
   });
 }
 
-export function closeDebate(cwd, id, { decision, owner, nextStep }) {
+export function closeDebate(cwd, id, { decision, owner, nextStep }, { author, fromPanel = false } = {}) {
+  const closedBy = speaker(fromPanel ? 'operator' : author, fromPanel);
   const outcome = {
     decision: requiredText(decision, 'Decision', 2000),
     owner: requiredText(owner, 'Owner', 120),
@@ -147,7 +148,7 @@ export function closeDebate(cwd, id, { decision, owner, nextStep }) {
       throw new Error('This debate already has a recorded decision.');
     }
     return { type: 'close', decision: {
-      ...outcome, closedAt: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString(), closedBy: 'operator'
+      ...outcome, closedAt: new Date(Math.max(Date.now(), Date.parse(room.createdAt))).toISOString(), closedBy
     } };
   });
 }

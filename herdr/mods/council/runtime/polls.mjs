@@ -179,7 +179,7 @@ export class PollStore {
       ...(createdBy ? { createdBy: voterId(createdBy, fromPanel) } : {})
     };
     for (const label of options) poll.options.push(makeOption(label, poll.options));
-    if (fromPanel && Array.isArray(participants)) {
+    if ((fromPanel || beforePublish) && Array.isArray(participants)) {
       if (beforePublish && participants.length > MAX_PARTICIPANTS) {
         throw new Error(`Select up to ${MAX_PARTICIPANTS} agents per poll.`);
       }

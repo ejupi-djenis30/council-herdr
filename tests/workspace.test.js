@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, unlinkSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { AgentWorkspace, sanitizeName, atomicWrite } from '../lib/workspace.js';
+import { JobManager } from '../lib/jobs.js';
 
 test('sanitizeName protects against Windows reserved device names, case, and dots', () => {
   assert.equal(sanitizeName('CON'), 'node-con');
@@ -29,6 +30,26 @@ test('atomicWrite creates directories and writes atomically', () => {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('formal and background sessions cannot overwrite an existing run or its ballots', async t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'council-reserve-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const workspace = new AgentWorkspace(cwd);
+  const manager = new JobManager({ workspace, cwd, workerLauncher: () => ({ success: true, address: 't80' }) });
+  const formal = { sessionId: 'formal', mode: 'review', task: 'First proposal' };
+  const { sessionDir } = workspace.initSession(formal);
+  const decision = join(sessionDir, 'reports', 'report.md');
+  writeFileSync(decision, 'Original approval');
+  assert.throws(() => workspace.initSession({ ...formal, task: 'Unrelated proposal' }), /already exists/);
+  assert.equal((await manager.startJob({ sessionId: formal.sessionId, task: 'New job' })).success, false);
+  assert.equal(readFileSync(decision, 'utf8'), 'Original approval');
+  assert.equal(readFileSync(join(sessionDir, 'task', 'task.md'), 'utf8'), formal.task);
+  const job = { sessionId: 'async', task: 'Inspect' };
+  assert.equal((await manager.startJob(job)).success, true);
+  assert.throws(() => workspace.initSession({ ...formal, sessionId: job.sessionId }), /already exists/);
+  assert.equal((await manager.startJob(job)).reconnect, true);
+  assert.throws(() => workspace.initSession({ ...formal, sessionId: '../other' }), /session ID/);
 });
 
 test('AgentWorkspace initializes deterministic session directory structure', () => {

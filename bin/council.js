@@ -27,7 +27,7 @@ COMMANDS:
   doctor                        Check environment health (Herdr, hc, agent CLIs)
   status [--session <id>]        List live terminals or inspect an async job
   start [options]                Start any of the six workflows in the background
-  schedule create|list|status|cancel   Schedule one-time or recurring runs
+  schedule create|list|status|cancel|resume   Manage scheduled runs and recover a stopped worker
   round --session <id>           Start the next voting round for a saved formal session
   retally --session <id>         Refresh the tally of a completed formal round
   result --session <id>          Read the saved result or pending state
@@ -39,7 +39,7 @@ COMMANDS:
   dismiss <targets...>          Kill and remove terminal(s) from Herdr
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
   poll help                     Manage advisory project polls and submit responses
-  debate help                   Open, read, or reply to a Council Desktop debate
+  debate help                   List, open, reply to, or close Council Desktop debates
   team help                     Configure named roles and call on-demand team members
   activity [--session <id>]     Inspect workspace activity and the session timeline
   activity report [options]     Record a reported progress note
@@ -158,7 +158,7 @@ async function main() {
   const commands = new Map([['poll', runPollCommand], ['debate', runDebateCommand], ['activity', runActivityCommand]]);
   if (commands.has(command)) {
     const run = commands.get(command);
-    const result = run(rawArgs.slice(1));
+    const result = await run(rawArgs.slice(1));
     console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     return;
   }
@@ -231,8 +231,8 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
     case 'schedule': {
       const manager = new ScheduleManager({ herdr });
       const [action, name] = flags._;
-      if (!['create', 'list', 'status', 'cancel'].includes(action)) {
-        throw new Error('Use schedule create --task <text> [--at <ISO-time>] [--every <seconds>] [--count <runs>], schedule list, schedule status <id>, or schedule cancel <id>.');
+      if (!['create', 'list', 'status', 'cancel', 'resume'].includes(action)) {
+        throw new Error('Use schedule create --task <text> [--at <ISO-time>] [--every <seconds>] [--count <runs>], schedule list, or schedule status|cancel|resume <id>.');
       }
       const id = flags.id ?? name;
       const result = action === 'create' ? manager.create({ id, at: flags.at, everySec: flags.every, count: flags.count,
@@ -348,6 +348,7 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
         keepTerminals,
         onProgress: ev => {
           if (ev.stage === 'workspace_initialized') console.log(`  -> Workspace: ${ev.sessionDir}`);
+          if (ev.stage === 'approval_progress' && ev.status === 'blocked') console.log(`  -> Open ${ev.terminal} in Herdr to address its prompt.`);
           if (ev.stage === 'launch') console.log(`  -> Spawning ${ev.name} (${ev.agent})...`);
           if (ev.stage === 'waiting_initial') console.log(`  -> Waiting for deliberations...`);
           if (ev.stage === 'voting_round') console.log(`  -> Formal voting round ${ev.round} in progress...`);
@@ -372,17 +373,22 @@ council team call <member> --session <id> --task <text> [--timeout <seconds>]`);
       }
 
       console.log(`[Council] Delegating to ${agent}...`);
-      const result = await orchestrator.runDelegate({
-        agent,
+      const result = await orchestrator.runMode({
+        mode: 'delegate',
+        agents: [agent],
+        sessionId: flags.session,
         task,
         context: flags.context || '',
         permission: flags.permission || 'read',
         timeoutSec: flags.timeout ? Number(flags.timeout) : 180,
-        keepTerminals: Boolean(flags.keep)
+        keepTerminals: Boolean(flags.keep),
+        onProgress: ev => {
+          if (ev.stage === 'approval_progress' && ev.status === 'blocked') console.log(`  -> Open ${ev.terminal} in Herdr to address its prompt.`);
+        }
       });
 
       if (!result.success) {
-        console.error(`\nDelegation failed: ${result.error}`);
+        console.error(`\nDelegation failed (${result.sessionId}): ${result.error}`);
         process.exit(1);
       }
 

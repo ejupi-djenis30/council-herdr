@@ -80,7 +80,7 @@ Use the assigned values from the brief. For MCP, pass the absolute session direc
 
 ## Respond to an advisory poll
 
-Open a poll with `council_poll_create` or `poll create` from your Herdr project. Use the same absolute `project` in MCP poll calls. Council Desktop lists the poll in the space containing that project.
+Open a poll with `council_poll_create` or `poll create` from your Herdr project. Use the same absolute `project` in subsequent calls. Supply `sourceDebateId` or `--debate <id>` to link it to a discussion. Use `council_poll_manage` to add options, manage the roster, or record the closing outcome.
 
 Use the poll ID and project folder from the invitation. Read its options and context through `council_poll_read`, or use `poll show <poll-id>` with the Council CLI from that project. Submit one listed option ID or a free response if available. Include the trade-off or reason in `note`. Use your own Herdr terminal address as the voter ID. The CLI can infer it from `HC_TERMINAL_ID`. Submit via `council_poll_vote` or `poll vote <poll-id> --option <option-id> --note "<reason>"`. Use `--answer` for a free response. A later submission under the same voter ID updates the response while the poll is open. Use your normal final answer when your permissions prevent submission.
 
@@ -95,10 +95,12 @@ Use the poll ID and project folder from the invitation. Read its options and con
 
 ## Open or reply to a Desktop debate
 
-Open a thread with `council_debate_create` or `debate create --question "<topic>" --context "<opening message>"`. Pass the intended absolute project to MCP or run the CLI in that project. Use the returned session ID and project when directing authorized participants to the discussion.
+Open a thread with `council_debate_create` or `debate create --question "<topic>" --context "<opening message>"`. Pass the intended absolute project to MCP or run the CLI in that project. When asked to invite specific participants to a debate or poll, pass their live terminal addresses as `recipients` or repeat `--invite <address>`. Use the saved ID to check invitation delivery. If the worker acknowledgement is missing, inspect the original queue in Desktop. Omit recipients when opening a discussion without invitations.
+
+Find threads using `debate list` or `council_debate_read` without a debate ID. Record the agreed decision, owner and next step through `council_debate_close` or `debate close <id> --decision "..." --owner "..." --next-step "..."`. Use your own terminal identity.
 
 Use the project path and debate ID from the invitation. Pass the project path to `council_debate_read` and `council_debate_reply`. The bundled CLI equivalents are `debate show <id>` and `debate reply <id> --text "<reply>"`. Run them from the debate project and use your own terminal address. If project permissions prevent submission, reply in your current terminal.
 
 ## Background workflows and voting rounds
 
-Pass the desired mode to `council_start` to run any workflow in the background. Follow it with `council_session_status` and `council_result` in the same project. Use `council_schedule_create` for a one-time or recurring workflow and `council_schedules` to inspect or cancel future runs. Use `council_retally` to refresh a completed formal round and `council_round` to start a linked round with new direct ballots. See the README for CLI equivalents.
+Pass the desired mode to `council_start` to run any workflow in the background. Follow it with `council_session_status` and `council_result` in the same project. Use `council_schedule_create` for a one-time or recurring workflow. Inspect a schedule with `council_schedules` and `action: status`. Use `resume` when the worker is verified stopped, or `cancel` to stop future runs. Use `council_retally` to refresh a completed formal round and `council_round` to start a linked round with new direct ballots.
