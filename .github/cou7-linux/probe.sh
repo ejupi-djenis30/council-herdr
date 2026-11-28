@@ -8,7 +8,7 @@ export HOME="$root/home" XDG_CONFIG_HOME="$root/home/config" XDG_STATE_HOME="$ro
 export XDG_DATA_HOME="$root/home/data" XDG_CACHE_HOME="$root/home/cache" XDG_RUNTIME_DIR="$root/runtime"
 export HERDR_APP_HOME="$root/home/config/herdr-app" HC_SESSION="cou7-linux-${GITHUB_RUN_ID}"
 export COU7_EVIDENCE="$evidence" COU7_PROJECT="$root/project" COU7_EVENTS="$root/events.jsonl"
-export COU7_RAW_SHOTS="$root/raw-shots"
+export COU7_RAW_SHOTS="$root/raw-shots" COU7_SCRATCH="$root"
 export COU7_NODE="$(command -v node)" COU7_FIXTURE="$GITHUB_WORKSPACE/harness/.github/cou7-linux/participant.mjs"
 export COU7_READY_FIFO="$root/participant-ready.fifo" COU7_RELEASE_FIFO="$root/participant-release.fifo"
 mkfifo "$COU7_READY_FIFO" "$COU7_RELEASE_FIFO"
@@ -17,6 +17,7 @@ unset HC_SOCKET HC_TERMINAL_ID NODE_OPTIONS
 facts="$evidence/facts.txt"
 say() { printf '%s\n' "$*" | tee -a "$facts"; }
 fail() { say "BLOCKED: $*"; exit 1; }
+trap 'if ! grep -q "\"overall_gate\":" "$facts" 2>/dev/null; then printf "%s\n" "{\"overall_gate\":\"blocked_by_setup_or_harness\"}" >>"$facts"; fi' EXIT
 say "harness_sha=$GITHUB_SHA"
 say "council_sha=$(git -C "$GITHUB_WORKSPACE/council" rev-parse HEAD)"
 say "council_tree=$(git -C "$GITHUB_WORKSPACE/council" rev-parse 'HEAD^{tree}')"
@@ -104,7 +105,14 @@ chmod +x "$root/bin/junie"
 collect_delivery() {
   local item="$1" label="$2" participant worker pid alive
   if ! timeout 60 head -n 1 "$COU7_READY_FIFO" >"$root/participant-address.txt"; then
-    say "${label}_participant_ready=not_observed"; return 1
+    say "${label}_participant_ready=not_observed"
+    hc ls --all --json >"$root/$label-unconfirmed-terminals.json" 2>/dev/null || true
+    worker=$(node -e 'try{const x=require(process.argv[1]);const a=x.terminals.filter(t=>t.name?.startsWith("c-job-")&&t.state==="live");if(a.length===1)console.log(a[0].address)}catch{}' "$root/$label-unconfirmed-terminals.json")
+    if [[ -n "$worker" ]]; then
+      say "${label}_unconfirmed_worker=$worker"
+      hc wait --json "$worker" --timeout 140 >"$evidence/$label-unconfirmed-worker-wait.json" 2>/dev/null || true
+    fi
+    return 1
   fi
   participant=$(cat "$root/participant-address.txt")
   [[ "$participant" =~ ^t[0-9a-z]+$ ]] || { say "${label}_participant_address=invalid"; return 1; }
@@ -138,24 +146,18 @@ const slim=t=>t&&({address:t.address??t.terminal,state:t.state,turn:t.turn,statu
 console.log(JSON.stringify({label,interface:'Core_and_installed_CLI',participantBefore:slim(before),participantWait:slim(p),participantAfter:slim(after),workerBefore:slim(wb),workerWait:slim(w),participantPidAlive:alive,
   item:{id:i.id,title:i.title,criteria:i.criteria,roleId:i.roleId,revision:i.lifecycle?.revision,workRevision:i.lifecycle?.workRevision,state:i.state,job:i.job,nextAction:i.nextAction,
   expectedHeading:o.includes('Heading: # Linux Native Checkpoint'),expectedNext:o.includes('Next action: compare the heading with the saved criteria.')},
-  jobReadback:status&&{sessionId:status.sessionId,state:status.state,deliveryState:status.deliveryState,participantAddress:status.participant?.address,power:status.participant?.power},
+  jobReadback:status&&{sessionId:status.sessionId,state:status.state,deliveryState:status.deliveryState,participantAddress:status.participant?.address,power:status.participant?.power,workerAddress:status.worker?.address},
   jobResult:result&&{sessionId:result.sessionId,state:result.state,turn:result.turn,ready:result.ready,captureScope:result.captureScope},
   fixtureEvents:e.map(x=>x.event),assignments:e.filter(x=>x.event==='assignment').length}));
 NODE
 }
 observe_overlay() {
   local label="$1" expected="$2"
-  "$COU7_APP" status >"$root/overlay-$label.json" 2>"$root/overlay-$label-error.txt" || return 1
-  "$COU7_APP" shot "$COU7_RAW_SHOTS/overlay-$label.png" >/dev/null 2>&1 || return 1
-  convert "$COU7_RAW_SHOTS/overlay-$label.png" -gravity center -crop 1000x800+0+0 +repage -strip "$evidence/ui-overlay-$label.png" || return 1
-  node - "$root/overlay-$label.json" "$label" "$expected" >>"$facts" <<'NODE'
-const fs=require('fs');const s=JSON.parse(fs.readFileSync(process.argv[2]));const names=(s.overlays||[]).filter(x=>typeof x==='string');
-const present=names.includes('council');console.log(JSON.stringify({interface:'Desktop_status_and_screenshot',stage:process.argv[3],councilOverlay:present}));
-if(present !== (process.argv[4] === 'present'))process.exitCode=1;
-NODE
+  python3 "$GITHUB_WORKSPACE/harness/.github/cou7-linux/ui.py" overlay "$label" "$expected" >>"$facts" 2>>"$facts"
 }
 say 'interface=Desktop; launch isolated app and open native Workspace'
 "$COU7_APP" >"$root/desktop.log" 2>&1 & app_pid=$!
+export COU7_APP_PID="$app_pid"
 ui=blocked
 if timeout 35 xdotool search --sync --onlyvisible --pid "$app_pid" >"$root/window-id.txt" 2>/dev/null; then
   say 'desktop_window=visible'
@@ -163,6 +165,8 @@ if timeout 35 xdotool search --sync --onlyvisible --pid "$app_pid" >"$root/windo
   "$COU7_APP" status >"$root/desktop-status.txt" 2>&1 && say 'desktop_status=pass' || say 'desktop_status=fail'
   if "$COU7_APP" do space.new --name 'COU7 test' --folder "$COU7_PROJECT" --argv '["/bin/sh","-c","printf COU7_SPACE"]' >"$root/space.json" 2>"$root/space-error.txt"; then
     say 'interface=Desktop_command space_new=pass'
+    project_terminal=$(node -e 'try{const x=require(process.argv[1]);if(typeof x.terminal==="string")console.log(x.terminal)}catch{}' "$root/space.json")
+    say "project_terminal=${project_terminal:-not_observed}"
     if "$COU7_APP" do mod.open --name council >"$root/open.json" 2>"$root/open-error.txt"; then
       say 'interface=Desktop_command mod_open=pass'
       if python3 "$GITHUB_WORKSPACE/harness/.github/cou7-linux/ui.py" >"$root/ui-out.txt" 2>"$root/ui-error.txt"; then ui=created_and_delegated; else ui=failed; fi
@@ -175,8 +179,7 @@ else
 fi
 say "ui_gate=$ui"
 if [[ "$ui" == created_and_delegated ]]; then
-  (cd "$COU7_PROJECT" && node "$COU7_CLI" work-item list >"$root/ui-list.json" 2>"$root/ui-list-error.txt") || true
-  item=$(node -e 'try {const x=require(process.argv[1]);const a=x.items.filter(i=>i.title==="Linux native checkpoint");if(a.length===1)console.log(a[0].id)}catch{}' "$root/ui-list.json")
+  item=$(node -e 'try{const x=require(process.argv[1]);if(x.id)console.log(x.id)}catch{}' "$root/ui-created.json")
   say "ui_item=${item:-not_observed}"
   [[ -n "$item" ]] && collect_delivery "$item" ui || say 'ui_delivery_evidence=incomplete'
   if observe_overlay before-close present && "$COU7_APP" do mod.open --name council >/dev/null 2>&1 && observe_overlay closed absent && "$COU7_APP" do mod.open --name council >/dev/null 2>&1 && observe_overlay reopened present; then
@@ -186,7 +189,17 @@ if [[ "$ui" == created_and_delegated ]]; then
     else say 'ui_reopen_handoff_and_delegation=failed'; fi
     cat "$root/ui-reopen-out.txt" >>"$facts"; cat "$root/ui-reopen-error.txt" >>"$facts"
   else say 'ui_reopen=Desktop command failed'; fi
-elif [[ ! -e "$COU7_EVENTS" ]] && ! grep -qE 'UI_FIRST_FAILURE=(save|delegate|actor|confirm|delegated)' "$root/ui-error.txt" 2>/dev/null; then
+elif [[ -e "$root/ui-delegate-attempted" ]]; then
+  say 'ui_delegation_outcome=uncertain_no_resend'
+  item=$(node -e 'try{const x=require(process.argv[1]);if(x.id)console.log(x.id)}catch{}' "$root/ui-created.json")
+  [[ -n "$item" ]] && collect_delivery "$item" ui_uncertain || say 'ui_uncertain_delivery_evidence=incomplete'
+elif [[ -e "$root/ui-save-attempted" ]]; then
+  say 'ui_save_outcome=uncertain_no_resend'
+  (cd "$COU7_PROJECT" && node "$COU7_CLI" work-item list >"$root/ui-uncertain-list.json" 2>/dev/null) || true
+  node - "$root/ui-uncertain-list.json" >>"$facts" <<'NODE'
+try{const x=require(process.argv[2]);console.log(JSON.stringify({interface:'installed_CLI_readonly_after_uncertain_UI',items:x.items?.map(i=>({id:i.id,title:i.title,roleId:i.roleId,state:i.state}))}));}catch{console.log('uncertain_save_readback=unavailable')}
+NODE
+elif [[ ! -e "$COU7_EVENTS" ]]; then
   say 'interface=installed_CLI; fallback uses a separate synthetic work item, not the UI gate'
   printf '%s\n' '{"id":"wi-linux-cli-fallback","title":"Linux native checkpoint","roleId":"verifier","criteria":["Name the first heading.","Give a concrete next action."]}' >"$root/input.json"
   (cd "$COU7_PROJECT" && node "$COU7_CLI" work-item create --input-file "$root/input.json" >"$root/create.json" 2>"$root/create-error.txt") && say 'cli_create=pass' || say 'cli_create=fail'
@@ -199,20 +212,26 @@ say 'interface=checkout; normal npm test outside Herdr terminal'
 say "npm_test_exit=$test_exit"; tail -9 "$root/npm-test.txt" >>"$facts"
 say 'cleanup: only finished owned terminals may be removed; live terminals are left to disposable runner teardown'
 hc ls --all --json >"$root/last-terminals.json" 2>/dev/null || true
-node - "$root/last-terminals.json" >>"$facts" <<'NODE'
-try { const x=require(process.argv[2]); console.log(JSON.stringify({remainingTerminals:x.terminals?.map(t=>({address:t.address,state:t.state,name:t.name,exit_code:t.exit_code}))})); } catch {}
+node - "$root/last-terminals.json" "$root/space.json" "$COU7_EVENTS" >>"$facts" <<'NODE'
+try {
+  const fs=require('fs'),x=require(process.argv[2]);let project,participant;
+  try{project=require(process.argv[3]).terminal}catch{}
+  try{participant=JSON.parse(fs.readFileSync(process.argv[4],'utf8').split('\n')[0]).address}catch{}
+  console.log(JSON.stringify({remainingTerminals:x.terminals?.map(t=>({address:t.address,state:t.state,
+    kind:t.address===project?'project':t.address===participant?'fixture':'other',exit_code:t.exit_code}))}));
+} catch {}
 NODE
 node - "$facts" >>"$facts" <<'NODE'
-const fs=require('fs');const lines=fs.readFileSync(process.argv[2],'utf8').split('\n');let ui;
-for(const line of lines){try{const v=JSON.parse(line);if(v.label==='ui')ui=v}catch{}}
+const fs=require('fs');const lines=fs.readFileSync(process.argv[2],'utf8').split('\n');let ui,created;
+for(const line of lines){try{const v=JSON.parse(line);if(v.label==='ui')ui=v}catch{};if(line.startsWith('UI_ITEM_READBACK=')){try{created=JSON.parse(line.slice('UI_ITEM_READBACK='.length))}catch{}}}
 const i=ui?.item||{}, worker=ui?.workerWait||{}, participant=ui?.participantWait||{};
 const checks={prerequisites:['display_check=pass','dbus_check=pass','software_vulkan=pass','package_smoke=pass','mod_receipt=present','installed_doctor=pass','installed_mod_check=pass','core_status=pass','core_terminal_transport=pass','desktop_window=visible','npm_test_exit=0'].every(v=>lines.includes(v)),
   createdAndDelegated:lines.includes('ui_gate=created_and_delegated'),overlayCloseAndReopen:lines.includes('ui_overlay_close_and_reopen=observed'),
   reopenedHandoffAndDelegation:lines.includes('ui_reopen_handoff_and_delegation=observed'),
-  definition:i.roleId==='verifier'&&JSON.stringify(i.criteria)===JSON.stringify(['Name the first heading.','Give a concrete next action.'])&&Number.isInteger(i.revision),
-  job:i.state==='result_ready'&&i.job?.linked===true&&i.job?.deliveryState==='acknowledged'&&i.job?.outcome==='completed'&&i.job?.address===ui?.participantBefore?.address&&i.job?.sessionId===ui?.jobReadback?.sessionId&&ui?.jobResult?.sessionId===i.job?.sessionId&&ui?.jobResult?.ready===true,
+  definition:i.id===created?.id&&i.title==='Linux native checkpoint'&&i.roleId==='verifier'&&JSON.stringify(i.criteria)===JSON.stringify(['Name the first heading.','Give a concrete next action.'])&&Number.isInteger(created?.revision)&&Number.isInteger(i.revision)&&i.revision>=created.revision,
+  job:i.state==='result_ready'&&i.job?.linked===true&&i.job?.deliveryState==='acknowledged'&&i.job?.outcome==='completed'&&i.job?.address===ui?.participantBefore?.address&&i.job?.sessionId===ui?.jobReadback?.sessionId&&ui?.jobResult?.sessionId===i.job?.sessionId&&ui?.jobResult?.ready===true&&ui?.jobReadback?.workerAddress===ui?.workerBefore?.address&&ui?.jobReadback?.participantAddress===i.job?.address,
   result:i.expectedHeading===true&&i.expectedNext===true&&i.nextAction==='Review the handoff against the acceptance criteria.',
-  once:ui?.assignments===1&&ui?.fixtureEvents?.includes('result'),
-  core:worker.ended===true&&worker.reason==='exit'&&worker.exit_code===0&&participant.ended===true&&ui?.participantBefore?.status?.state==='working'&&Number.isInteger(ui?.participantBefore?.turn)&&participant.turn>ui.participantBefore.turn&&ui?.participantPidAlive==='no'};
+  once:ui?.assignments===1&&ui?.fixtureEvents?.includes('result')&&!ui?.fixtureEvents?.includes('error'),
+  core:worker.ended===true&&worker.reason==='exit'&&worker.exit_code===0&&participant.ended===true&&ui?.participantBefore?.status?.state==='working'&&Number.isInteger(ui?.participantBefore?.turn)&&participant.turn>ui.participantBefore.turn&&ui?.jobResult?.turn===participant.turn&&ui?.participantPidAlive==='no'&&ui?.jobReadback?.power==='off'};
 console.log(JSON.stringify({overall_gate:Object.values(checks).every(Boolean)?'pass':'incomplete_or_blocked',checks}));
 NODE
