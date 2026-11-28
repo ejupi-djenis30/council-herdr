@@ -7,5 +7,6 @@
 - [x] Current-user OS custody, metadata boundaries, positive detector controls and unavailable prerequisites are specified.
 - [x] Feasibility observations are separated from the actual managed ARM64 validation.
 - [x] Data compatibility, role ownership, implementation phases and quickstart are present.
+- [x] The contracts and native tests cover identification-only pipe opens and effective level, plus an immutable A entry/version and negative substitution checks at both fences.
 - [ ] Independent review accepts the exact specification commit before implementation.
 - [ ] Independent evidence review evaluates the complete pilot before any real-value proposal.

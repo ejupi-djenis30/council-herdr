@@ -11,14 +11,14 @@ Tasks remain pending until the preceding acceptance gate is recorded. The 14 acc
 
 ## Phase 2 · Durable foundation
 
-- [ ] T005 Build versioned, bounded, mutually authenticated local IPC and fixed command/response schemas. Add scope, duplicate-key, caller, pipe collision, remote and redirect negative controls (C01/C04/C07/C09).
-- [ ] T006 Implement broker-owned durable records and encrypted synthetic storage using the scoped service identity. Verify ACLs on DB/WAL/temp, positive DPAPI reopen and locked/denied/unavailable storage (C08/C10).
+- [ ] T005 Build versioned, bounded, mutually authenticated local IPC and fixed command/response schemas. Add explicit identification-only opens, server-side effective-level checks on each actual channel and scope, caller, unsafe-QoS, pipe collision, remote and redirect controls (C01/C04/C07/C09).
+- [ ] T006 Implement broker-owned durable records and encrypted synthetic storage using the scoped service identity. Verify ACLs on DB/WAL/temp, positive DPAPI reopen, authenticated immutable A entry versions and locked/denied/unavailable storage (A01/C08/C10).
 - [ ] T007 Implement immutable requests, attributed decisions, monotonic and UTC expiry, restart invalidation and unique claims. Cover refusal/cancellation, expiry and revoked-before-start variants (C02–C05).
 - [ ] T008 Add durable Start and receipt fences shared by A and B. Wire deterministic race/crash barriers for both sides of Start and receipt, metadata-only lookup and reconciliation (C04–C08).
 
 ## Phase 3 · User story A
 
-- [ ] T009 [US1] Add enrolled participant request and native U offer with approved synthetic entry and exact binding (A01/A02).
+- [ ] T009 [US1] Add enrolled participant request and native U offer with exact synthetic entry/version binding, checks at Claim and Start, no substitution on replacement, and the two-entry regression (A01/A02).
 - [ ] T010 [US1] Implement the approved one-shot fixed dispatch, ordinary typed participant receipt and positive independently retained fake proof for reconciliation (A01/A02/C05/C06/C08/C09).
 
 ## Phase 4 · User story B

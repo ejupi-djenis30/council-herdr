@@ -13,7 +13,7 @@ Deliver one opt-in synthetic vertical slice for a managed run on a local Windows
 | Area | Choice |
 | --- | --- |
 | Runtime | Existing JS/Node package for Workspace, launch and read-only projection. Native Win32 ARM64 broker, supervisor/fixture launcher, UI and fixed fake. C++20 and a pinned Microsoft ARM64 toolchain/SQLite build are the candidate implementation baseline. |
-| IPC | Versioned length-bounded Windows local named pipes with explicit ACLs, mutual peer checks and per-channel command allowlists. Private adapter/fake and render endpoints. |
+| IPC | Versioned length-bounded Windows local named pipes with explicit ACLs, mutual peer checks, an identification-only client security QoS cap verified by the Windows receiver and per-channel command allowlists. Private adapter/fake and render endpoints. |
 | Storage | Dedicated service identity, protected local NTFS and SQLite WAL/FULL. Current-user DPAPI for retained synthetic data under a loaded broker profile. |
 | Provisioning | Separate explicitly installed isolated Windows test package. Administrator provisions dedicated accounts, signed/hash-pinned binaries, paths and ACL/pins. Local operator console and supervised one-role run. No hosted routing or package-triggered service install. |
 | Testing | Existing Node regressions, native unit/fault tests, installed ARM64 OS checks and transport with a deterministic native fixture under actual Herdr. Record all separately. |
