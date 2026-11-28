@@ -30,6 +30,7 @@ const files = [
   'runtime/discussion.mjs', 'runtime/invitations.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs', 'runtime/wait-alignment.mjs',
   'runtime/worker-observation.mjs', 'runtime/agent-discussion.mjs', 'runtime/schedule-record.mjs', 'runtime/schedule-time.mjs',
   'runtime/polls.mjs', 'runtime/store-files.mjs', 'runtime/team.mjs', 'runtime/work-item-store.mjs', 'runtime/work-item-lifecycle-store.mjs', 'runtime/plane-fixture.mjs',
+  'runtime/plane-journal-fixture.mjs', 'runtime/plane-publication-fixture.mjs', 'runtime/plane-transport-fixture.mjs',
   'icons/LICENSE.ejupilabs-icons.txt',
   ...readdirSync(join(source, 'icons')).filter(name => name.endsWith('.svg')).map(name => `icons/${name}`)
 ];
