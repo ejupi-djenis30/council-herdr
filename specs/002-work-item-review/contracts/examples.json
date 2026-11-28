@@ -1,0 +1,808 @@
+{
+  "legacy": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "draft",
+      "nextAction": "Delegate this work item to its recorded role.",
+      "canDelegate": true,
+      "job": null,
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": null,
+      "lifecycle": {
+        "revision": 1,
+        "workRevision": 1,
+        "cycle": 1,
+        "managed": false,
+        "state": "open",
+        "priority": "none",
+        "blockedBy": [],
+        "nextAction": null,
+        "guidance": "Delegate this work item to its recorded role.",
+        "needsAttention": false,
+        "reviewState": null,
+        "actions": {
+          "triage": true,
+          "editDefinition": true,
+          "delegate": true,
+          "startReview": false,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": null,
+        "decision": null
+      }
+    }
+  },
+  "triageInput": {
+    "id": "wi-release-check",
+    "ifRevision": 1,
+    "requestId": "triage-1",
+    "actor": "Lead",
+    "patch": {
+      "priority": "high",
+      "nextAction": "Ask the verifier to check the release notes."
+    }
+  },
+  "triaged": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "draft",
+      "nextAction": "Delegate this work item to its recorded role.",
+      "canDelegate": false,
+      "job": null,
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": null,
+      "lifecycle": {
+        "revision": 2,
+        "workRevision": 1,
+        "cycle": 1,
+        "managed": true,
+        "state": "open",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": "Ask the verifier to check the release notes.",
+        "guidance": "Delegate this work item to its recorded role.",
+        "needsAttention": false,
+        "reviewState": null,
+        "actions": {
+          "triage": true,
+          "editDefinition": true,
+          "delegate": true,
+          "startReview": false,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": null,
+        "decision": null
+      }
+    },
+    "receipt": {
+      "requestId": "triage-1",
+      "event": "triaged",
+      "revision": 2,
+      "replay": false
+    }
+  },
+  "list": {
+    "success": true,
+    "project": "/example/Council project",
+    "items": [
+      {
+        "id": "wi-release-check",
+        "title": "Verify the release notes",
+        "roleId": "verifier",
+        "createdAt": "2026-11-28T09:00:00.000Z",
+        "state": "draft",
+        "nextAction": "Delegate this work item to its recorded role.",
+        "canDelegate": false,
+        "job": null,
+        "attention": null,
+        "lifecycle": {
+          "revision": 2,
+          "workRevision": 1,
+          "cycle": 1,
+          "managed": true,
+          "state": "open",
+          "priority": "high",
+          "blockedBy": [],
+          "nextAction": "Ask the verifier to check the release notes.",
+          "guidance": "Delegate this work item to its recorded role.",
+          "needsAttention": false,
+          "reviewState": null
+        }
+      },
+      {
+        "id": "wi-formal-review",
+        "title": "Verify the release notes",
+        "roleId": "verifier",
+        "createdAt": "2026-11-28T09:00:00.000Z",
+        "state": "result_ready",
+        "nextAction": "Review the handoff against the acceptance criteria.",
+        "canDelegate": false,
+        "job": {
+          "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+          "linked": true,
+          "outcome": "completed",
+          "deliveryState": "acknowledged",
+          "deadlineAt": "2026-11-28T09:03:00.000Z",
+          "address": "t42"
+        },
+        "attention": null,
+        "lifecycle": {
+          "revision": 5,
+          "workRevision": 1,
+          "cycle": 1,
+          "managed": true,
+          "state": "in_review",
+          "priority": "high",
+          "blockedBy": [],
+          "nextAction": null,
+          "guidance": "Inspect the formal verdict or return the review for changes.",
+          "needsAttention": true,
+          "reviewState": "provisional"
+        }
+      }
+    ],
+    "errors": []
+  },
+  "inReview": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "result_ready",
+      "nextAction": "Review the handoff against the acceptance criteria.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+        "linked": true,
+        "outcome": "completed",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:03:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": {
+        "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+        "source": "terminal_screen",
+        "captureScope": "history",
+        "artifactPath": null,
+        "turn": 2,
+        "completedAt": "2026-11-28T09:01:00.000Z"
+      },
+      "lifecycle": {
+        "revision": 4,
+        "workRevision": 1,
+        "cycle": 1,
+        "managed": true,
+        "state": "in_review",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": null,
+        "guidance": "Review the frozen capture and record a decision.",
+        "needsAttention": false,
+        "reviewState": "operator",
+        "actions": {
+          "triage": false,
+          "editDefinition": false,
+          "delegate": false,
+          "startReview": false,
+          "addNote": true,
+          "attachFormal": false,
+          "close": true,
+          "returnForChanges": true,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": {
+          "id": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "reviewOwnerRoleId": "verifier",
+          "policy": "operator",
+          "definition": {
+            "title": "Verify the release notes",
+            "roleId": "verifier",
+            "criteria": [
+              "Name the first heading.",
+              "Give a concrete next action."
+            ]
+          },
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+          "capture": {
+            "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+            "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+            "sha256": "4727fd45ec6685f396507d9e03927d9779c4b819280f55e971587de3f6e9680d",
+            "byteCount": 73,
+            "source": "terminal_screen",
+            "captureScope": "history",
+            "turn": 2,
+            "completedAt": "2026-11-28T09:01:00.000Z",
+            "verified": true
+          },
+          "notes": [],
+          "formal": null,
+          "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff"
+        },
+        "decision": null
+      }
+    }
+  },
+  "formalProvisional": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-formal-review",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "result_ready",
+      "nextAction": "Review the handoff against the acceptance criteria.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+        "linked": true,
+        "outcome": "completed",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:03:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": {
+        "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+        "source": "terminal_screen",
+        "captureScope": "history",
+        "artifactPath": null,
+        "turn": 2,
+        "completedAt": "2026-11-28T09:01:00.000Z"
+      },
+      "lifecycle": {
+        "revision": 5,
+        "workRevision": 1,
+        "cycle": 1,
+        "managed": true,
+        "state": "in_review",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": null,
+        "guidance": "Inspect the formal verdict or return the review for changes.",
+        "needsAttention": true,
+        "reviewState": "provisional",
+        "actions": {
+          "triage": false,
+          "editDefinition": false,
+          "delegate": false,
+          "startReview": false,
+          "addNote": true,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": true,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": {
+          "id": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "reviewOwnerRoleId": "verifier",
+          "policy": "formal",
+          "definition": {
+            "title": "Verify the release notes",
+            "roleId": "verifier",
+            "criteria": [
+              "Name the first heading.",
+              "Give a concrete next action."
+            ]
+          },
+          "snapshotSha256": "08bc6517cc9344100df701b489d03c4efead17f17da969963b73a286bd2f063b",
+          "capture": {
+            "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+            "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+            "sha256": "4727fd45ec6685f396507d9e03927d9779c4b819280f55e971587de3f6e9680d",
+            "byteCount": 73,
+            "source": "terminal_screen",
+            "captureScope": "history",
+            "turn": 2,
+            "completedAt": "2026-11-28T09:01:00.000Z",
+            "verified": true
+          },
+          "notes": [],
+          "formal": {
+            "sessionId": "review-release-notes",
+            "round": 1,
+            "state": "provisional",
+            "verdict": "provisional",
+            "proposalSha256": "f8c9d901d11027c5a673dd622246e3d3a5e21163626c861863f642d0592eda66",
+            "manifestSha256": "dcecd0020457f0e9d32d36671a4a6428fef04f981e1f20b88da885ed9c625254",
+            "dissent": []
+          },
+          "evidenceToken": "85f3d75cbd4bd299fd5e6b803411b002fde5e9b152133454bcc4bde20d8106bc"
+        },
+        "decision": null
+      }
+    }
+  },
+  "formalRejected": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-formal-review",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "result_ready",
+      "nextAction": "Review the handoff against the acceptance criteria.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+        "linked": true,
+        "outcome": "completed",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:03:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": {
+        "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+        "source": "terminal_screen",
+        "captureScope": "history",
+        "artifactPath": null,
+        "turn": 2,
+        "completedAt": "2026-11-28T09:01:00.000Z"
+      },
+      "lifecycle": {
+        "revision": 5,
+        "workRevision": 1,
+        "cycle": 1,
+        "managed": true,
+        "state": "in_review",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": null,
+        "guidance": "Inspect the formal verdict or return the review for changes.",
+        "needsAttention": true,
+        "reviewState": "rejected",
+        "actions": {
+          "triage": false,
+          "editDefinition": false,
+          "delegate": false,
+          "startReview": false,
+          "addNote": true,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": true,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": {
+          "id": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "reviewOwnerRoleId": "verifier",
+          "policy": "formal",
+          "definition": {
+            "title": "Verify the release notes",
+            "roleId": "verifier",
+            "criteria": [
+              "Name the first heading.",
+              "Give a concrete next action."
+            ]
+          },
+          "snapshotSha256": "08bc6517cc9344100df701b489d03c4efead17f17da969963b73a286bd2f063b",
+          "capture": {
+            "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+            "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+            "sha256": "4727fd45ec6685f396507d9e03927d9779c4b819280f55e971587de3f6e9680d",
+            "byteCount": 73,
+            "source": "terminal_screen",
+            "captureScope": "history",
+            "turn": 2,
+            "completedAt": "2026-11-28T09:01:00.000Z",
+            "verified": true
+          },
+          "notes": [],
+          "formal": {
+            "sessionId": "review-release-notes",
+            "round": 1,
+            "state": "rejected",
+            "verdict": "rejected",
+            "proposalSha256": "f8c9d901d11027c5a673dd622246e3d3a5e21163626c861863f642d0592eda66",
+            "manifestSha256": "a72e3b891633a013836e75a23f98b75d0213ecb0e722ece0da3004bb224c0b5e",
+            "dissent": [
+              {
+                "voter": "review-reviewer",
+                "vote": "reject",
+                "rationale": "The upgrade step remains ambiguous."
+              }
+            ]
+          },
+          "evidenceToken": "fd2c3117aa0bb6a3f25f59ef6c3670ef6083eaa05839f1206b03df64b064f701"
+        },
+        "decision": null
+      }
+    }
+  },
+  "closeInput": {
+    "id": "wi-release-check",
+    "ifRevision": 4,
+    "requestId": "close-1",
+    "actor": "Lead",
+    "reviewId": "review-4",
+    "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff",
+    "decision": "accept",
+    "reason": "The handoff covers both saved criteria.",
+    "nextAction": "Share the release notes."
+  },
+  "closed": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "result_ready",
+      "nextAction": "Review the handoff against the acceptance criteria.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+        "linked": true,
+        "outcome": "completed",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:03:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": {
+        "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+        "source": "terminal_screen",
+        "captureScope": "history",
+        "artifactPath": null,
+        "turn": 2,
+        "completedAt": "2026-11-28T09:01:00.000Z"
+      },
+      "lifecycle": {
+        "revision": 5,
+        "workRevision": 1,
+        "cycle": 1,
+        "managed": true,
+        "state": "closed",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": "Share the release notes.",
+        "guidance": "Reopen if more work is needed.",
+        "needsAttention": false,
+        "reviewState": "operator",
+        "actions": {
+          "triage": false,
+          "editDefinition": false,
+          "delegate": false,
+          "startReview": false,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": true
+        },
+        "integrity": null,
+        "review": {
+          "id": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "reviewOwnerRoleId": "verifier",
+          "policy": "operator",
+          "definition": {
+            "title": "Verify the release notes",
+            "roleId": "verifier",
+            "criteria": [
+              "Name the first heading.",
+              "Give a concrete next action."
+            ]
+          },
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+          "capture": {
+            "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+            "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+            "sha256": "4727fd45ec6685f396507d9e03927d9779c4b819280f55e971587de3f6e9680d",
+            "byteCount": 73,
+            "source": "terminal_screen",
+            "captureScope": "history",
+            "turn": 2,
+            "completedAt": "2026-11-28T09:01:00.000Z",
+            "verified": true
+          },
+          "notes": [],
+          "formal": null,
+          "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff"
+        },
+        "decision": {
+          "id": "decision-5",
+          "reviewId": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "disposition": "accepted",
+          "actor": "Lead",
+          "reason": "The handoff covers both saved criteria.",
+          "nextAction": "Share the release notes.",
+          "at": "2026-11-28T09:02:00.000Z",
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+          "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff",
+          "formal": null
+        }
+      }
+    },
+    "receipt": {
+      "requestId": "close-1",
+      "event": "closed",
+      "revision": 5,
+      "replay": false
+    }
+  },
+  "reopenInput": {
+    "id": "wi-release-check",
+    "ifRevision": 5,
+    "requestId": "reopen-1",
+    "actor": "Lead",
+    "decisionId": "decision-5",
+    "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+    "reason": "The release notes now include a new section.",
+    "roleId": "verifier",
+    "nextAction": "Check the newly added section."
+  },
+  "reopened": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "draft",
+      "nextAction": "Delegate this work item to its recorded role.",
+      "canDelegate": false,
+      "job": null,
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": null,
+      "lifecycle": {
+        "revision": 6,
+        "workRevision": 2,
+        "cycle": 2,
+        "managed": true,
+        "state": "open",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": "Check the newly added section.",
+        "guidance": "Triage or delegate the new cycle.",
+        "needsAttention": false,
+        "reviewState": null,
+        "actions": {
+          "triage": true,
+          "editDefinition": true,
+          "delegate": true,
+          "startReview": false,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": null,
+        "decision": {
+          "id": "decision-5",
+          "reviewId": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "disposition": "accepted",
+          "actor": "Lead",
+          "reason": "The handoff covers both saved criteria.",
+          "nextAction": "Share the release notes.",
+          "at": "2026-11-28T09:02:00.000Z",
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+          "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff",
+          "formal": null
+        }
+      }
+    },
+    "receipt": {
+      "requestId": "reopen-1",
+      "event": "reopened",
+      "revision": 6,
+      "replay": false
+    }
+  },
+  "archivedReview": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "draft",
+      "nextAction": "Delegate this work item to its recorded role.",
+      "canDelegate": false,
+      "job": null,
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": null,
+      "lifecycle": {
+        "revision": 6,
+        "workRevision": 2,
+        "cycle": 2,
+        "managed": true,
+        "state": "open",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": "Check the newly added section.",
+        "guidance": "Triage or delegate the new cycle.",
+        "needsAttention": false,
+        "reviewState": null,
+        "actions": {
+          "triage": true,
+          "editDefinition": true,
+          "delegate": true,
+          "startReview": false,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": null,
+        "decision": {
+          "id": "decision-5",
+          "reviewId": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "disposition": "accepted",
+          "actor": "Lead",
+          "reason": "The handoff covers both saved criteria.",
+          "nextAction": "Share the release notes.",
+          "at": "2026-11-28T09:02:00.000Z",
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+          "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff",
+          "formal": null
+        }
+      }
+    },
+    "archivedReview": {
+      "id": "review-4",
+      "cycle": 1,
+      "workRevision": 1,
+      "reviewOwnerRoleId": "verifier",
+      "policy": "operator",
+      "definition": {
+        "title": "Verify the release notes",
+        "roleId": "verifier",
+        "criteria": [
+          "Name the first heading.",
+          "Give a concrete next action."
+        ]
+      },
+      "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+      "capture": {
+        "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778",
+        "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+        "sha256": "4727fd45ec6685f396507d9e03927d9779c4b819280f55e971587de3f6e9680d",
+        "byteCount": 73,
+        "source": "terminal_screen",
+        "captureScope": "history",
+        "turn": 2,
+        "completedAt": "2026-11-28T09:01:00.000Z",
+        "verified": true
+      },
+      "notes": [],
+      "formal": null,
+      "evidenceToken": "894d36f07a6636a2b1ee439fe166c8bee8070cee522dc48a23006f80cdcd58ff"
+    }
+  },
+  "history": {
+    "success": true,
+    "project": "/example/Council project",
+    "id": "wi-release-check",
+    "events": [
+      {
+        "revision": 6,
+        "type": "reopened",
+        "actor": "Lead",
+        "at": "2026-11-28T09:04:00.000Z",
+        "requestId": "reopen-1",
+        "cycle": 2,
+        "workRevision": 2,
+        "references": {
+          "decisionId": "decision-5",
+          "reviewId": "review-4",
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349"
+        }
+      },
+      {
+        "revision": 5,
+        "type": "closed",
+        "actor": "Lead",
+        "at": "2026-11-28T09:02:00.000Z",
+        "requestId": "close-1",
+        "cycle": 1,
+        "workRevision": 1,
+        "references": {
+          "decisionId": "decision-5",
+          "reviewId": "review-4",
+          "snapshotSha256": "e8b5e3f67fb16e7334ce2e062f9a764573d84a2699269b02eec59ea96a060349",
+          "sessionId": "wi-job-165a7127-1ea3-47db-bef4-bd89cb58f778"
+        }
+      }
+    ],
+    "nextBeforeRevision": 5,
+    "integrity": null
+  },
+  "conflict": {
+    "success": false,
+    "project": "/example/Council project",
+    "error": {
+      "code": "conflict",
+      "message": "This item changed. Refresh and review the current revision.",
+      "currentRevision": 6
+    }
+  },
+  "blockedClose": {
+    "success": false,
+    "project": "/example/Council project",
+    "error": {
+      "code": "review_not_authorized",
+      "message": "The current formal verdict is provisional."
+    }
+  }
+}
