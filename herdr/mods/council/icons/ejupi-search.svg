@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="search" data-style="mono" role="img" aria-label="Search">
+  <title>Search</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M32 19A13 13 0 1 1 6 19A13 13 0 1 1 32 19Z M27 19A8 8 0 1 1 11 19A8 8 0 1 1 27 19Z" />
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M31.0711 25.4142L40.9706 35.3137Q43.799 38.1421 40.9706 40.9706Q38.1421 43.799 35.3137 40.9706L25.4142 31.0711Q22.5858 28.2426 25.4142 25.4142Q28.2426 22.5858 31.0711 25.4142Z" />
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M36.7279 31.0711L40.9706 35.3137Q43.799 38.1421 40.9706 40.9706Q38.1421 43.799 35.3137 40.9706L28.2426 33.8995Z" />
+</svg>

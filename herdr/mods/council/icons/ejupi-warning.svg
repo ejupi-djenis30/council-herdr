@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="warning" data-style="mono" role="img" aria-label="Warning">
+  <title>Warning</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M20.5 7C22.1 4.2 25.9 4.2 27.5 7L43.2 35C44.8 38.1 42.8 42 39.4 42H8.6C5.2 42 3.2 38.1 4.8 35ZM23 14.2L11.4 34.7C10.9 35.6 11.5 36.7 12.5 36.7H35.5C36.5 36.7 37.1 35.6 36.6 34.7L25 14.2C24.6 13.4 23.4 13.4 23 14.2Z" />
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M24 19C25.1046 19 26 19.8954 26 21V24.5C26 25.6046 25.1046 26.5 24 26.5C22.8954 26.5 22 25.6046 22 24.5V21C22 19.8954 22.8954 19 24 19Z" />
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M26 32C26 33.1046 25.1046 34 24 34C22.8954 34 22 33.1046 22 32C22 30.8954 22.8954 30 24 30C25.1046 30 26 30.8954 26 32Z" />
+</svg>

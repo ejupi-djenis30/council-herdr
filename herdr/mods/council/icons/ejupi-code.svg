@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="code" data-style="mono" role="img" aria-label="Code">
+  <title>Code</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M17.296 8.965A3 3 0 0 1 21.704 13.035L12.49 23.015Q11.58 24 12.49 24.985L21.704 34.965A3 3 0 0 1 17.296 39.035L5.296 26.035A3 3 0 0 1 5.296 21.965Z" />
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M30.704 8.965A3 3 0 0 0 26.296 13.035L35.51 23.015Q36.42 24 35.51 24.985L26.296 34.965A3 3 0 0 0 30.704 39.035L42.704 26.035A3 3 0 0 0 42.704 21.965Z" />
+</svg>
