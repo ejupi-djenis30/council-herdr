@@ -8,14 +8,18 @@ Add-Type -AssemblyName System.Windows.Forms
 $refs = @([System.Windows.Automation.AutomationElement].Assembly.Location, [System.Windows.Automation.TreeScope].Assembly.Location, [System.Runtime.InteropServices.DllImportAttribute].Assembly.Location)
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/uia-wait.cs') -ReferencedAssemblies $refs
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/pixel-check.cs')
+. (Join-Path $env:COU7_HARNESS '.github/cou7-windows/tab-template.ps1')
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class Cou7UiInput {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
 }
@@ -29,11 +33,13 @@ $criteria = @('Name the first heading.','Give a concrete next action.')
 function Record([string]$name, $value) { @{ stage=$name; value=$value } | ConvertTo-Json -Compress -Depth 10 }
 function Mark([string]$name) { $script:last=$name; Record 'ui_reached' @{ name=$name; interface='native_UIA_and_input' } }
 function CheckWindow {
+  $script:root=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
   if ($root.Current.ProcessId -ne $pidExpected) { throw 'uia_process_mismatch' }
   [void][Cou7UiInput]::SetForegroundWindow($hwnd)
   if ([Cou7UiInput]::GetForegroundWindow() -ne $hwnd) { throw 'uia_window_not_foreground' }
 }
 function Nodes([string]$name) {
+  $script:root=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
   $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$name)
   return @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition) | ForEach-Object { $_ })
 }
@@ -61,8 +67,18 @@ function FrameBarrier {
 }
 function Await([string]$name) {
   $script:stage = $name
+  CheckWindow
   FrameBarrier
   if (-not [Cou7UiaWait]::WaitName($hwnd.ToInt64(),$name,12000)) { throw 'uia_expected_control_absent' }
+}
+function EmitClick([int]$x,[int]$y) {
+  CheckWindow
+  $point=[Cou7UiInput+POINT]::new();$point.X=$x;$point.Y=$y
+  $hit=[Cou7UiInput]::WindowFromPoint($point);[uint32]$owner=0
+  [void][Cou7UiInput]::GetWindowThreadProcessId($hit,[ref]$owner)
+  if ($hit -eq [IntPtr]::Zero -or $owner -ne $pidExpected) { throw 'native_point_not_owned_by_desktop' }
+  if (-not [Cou7UiInput]::SetCursorPos($x,$y)) { throw 'native_pointer_failed' }
+  [Cou7UiInput]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [Cou7UiInput]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
 }
 function Click($element) {
   CheckWindow
@@ -71,8 +87,7 @@ function Click($element) {
   if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$window)) { throw 'window_geometry_unavailable' }
   $x=[int][Math]::Round($rect.Left+$rect.Width/2); $y=[int][Math]::Round($rect.Top+$rect.Height/2)
   if ($rect.IsEmpty -or $x -le $window.Left -or $x -ge $window.Right -or $y -le $window.Top -or $y -ge $window.Bottom) { throw 'uia_control_outside_owned_window' }
-  if (-not [Cou7UiInput]::SetCursorPos($x,$y)) { throw 'native_pointer_failed' }
-  [Cou7UiInput]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [Cou7UiInput]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+  EmitClick $x $y
 }
 function Edits {
   $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Edit)
@@ -132,18 +147,42 @@ function SelectRole($element) {
     [Windows.Forms.SendKeys]::SendWait(' ')
   }
 }
+function CaptureWindow {
+  CheckWindow
+  $r=[Cou7UiInput+RECT]::new(); if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)) { throw 'window_geometry_unavailable' }
+  $w=$r.Right-$r.Left-32; $h=$r.Bottom-$r.Top-32
+  if ($w -lt 100 -or $h -lt 100 -or $w -gt 4000 -or $h -gt 3000) { throw 'window_geometry_unexpected' }
+  $bitmap=[Drawing.Bitmap]::new($w,$h); $graphics=[Drawing.Graphics]::FromImage($bitmap)
+  try { $graphics.CopyFromScreen($r.Left+16,$r.Top+16,0,0,[Drawing.Size]::new($w,$h)) }
+  finally { $graphics.Dispose() }
+  return $bitmap
+}
 function Shot([string]$name) {
   try {
-    CheckWindow
-    $r=[Cou7UiInput+RECT]::new(); if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)) { return }
-    $w=$r.Right-$r.Left-32; $h=$r.Bottom-$r.Top-32
-    if ($w -lt 100 -or $h -lt 100 -or $w -gt 4000 -or $h -gt 3000) { return }
-    $bitmap=[Drawing.Bitmap]::new($w,$h); $graphics=[Drawing.Graphics]::FromImage($bitmap)
-    $graphics.CopyFromScreen($r.Left+16,$r.Top+16,0,0,[Drawing.Size]::new($w,$h))
-    $bitmap.Save((Join-Path $env:COU7_EVIDENCE "ui-$name.png"),[Drawing.Imaging.ImageFormat]::Png)
-    $graphics.Dispose(); $bitmap.Dispose()
+    $bitmap=CaptureWindow
+    try { $bitmap.Save((Join-Path $env:COU7_EVIDENCE "ui-$name.png"),[Drawing.Imaging.ImageFormat]::Png) }
+    finally { $bitmap.Dispose() }
     Record 'ui_screenshot' @{ stage=$name; interface='native_screen_crop' }
   } catch { Record 'ui_screenshot_unavailable' @{ stage=$name } }
+}
+function ClickWorkItems {
+  $script:stage='Work items'
+  CheckWindow; FrameBarrier
+  $nodes=@(Nodes 'Work items' | Where-Object { -not $_.Current.IsOffscreen })
+  if ($nodes.Count -eq 1) { Click $nodes[0]; return }
+  if ($nodes.Count -gt 1) { throw 'work_items_control_not_unique' }
+  $r=[Cou7UiInput+RECT]::new(); if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)) { throw 'window_geometry_unavailable' }
+  [void][Cou7UiInput]::SetCursorPos($r.Left+24,$r.Top+24)
+  FrameBarrier
+  $frame=CaptureWindow; $template=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/work-items-template.png'))
+  try { $plan=Get-Cou7TabPlan $frame $template $r.Left $r.Top }
+  finally { $frame.Dispose(); $template.Dispose() }
+  Record 'ui_tab_visual_plan' $plan
+  if (-not $plan.matched) { throw 'work_items_visual_guard_failed' }
+  CheckWindow
+  $current=[Cou7UiInput+RECT]::new(); if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$current)) { throw 'window_geometry_unavailable' }
+  if ($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom) { throw 'window_geometry_changed' }
+  EmitClick $plan.point[0] $plan.point[1]
 }
 function Read-Cou7WorkItem([string[]]$arguments) {
   Push-Location $env:COU7_UI_PROJECT
@@ -191,7 +230,7 @@ function Diagnostic {
 try {
   if ($Mode -eq 'capture') { Shot 'desktop-initial'; Mark 'desktop_initial'; exit 0 }
   if ($Mode -eq 'create') {
-    Await 'Work items'; Click (One 'Work items')
+    ClickWorkItems
     Await 'New work item'; Shot 'list'; Mark 'list'
     Click (One 'New work item')
     Await 'Save work item'; Await 'Refresh roles'
@@ -234,7 +273,7 @@ try {
     $saved=Get-Content -Raw (Join-Path $env:COU7_ROOT 'ui-created.json') | ConvertFrom-Json
     $item=(Read-Cou7WorkItem @('show','--id',$saved.id)).item
     if ($item.state -ne 'result_ready' -or -not $item.job.sessionId) { throw 'reopened_item_not_result_ready' }
-    Await 'Work items'; Click (One 'Work items'); Await 'Open work item'
+    ClickWorkItems; Await 'Open work item'
     $list=Read-Cou7WorkItem @('list'); if (@($list.items | Where-Object title -eq $title).Count -ne 1) { throw 'reopened_item_not_unique' }
     Click (One 'Open work item'); Await 'Read saved handoff'; Await 'Open delegation'; Shot 'reopened-item'
     Click (One 'Read saved handoff'); Await 'Back to work item'; Shot 'reopened-handoff'; Mark 'reopened_handoff'

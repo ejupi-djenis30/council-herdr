@@ -8,8 +8,9 @@ public static class Cou7UiaWait {
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     public static bool AcceptAfterWait(uint waitResult, bool present) { return waitResult != 0xffffffff && present; }
-    static bool Has(AutomationElement root, string name, bool enabled) {
+    static bool Has(long hwnd, string name, bool enabled) {
         try {
+            var root = AutomationElement.FromHandle(new IntPtr(hwnd));
             var elements = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, name));
             foreach (AutomationElement element in elements) if (!enabled || element.Current.IsEnabled) return true;
             return false;
@@ -26,16 +27,16 @@ public static class Cou7UiaWait {
         var root = AutomationElement.FromHandle(new IntPtr(hwnd));
         var signal = CreateEvent(IntPtr.Zero, true, false, null);
         if (signal == IntPtr.Zero) throw new InvalidOperationException("uia_event_creation_failed");
-        StructureChangedEventHandler structure = (sender, args) => { if (Has(root,name,enabled)) SetEvent(signal); };
-        AutomationPropertyChangedEventHandler property = (sender, args) => { if (Has(root,name,enabled)) SetEvent(signal); };
+        StructureChangedEventHandler structure = (sender, args) => { if (Has(hwnd,name,enabled)) SetEvent(signal); };
+        AutomationPropertyChangedEventHandler property = (sender, args) => { if (Has(hwnd,name,enabled)) SetEvent(signal); };
         bool s = false, p = false;
         try {
             Automation.AddStructureChangedEventHandler(root, TreeScope.Subtree, structure); s = true;
             Automation.AddAutomationPropertyChangedEventHandler(root, TreeScope.Subtree, property, AutomationElement.NameProperty, AutomationElement.IsEnabledProperty); p = true;
-            if (Has(root,name,enabled)) SetEvent(signal);
+            if (Has(hwnd,name,enabled)) SetEvent(signal);
             uint waited = WaitForSingleObject(signal, timeoutMilliseconds);
             // Some providers expose the new tree without raising UIA events.
-            return AcceptAfterWait(waited, Has(root,name,enabled));
+            return AcceptAfterWait(waited, Has(hwnd,name,enabled));
         } finally {
             if (p) Automation.RemoveAutomationPropertyChangedEventHandler(root, property);
             if (s) Automation.RemoveStructureChangedEventHandler(root, structure);
