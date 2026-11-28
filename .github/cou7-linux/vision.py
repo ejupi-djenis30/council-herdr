@@ -140,9 +140,15 @@ def role_selection_transition(before, after):
     if (before['width'], before['height'], before['left'], before['top']) != (after['width'], after['height'], after['left'], after['top']):
         return {'verified': False, 'reason': 'frame_geometry_changed'}
     first = boxes(before['lines'], 'Linux fixture')
-    second = boxes(after['lines'], 'Linux fixture')
-    if len(first) != 1 or len(second) != 1 or any(abs(a-b) > 3 for a, b in zip(first[0], second[0])):
-        return {'verified': False, 'reason': 'role_anchor_changed'}
+    # The selected button's highlighted text may not be recognized by OCR.
+    # Anchor its pixels to the uniquely identified role in the preceding frame.
+    if len(first) != 1:
+        return {'verified': False, 'reason': 'role_anchor_missing'}
+    first_refresh = boxes(before['lines'], 'Refresh roles')
+    next_refresh = boxes(after['lines'], 'Refresh roles')
+    if (len(first_refresh) != 1 or len(next_refresh) != 1 or
+            any(abs(a-b) > 3 for a, b in zip(first_refresh[0], next_refresh[0]))):
+        return {'verified': False, 'reason': 'form_anchor_changed'}
     x1, y1, x2, y2 = first[0]
     left, right = max(0, x1-12), min(CROP_WIDTH, x2+90)
     top, bottom = max(0, y1-10), min(CROP_HEIGHT, y2+12)

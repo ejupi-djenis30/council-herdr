@@ -146,13 +146,15 @@ def click_queue(snapshot):
     if not vision.emit_queue(frame, send):
         raise RuntimeError('current frame no longer matches the calibrated queue and button geometry')
 
-def click_primary(snapshot, anchor, required):
+def click_primary(snapshot, anchor, required, role_before=None):
     focus_window(snapshot)
     current = capture(time.monotonic() + 15)
     focus_window(current)
     if not all(text_has(current[1], text) for text in required):
         raise RuntimeError('current form no longer matches the expected controls')
     frame = current[2]
+    if role_before is not None and not vision.role_selection_transition(role_before, frame)['verified']:
+        raise RuntimeError('expected role selection is no longer verified')
     point = vision.primary_adjacent(current[1], frame['rgb'], anchor)
     if point is None:
         raise RuntimeError('primary control cannot be uniquely verified next to ' + anchor)
@@ -263,14 +265,14 @@ try:
     before = ready('role-before', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture', 'Refresh roles'])
     click(before, 'Linux fixture')
     run('xdotool', 'mousemove', '--window', window, '--sync', '5', '5')
-    snap = ready('role-chosen', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture', 'Refresh roles'])
+    snap = ready('role-chosen', [title, 'Name the first heading', 'Give a concrete next action', 'Refresh roles'])
     selection = vision.role_selection_transition(before[2], snap[2])
     print('UI_ROLE_SELECTION=' + json.dumps(selection), flush=True)
     if not selection['verified']:
         raise RuntimeError('role selected state and Save enablement were not independently verified')
     mark('role-selection-verified')
     mark_mutation('save')
-    click_primary(snap, 'Refresh roles', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture', 'Refresh roles'])
+    click_primary(snap, 'Refresh roles', [title, 'Name the first heading', 'Give a concrete next action', 'Refresh roles'], before[2])
     snap = ready('created-detail', [title, 'Delegate'], absent=['Saving work item'])
     item = read_created_item()
     mark('created-readback')
