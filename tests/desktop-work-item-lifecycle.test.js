@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -396,7 +396,8 @@ if (action === 'list') {
 `;
 
 test('ten-item Workspace fixture uses real Node processes, pages frozen evidence and reopens without launching another attempt', async t => {
-  const qa = mkdtempSync(join(tmpdir(), 'cou-workspace-lifecycle-'));
+  // The child reports process.cwd(). On macOS the temporary root can be a symlink.
+  const qa = realpathSync(mkdtempSync(join(tmpdir(), 'cou-workspace-lifecycle-')));
   t.after(() => rmSync(qa, { recursive: true, force: true }));
   const cli = join(qa, 'fixture-cli.cjs');
   writeFileSync(cli, engineScript);
@@ -428,6 +429,7 @@ test('ten-item Workspace fixture uses real Node processes, pages frozen evidence
   } });
 
   await work.showList(scope);
+  assert.equal(work.current.error, '');
   assert.equal(work.current.items.length, 10);
   assert.equal(work.current.items[0].id, 'wi-neighbor-0');
   assert.deepEqual(work.current.errors.map(error => error.id), ['wi-unreadable', 'wi-malformed']);
