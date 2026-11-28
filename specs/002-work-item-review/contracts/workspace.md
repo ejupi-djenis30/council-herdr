@@ -16,6 +16,12 @@ Continue using Council → Workspace → Work items on the resolved project mach
 
 Lifecycle text is **Open**, **In review** or **Closed**. In open detail show the existing execution text separately. Formal status is labeled separately, including **Provisional**, **Rejected**, **Approved** and **Unverified**. Operator acceptance is named explicitly. Pair status with text. Preserve the returned recovery guidance. Provide accessible names for fields/actions and visible keyboard focus through the existing controls.
 
+## Review policy compatibility
+
+When starting a review, offer **Operator acceptance** only when the current verified detail explicitly reports `formalRequired: false`. When the field is true, show **Formal Council review** as required and submit formal policy only. When an earlier lifecycle detail omits the field, offer formal policy only, and show that refreshing or updating Council is needed to verify whether operator acceptance is available. Existing pre-lifecycle responses continue to use the read-only update-required view.
+
+Apply this rule from the current detail before opening and submitting Start review. A change in the available policy invalidates an existing incompatible confirmation. A null historical `decision.formal` is expected when a formal review returned before attaching a round. The durable policy still governs the new cycle. The backend revalidates it on the write. See `formalRequiredAfterReturn` and `reviewPolicyCases` in the [wire examples](examples.json).
+
 ## Scope and recovery
 
 - Execute CLI on the selected project engine with argv tokens and frozen cwd. Keep the same project/machine for Team roles, linked blockers, delegation and formal reviews. A pending read from an obsolete scope or selection cannot update the visible state. Restoring a view upholds existing return navigation.
