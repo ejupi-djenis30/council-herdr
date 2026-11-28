@@ -19,11 +19,13 @@ say() { printf '%s\n' "$*" | tee -a "$facts"; }
 fail() { say "BLOCKED: $*"; exit 1; }
 finalize() {
   if ! grep -q '"overall_gate":' "$facts" 2>/dev/null; then printf '%s\n' '{"overall_gate":"blocked_by_setup_or_harness"}' >>"$facts"; fi
-  local verdict milestone
+  local verdict cli_verdict milestone
   verdict=$(node -e 'const f=require("fs").readFileSync(process.argv[1],"utf8").split("\n");for(const l of f){try{const x=JSON.parse(l);if(x.overall_gate){console.log(x.overall_gate);break}}catch{}}' "$facts" 2>/dev/null)
+  cli_verdict=$(node -e 'const f=require("fs").readFileSync(process.argv[1],"utf8").split("\n");for(const l of f){try{const x=JSON.parse(l);if(x.cli_gate){console.log(x.cli_gate.verdict+" ("+x.cli_gate.source+")");break}}catch{}}' "$facts" 2>/dev/null)
   milestone=$(grep '^UI_REACHED=' "$facts" | tail -1 | cut -d= -f2- || true)
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     { printf '## COU-7 Linux native gate\n\n'; printf '**UI gate: %s**\n\n' "${verdict:-unknown}";
+      printf '**CLI transport/readback: %s**\n\n' "${cli_verdict:-not_run}";
       printf 'Last observed UI milestone: %s. The technical job exit and CLI fallback are separate from the UI gate.\n' "${milestone:-none}"; } >>"$GITHUB_STEP_SUMMARY"
   fi
 }
@@ -124,6 +126,10 @@ collect_delivery() {
       say "${label}_unconfirmed_worker=$worker"
       hc wait --json "$worker" --timeout 140 >"$evidence/$label-unconfirmed-worker-wait.json" 2>/dev/null || true
     fi
+    (cd "$COU7_PROJECT" && node "$COU7_CLI" work-item show --id "$item" >"$root/$label-unconfirmed-show.json" 2>/dev/null) || true
+    node - "$root/$label-unconfirmed-show.json" >>"$facts" <<'NODE'
+try{const i=require(process.argv[2]).item;console.log(JSON.stringify({interface:'installed_CLI_readonly_after_uncertain_delivery',id:i.id,state:i.state,revision:i.lifecycle?.revision,job:i.job}));}catch{console.log('uncertain_delivery_readback=unavailable')}
+NODE
     return 1
   fi
   participant=$(cat "$root/participant-address.txt")
@@ -211,6 +217,13 @@ elif [[ -e "$root/ui-save-attempted" ]]; then
   node - "$root/ui-uncertain-list.json" >>"$facts" <<'NODE'
 try{const x=require(process.argv[2]);console.log(JSON.stringify({interface:'installed_CLI_readonly_after_uncertain_UI',items:x.items?.map(i=>({id:i.id,title:i.title,roleId:i.roleId,state:i.state}))}));}catch{console.log('uncertain_save_readback=unavailable')}
 NODE
+  uncertain_item=$(node -e 'try{const a=require(process.argv[1]).items.filter(i=>i.title==="Linux native checkpoint");if(a.length===1)console.log(a[0].id)}catch{}' "$root/ui-uncertain-list.json")
+  if [[ -n "$uncertain_item" ]]; then
+    (cd "$COU7_PROJECT" && node "$COU7_CLI" work-item show --id "$uncertain_item" >"$root/ui-uncertain-show.json" 2>/dev/null) || true
+    node - "$root/ui-uncertain-show.json" >>"$facts" <<'NODE'
+try{const i=require(process.argv[2]).item;console.log(JSON.stringify({interface:'installed_CLI_readonly_after_uncertain_save',id:i.id,title:i.title,roleId:i.roleId,criteria:i.criteria,revision:i.lifecycle?.revision,state:i.state,job:i.job}));}catch{console.log('uncertain_save_detail=unavailable')}
+NODE
+  fi
 elif [[ ! -e "$COU7_EVENTS" ]]; then
   say 'interface=installed_CLI; fallback uses a separate synthetic work item, not the UI gate'
   printf '%s\n' '{"id":"wi-linux-cli-fallback","title":"Linux native checkpoint","roleId":"verifier","criteria":["Name the first heading.","Give a concrete next action."]}' >"$root/input.json"
@@ -234,16 +247,21 @@ try {
 } catch {}
 NODE
 node - "$facts" >>"$facts" <<'NODE'
-const fs=require('fs');const lines=fs.readFileSync(process.argv[2],'utf8').split('\n');let ui,created;
-for(const line of lines){try{const v=JSON.parse(line);if(v.label==='ui')ui=v}catch{};if(line.startsWith('UI_ITEM_READBACK=')){try{created=JSON.parse(line.slice('UI_ITEM_READBACK='.length))}catch{}}}
+const fs=require('fs');const lines=fs.readFileSync(process.argv[2],'utf8').split('\n');let ui,fallback,created,selection;
+for(const line of lines){try{const v=JSON.parse(line);if(v.label==='ui')ui=v;if(v.label==='fallback')fallback=v}catch{};if(line.startsWith('UI_ITEM_READBACK=')){try{created=JSON.parse(line.slice('UI_ITEM_READBACK='.length))}catch{}};if(line.startsWith('UI_ROLE_SELECTION=')){try{selection=JSON.parse(line.slice('UI_ROLE_SELECTION='.length))}catch{}}}
 const i=ui?.item||{}, worker=ui?.workerWait||{}, participant=ui?.participantWait||{};
 const checks={prerequisites:['display_check=pass','dbus_check=pass','software_vulkan=pass','package_smoke=pass','mod_receipt=present','installed_doctor=pass','installed_mod_check=pass','core_status=pass','core_terminal_transport=pass','desktop_window=visible','npm_test_exit=0'].every(v=>lines.includes(v)),
   createdAndDelegated:lines.includes('ui_gate=created_and_delegated'),overlayCloseAndReopen:lines.includes('ui_overlay_close_and_reopen=observed'),
   reopenedHandoffAndDelegation:lines.includes('ui_reopen_handoff_and_delegation=observed'),
+  inputsAndRole:lines.includes('UI_REACHED=criteria-entered')&&lines.includes('UI_REACHED=role-selection-verified')&&selection?.verified===true&&selection?.savePreviouslyEnabled===false&&selection?.saveNowEnabled===true,
+  singleGestures:lines.filter(l=>l==='UI_MUTATION_ATTEMPTED=save').length===1&&lines.filter(l=>l==='UI_MUTATION_ATTEMPTED=delegate').length===1,
   definition:i.id===created?.id&&i.title==='Linux native checkpoint'&&i.roleId==='verifier'&&JSON.stringify(i.criteria)===JSON.stringify(['Name the first heading.','Give a concrete next action.'])&&Number.isInteger(created?.revision)&&Number.isInteger(i.revision)&&i.revision>=created.revision,
   job:i.state==='result_ready'&&i.job?.linked===true&&i.job?.deliveryState==='acknowledged'&&i.job?.outcome==='completed'&&i.job?.address===ui?.participantBefore?.address&&i.job?.sessionId===ui?.jobReadback?.sessionId&&ui?.jobResult?.sessionId===i.job?.sessionId&&ui?.jobResult?.ready===true&&ui?.jobReadback?.workerAddress===ui?.workerBefore?.address&&ui?.jobReadback?.participantAddress===i.job?.address,
   result:i.expectedHeading===true&&i.expectedNext===true&&i.nextAction==='Review the handoff against the acceptance criteria.',
   once:ui?.assignments===1&&ui?.fixtureEvents?.includes('result')&&!ui?.fixtureEvents?.includes('error'),
   core:worker.ended===true&&worker.reason==='exit'&&worker.exit_code===0&&participant.ended===true&&ui?.participantBefore?.status?.state==='working'&&Number.isInteger(ui?.participantBefore?.turn)&&participant.turn>ui.participantBefore.turn&&ui?.jobResult?.turn===participant.turn&&ui?.participantPidAlive==='no'&&ui?.jobReadback?.power==='off'};
-console.log(JSON.stringify({overall_gate:Object.values(checks).every(Boolean)?'pass':'incomplete_or_blocked',checks}));
+const cli=fallback??ui, ci=cli?.item||{},cw=cli?.workerWait||{},cp=cli?.participantWait||{};
+const cliPass=ci.state==='result_ready'&&ci.job?.deliveryState==='acknowledged'&&ci.job?.outcome==='completed'&&ci.expectedHeading===true&&ci.expectedNext===true&&cli?.assignments===1&&!cli?.fixtureEvents?.includes('error')&&cw.ended===true&&cw.reason==='exit'&&cw.exit_code===0&&cp.ended===true&&cli?.participantPidAlive==='no'&&cli?.jobReadback?.power==='off';
+console.log(JSON.stringify({overall_gate:Object.values(checks).every(Boolean)?'pass':'incomplete_or_blocked',checks,
+  cli_gate:{verdict:cli?(cliPass?'pass':'incomplete'):'not_run',source:fallback?'fallback':ui?'ui_readback':'none'}}));
 NODE

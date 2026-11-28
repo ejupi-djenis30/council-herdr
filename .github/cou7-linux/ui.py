@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -32,31 +33,14 @@ def normalize(value):
     return vision.normalize(value)
 
 def capture(deadline):
-    path = os.path.join(raw_shots, 'ui-current.png')
+    raw = os.path.join(raw_shots, 'ui-current-raw.png')
+    crop = os.path.join(raw_shots, 'ui-current-crop.png')
     left = deadline - time.monotonic()
     if left <= 0:
         raise TimeoutError('screenshot deadline')
-    run(app, 'shot', path, timeout=min(10, left))
-    left = deadline - time.monotonic()
-    if left <= 0:
-        raise TimeoutError('OCR deadline')
-    lines = vision.parse_tsv(run('tesseract', path, 'stdout', '--psm', '11', 'tsv', timeout=min(10, left)).stdout)
-    left_time = deadline - time.monotonic()
-    if left_time <= 0:
-        raise TimeoutError('image geometry deadline')
-    width, height = map(int, run('identify', '-format', '%w %h', path, timeout=min(8, left_time)).stdout.split())
-    if width < vision.CROP_WIDTH or height < vision.CROP_HEIGHT:
-        raise RuntimeError('window frame is smaller than the calibrated crop')
-    left_time = deadline - time.monotonic()
-    if left_time <= 0:
-        raise TimeoutError('image sampling deadline')
-    rgb = subprocess.run(['convert', path, '-gravity', 'center', '-crop', '1000x800+0+0', '+repage',
-                          '-colorspace', 'sRGB', '-depth', '8', 'RGB:-'], capture_output=True, check=True,
-                         timeout=min(10, left_time)).stdout
-    if len(rgb) != vision.CROP_WIDTH * vision.CROP_HEIGHT * 3:
-        raise RuntimeError('unexpected calibrated crop size')
-    frame = {'width': width, 'height': height, 'left': (width - 1000) // 2, 'top': (height - 800) // 2, 'rgb': rgb}
-    return path, lines, frame
+    run(app, 'shot', raw, timeout=min(10, left))
+    frame = vision.capture_image(raw, crop, deadline)
+    return crop, frame['lines'], frame
 
 def text_has(lines, phrase):
     phrase = normalize(phrase)
@@ -64,7 +48,7 @@ def text_has(lines, phrase):
 
 def export_image(raw, name):
     path = os.path.join(evidence, 'ui-' + name + '.png')
-    run('convert', raw, '-gravity', 'center', '-crop', '1000x800+0+0', '+repage', '-strip', path)
+    shutil.copyfile(raw, path)
 
 def export_tokens(snapshot, name):
     allowed = set(('council workspace project work items item linux native fixture verifier no new title acceptance criteria '
@@ -75,11 +59,12 @@ def export_tokens(snapshot, name):
     for _text, line in snapshot[1]:
         for word, row in line:
             if word in allowed:
-                x, y = int(row['left']) - frame['left'], int(row['top']) - frame['top']
+                x, y = int(row['left']), int(row['top'])
                 if 0 <= x < 1000 and 0 <= y < 800:
                     tokens.append({'token': word, 'x': x, 'y': y})
-    diagnostic = {'stage': name, 'crop': [1000, 800], 'tokens': tokens,
-                  'queue': vision.queue_diagnostics(snapshot[1], frame['rgb'], frame['left'], frame['top'])}
+    diagnostic = {'stage': name, 'crop': [1000, 800], 'origin': [frame['left'], frame['top']],
+                  'window': [frame['width'], frame['height']], 'queueLocalPoint': list(vision.QUEUE_CLICK),
+                  'tokens': tokens, 'queue': vision.queue_diagnostics(snapshot[1], frame['rgb'])}
     with open(os.path.join(evidence, 'ui-' + name + '-ocr.json'), 'w', encoding='utf-8') as handle:
         json.dump(diagnostic, handle)
 
@@ -95,7 +80,7 @@ def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=Fa
             if (all(text_has(lines, x) for x in required)
                 and (not alternatives or any(text_has(lines, x) for x in alternatives))
                 and not any(text_has(lines, x) for x in absent)
-                and (not queue_guard or vision.queue_diagnostics(lines, last[2]['rgb'], last[2]['left'], last[2]['top'])['ready'])):
+                and (not queue_guard or vision.queue_plan(last[2]) is not None)):
                 export_image(last[0], name)
                 mark(name)
                 return last
@@ -147,17 +132,19 @@ def click_xy(snapshot, x, y):
 def click(snapshot, phrase, offset=0, topmost=False):
     focus_window(snapshot)
     x, y = locate(snapshot, phrase, topmost)
-    click_xy(snapshot, x, y + offset)
+    click_xy(snapshot, *vision.window_point(snapshot[2], (x, y + offset)))
 
 def click_queue(snapshot):
     focus_window(snapshot)
     current = capture(time.monotonic() + 15)
     focus_window(current)
     frame = current[2]
-    if not vision.queue_diagnostics(current[1], frame['rgb'], frame['left'], frame['top'])['ready']:
+    def send(point):
+        print('UI_QUEUE_POINT=' + json.dumps({'origin': [frame['left'], frame['top']], 'local': list(vision.QUEUE_CLICK),
+                                             'window': list(point)}), flush=True)
+        click_xy(current, *point)
+    if not vision.emit_queue(frame, send):
         raise RuntimeError('current frame no longer matches the calibrated queue and button geometry')
-    x, y = vision.QUEUE_CLICK
-    click_xy(current, frame['left'] + x, frame['top'] + y)
 
 def click_primary(snapshot, anchor, required):
     focus_window(snapshot)
@@ -166,10 +153,10 @@ def click_primary(snapshot, anchor, required):
     if not all(text_has(current[1], text) for text in required):
         raise RuntimeError('current form no longer matches the expected controls')
     frame = current[2]
-    point = vision.primary_adjacent(current[1], frame['rgb'], anchor, left=frame['left'], top=frame['top'])
+    point = vision.primary_adjacent(current[1], frame['rgb'], anchor)
     if point is None:
         raise RuntimeError('primary control cannot be uniquely verified next to ' + anchor)
-    click_xy(current, frame['left'] + point[0], frame['top'] + point[1])
+    click_xy(current, *vision.window_point(frame, point))
 
 def type_text(text):
     run('xdotool', 'type', '--clearmodifiers', '--', text)
@@ -261,7 +248,7 @@ try:
 
     snap = initial_workspace()
     click(snap, 'Work items')
-    snap = ready('queue-ready', ['Workspace', 'project', 'Work items', 'Linux fixture verifier', 'No work items'], queue_guard=True)
+    snap = ready('queue-ready', ['Workspace', 'project', 'Work items', 'No work items'], queue_guard=True)
     click_queue(snap)
     snap = ready('form-and-roles-ready', ['Title', 'Acceptance criteria', 'Linux fixture', 'Refresh roles'],
                  absent=['Loading roles'])
@@ -271,10 +258,19 @@ try:
     click(snap, 'Acceptance criteria', 58)
     type_text(criteria[0]); run('xdotool', 'key', 'Return'); type_text(criteria[1])
     snap = ready('criteria-entered', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture'])
-    click(snap, 'Linux fixture')
-    snap = ready('role-chosen', [title, 'Acceptance criteria', 'Linux fixture', 'Refresh roles'])
+    focus_window(snap)
+    run('xdotool', 'mousemove', '--window', window, '--sync', '5', '5')
+    before = ready('role-before', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture', 'Refresh roles'])
+    click(before, 'Linux fixture')
+    run('xdotool', 'mousemove', '--window', window, '--sync', '5', '5')
+    snap = ready('role-chosen', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture', 'Refresh roles'])
+    selection = vision.role_selection_transition(before[2], snap[2])
+    print('UI_ROLE_SELECTION=' + json.dumps(selection), flush=True)
+    if not selection['verified']:
+        raise RuntimeError('role selected state and Save enablement were not independently verified')
+    mark('role-selection-verified')
     mark_mutation('save')
-    click_primary(snap, 'Refresh roles', [title, 'Acceptance criteria', 'Linux fixture', 'Refresh roles'])
+    click_primary(snap, 'Refresh roles', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture', 'Refresh roles'])
     snap = ready('created-detail', [title, 'Delegate'], absent=['Saving work item'])
     item = read_created_item()
     mark('created-readback')

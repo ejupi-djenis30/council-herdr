@@ -1,24 +1,280 @@
 {
-  "sourceRun": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46172914257",
-  "sourceArtifact": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46172914257/artifacts/15274013363",
-  "offlineEngine": "Tesseract 5.5.3.20260724 Windows portable; PSM 11; tessdata_fast eng 4.1.0",
-  "trainedDataSha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
-  "positive": {
-    "frame": "ui-failed-queue-ready.png",
-    "sha256": "1c041f3f90a37eb39e8703ba990de16ce3d15d992e7299ebeb77bfec3f39613c",
-    "size": [1000, 800],
-    "anchors": ["Workspace", "project", "Work items", "Linux fixture verifier", "No work items"],
-    "samples": {"815,311": [27, 27, 30], "929,311": [27, 27, 30], "873,319": [27, 27, 30]},
-    "queueReady": true,
-    "primaryRightOfRefresh": [872, 310]
-  },
-  "negative": {
-    "frame": "ui-workspace-ready.png",
-    "sha256": "c9604066ceffe65073a8e264c9b7529f395480296e3998675d00ee36d7fbfc95",
-    "size": [1000, 800],
-    "samples": {"815,311": [255, 255, 255], "929,311": [255, 255, 255], "873,319": [255, 255, 255]},
-    "queueReady": false,
-    "primaryRightOfRefresh": null
-  },
-  "limitation": "Portable Windows OCR differs from the hosted Ubuntu Tesseract build; live OCR and geometry are revalidated before the click."
+  "sourceRun": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46174484283",
+  "sourceArtifact": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46174484283/artifacts/15274779547",
+  "ocr": "tesseract v5.5.3.20260724 PSM 11",
+  "cases": [
+    {
+      "case": "positive-zero",
+      "sourceSha256": "1c041f3f90a37eb39e8703ba990de16ce3d15d992e7299ebeb77bfec3f39613c",
+      "cropSha256": "1c041f3f90a37eb39e8703ba990de16ce3d15d992e7299ebeb77bfec3f39613c",
+      "sourceSize": [
+        1000,
+        800
+      ],
+      "cropOrigin": [
+        0,
+        0
+      ],
+      "localPoint": [
+        873,
+        319
+      ],
+      "windowPoint": [
+        873,
+        319
+      ],
+      "mockInputCount": 1,
+      "queue": {
+        "ready": true,
+        "anchors": {
+          "workspace": true,
+          "project": true,
+          "heading": true,
+          "empty": true
+        },
+        "samples": {
+          "815,311": [
+            27,
+            27,
+            30
+          ],
+          "929,311": [
+            27,
+            27,
+            30
+          ],
+          "873,319": [
+            27,
+            27,
+            30
+          ]
+        }
+      }
+    },
+    {
+      "case": "positive-even-offset",
+      "sourceSha256": "a8b6484fe4504f16c494e3e20e292eb7aecdf5591c193051f88c31474b6fab3e",
+      "cropSha256": "c5372d2f0d2fc805cb28759998d8ef335c78219966697829481cf46d99f16297",
+      "sourceSize": [
+        1440,
+        1000
+      ],
+      "cropOrigin": [
+        220,
+        100
+      ],
+      "localPoint": [
+        873,
+        319
+      ],
+      "windowPoint": [
+        1093,
+        419
+      ],
+      "mockInputCount": 1,
+      "queue": {
+        "ready": true,
+        "anchors": {
+          "workspace": true,
+          "project": true,
+          "heading": true,
+          "empty": true
+        },
+        "samples": {
+          "815,311": [
+            27,
+            27,
+            30
+          ],
+          "929,311": [
+            27,
+            27,
+            30
+          ],
+          "873,319": [
+            27,
+            27,
+            30
+          ]
+        }
+      }
+    },
+    {
+      "case": "positive-odd-offset",
+      "sourceSha256": "8f60e108219a9a8158f3bbfce7bdd708f129ac39776a178d0710920b368e5890",
+      "cropSha256": "c5372d2f0d2fc805cb28759998d8ef335c78219966697829481cf46d99f16297",
+      "sourceSize": [
+        1441,
+        1001
+      ],
+      "cropOrigin": [
+        220,
+        100
+      ],
+      "localPoint": [
+        873,
+        319
+      ],
+      "windowPoint": [
+        1093,
+        419
+      ],
+      "mockInputCount": 1,
+      "queue": {
+        "ready": true,
+        "anchors": {
+          "workspace": true,
+          "project": true,
+          "heading": true,
+          "empty": true
+        },
+        "samples": {
+          "815,311": [
+            27,
+            27,
+            30
+          ],
+          "929,311": [
+            27,
+            27,
+            30
+          ],
+          "873,319": [
+            27,
+            27,
+            30
+          ]
+        }
+      }
+    },
+    {
+      "case": "negative-zero",
+      "sourceSha256": "c9604066ceffe65073a8e264c9b7529f395480296e3998675d00ee36d7fbfc95",
+      "cropSha256": "c9604066ceffe65073a8e264c9b7529f395480296e3998675d00ee36d7fbfc95",
+      "sourceSize": [
+        1000,
+        800
+      ],
+      "cropOrigin": [
+        0,
+        0
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0,
+      "queue": {
+        "ready": false,
+        "anchors": {
+          "workspace": true,
+          "project": true,
+          "heading": false,
+          "empty": false
+        },
+        "samples": {
+          "815,311": [
+            255,
+            255,
+            255
+          ],
+          "929,311": [
+            255,
+            255,
+            255
+          ],
+          "873,319": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    },
+    {
+      "case": "negative-even-offset",
+      "sourceSha256": "c647229cb394dda0e5ddfa656f45b2f702de57f4ae203ac8fa8821fa2dc67ca1",
+      "cropSha256": "721f5e34e8923a26384baae5664ad4f4a7aaeb026176bc302938a08705d912b7",
+      "sourceSize": [
+        1440,
+        1000
+      ],
+      "cropOrigin": [
+        220,
+        100
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0,
+      "queue": {
+        "ready": false,
+        "anchors": {
+          "workspace": true,
+          "project": true,
+          "heading": false,
+          "empty": false
+        },
+        "samples": {
+          "815,311": [
+            255,
+            255,
+            255
+          ],
+          "929,311": [
+            255,
+            255,
+            255
+          ],
+          "873,319": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    },
+    {
+      "case": "negative-odd-offset",
+      "sourceSha256": "3347eebdef626b9b8a1fc3ae94d23e03b5aa52a6ce97ae2f37afbeb5587e7572",
+      "cropSha256": "721f5e34e8923a26384baae5664ad4f4a7aaeb026176bc302938a08705d912b7",
+      "sourceSize": [
+        1441,
+        1001
+      ],
+      "cropOrigin": [
+        220,
+        100
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0,
+      "queue": {
+        "ready": false,
+        "anchors": {
+          "workspace": true,
+          "project": true,
+          "heading": false,
+          "empty": false
+        },
+        "samples": {
+          "815,311": [
+            255,
+            255,
+            255
+          ],
+          "929,311": [
+            255,
+            255,
+            255
+          ],
+          "873,319": [
+            255,
+            255,
+            255
+          ]
+        }
+      }
+    }
+  ],
+  "negativeEmittedInput": false,
+  "roleOcrRequiredForQueue": false,
+  "limitation": "Offline engine and ImageMagick can differ from the hosted Ubuntu build; the live frame is revalidated."
 }

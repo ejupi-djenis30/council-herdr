@@ -1,9 +1,45 @@
 import csv
+import os
 import re
+import subprocess
+import time
 
 CROP_WIDTH, CROP_HEIGHT = 1000, 800
 QUEUE_SAMPLES = ((815, 311), (929, 311), (873, 319))
 QUEUE_CLICK = (873, 319)
+
+def crop_origin(width, height):
+    if width < CROP_WIDTH or height < CROP_HEIGHT:
+        raise RuntimeError('window frame is smaller than the calibrated crop')
+    return (width - CROP_WIDTH) // 2, (height - CROP_HEIGHT) // 2
+
+def window_point(frame, local):
+    x, y = local
+    if not (0 <= x < CROP_WIDTH and 0 <= y < CROP_HEIGHT):
+        raise RuntimeError('point outside the calibrated crop')
+    return frame['left'] + x, frame['top'] + y
+
+def capture_image(raw, crop, deadline):
+    magick = os.environ.get('COU7_MAGICK')
+    identify = [magick, 'identify'] if magick else ['identify']
+    convert = [magick] if magick else ['convert']
+    tesseract = os.environ.get('COU7_TESSERACT', 'tesseract')
+    def invoke(args, binary=False):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('image processing deadline')
+        return subprocess.run(args, check=True, capture_output=True, text=not binary,
+                              timeout=min(12, remaining)).stdout
+    width, height = map(int, invoke(identify + ['-format', '%w %h', raw]).split())
+    left, top = crop_origin(width, height)
+    geometry = f'{CROP_WIDTH}x{CROP_HEIGHT}+{left}+{top}'
+    invoke(convert + [raw, '-crop', geometry, '+repage', '-strip', crop])
+    lines = parse_tsv(invoke([tesseract, crop, 'stdout', '--psm', '11', 'tsv']))
+    rgb = invoke(convert + [crop, '-colorspace', 'sRGB', '-depth', '8', 'RGB:-'], binary=True)
+    if len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:
+        raise RuntimeError('unexpected calibrated crop size')
+    return {'width': width, 'height': height, 'left': left, 'top': top,
+            'image': crop, 'lines': lines, 'rgb': rgb}
 
 def normalize(value):
     return re.sub(r'[^a-z0-9]+', ' ', value.lower()).strip()
@@ -17,7 +53,7 @@ def parse_tsv(text):
             grouped.setdefault(key, []).extend((word, row) for word in words)
     return [(normalize(' '.join(word for word, _ in line)), line) for line in grouped.values()]
 
-def boxes(lines, phrase, left=0, top=0):
+def boxes(lines, phrase):
     target = normalize(phrase).split()
     found = []
     for _text, line in lines:
@@ -25,15 +61,15 @@ def boxes(lines, phrase, left=0, top=0):
         for i in range(len(words) - len(target) + 1):
             if words[i:i + len(target)] == target:
                 a, b = line[i][1], line[i + len(target) - 1][1]
-                x1, y1 = int(a['left']) - left, int(a['top']) - top
-                x2 = int(b['left']) + int(b['width']) - left
-                y2 = max(int(v[1]['top']) + int(v[1]['height']) for v in line[i:i + len(target)]) - top
+                x1, y1 = int(a['left']), int(a['top'])
+                x2 = int(b['left']) + int(b['width'])
+                y2 = max(int(v[1]['top']) + int(v[1]['height']) for v in line[i:i + len(target)])
                 found.append((x1, y1, x2, y2))
     return found
 
-def in_region(lines, phrase, region, left=0, top=0):
+def in_region(lines, phrase, region):
     x1, y1, x2, y2 = region
-    return any(x1 <= (a+c)//2 <= x2 and y1 <= (b+d)//2 <= y2 for a,b,c,d in boxes(lines, phrase, left, top))
+    return any(x1 <= (a+c)//2 <= x2 and y1 <= (b+d)//2 <= y2 for a,b,c,d in boxes(lines, phrase))
 
 def pixel(rgb, x, y):
     index = (y * CROP_WIDTH + x) * 3
@@ -42,22 +78,32 @@ def pixel(rgb, x, y):
 def dark(value):
     return len(value) == 3 and max(value) <= 65 and max(value) - min(value) <= 22
 
-def queue_diagnostics(lines, rgb, left=0, top=0):
+def queue_diagnostics(lines, rgb):
     if len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:
         return {'ready': False, 'reason': 'invalid_crop'}
     anchors = {
-        'workspace': in_region(lines, 'Workspace', (70, 90, 210, 145), left, top),
-        'project': in_region(lines, 'project', (95, 175, 235, 225), left, top),
-        'heading': in_region(lines, 'Work items', (60, 290, 220, 335), left, top),
-        'role': in_region(lines, 'Linux fixture verifier', (105, 340, 325, 420), left, top),
-        'empty': in_region(lines, 'No work items', (60, 480, 300, 580), left, top),
+        'workspace': in_region(lines, 'Workspace', (70, 90, 210, 145)),
+        'project': in_region(lines, 'project', (95, 175, 235, 225)),
+        'heading': in_region(lines, 'Work items', (60, 290, 220, 335)),
+        'empty': in_region(lines, 'No work items', (60, 480, 300, 580)),
     }
     samples = {f'{x},{y}': pixel(rgb, x, y) for x, y in QUEUE_SAMPLES}
     return {'ready': all(anchors.values()) and all(dark(v) for v in samples.values()),
             'anchors': anchors, 'samples': samples}
 
-def primary_adjacent(lines, rgb, anchor, side='left', left=0, top=0):
-    labels = boxes(lines, anchor, left, top)
+def queue_plan(frame):
+    diagnostic = queue_diagnostics(frame['lines'], frame['rgb'])
+    return QUEUE_CLICK if diagnostic['ready'] else None
+
+def emit_queue(frame, send):
+    point = queue_plan(frame)
+    if point is None:
+        return False
+    send(window_point(frame, point))
+    return True
+
+def primary_adjacent(lines, rgb, anchor, side='left'):
+    labels = boxes(lines, anchor)
     if len(labels) != 1 or len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:
         return None
     ax1, ay1, ax2, ay2 = labels[0]
@@ -89,3 +135,24 @@ def primary_adjacent(lines, rgb, anchor, side='left', left=0, top=0):
             if dark(pixel(rgb, lo + 2, cy)) and dark(pixel(rgb, hi - 2, cy)):
                 candidates.append(((lo + hi) // 2, cy))
     return candidates[0] if len(candidates) == 1 else None
+
+def role_selection_transition(before, after):
+    if (before['width'], before['height'], before['left'], before['top']) != (after['width'], after['height'], after['left'], after['top']):
+        return {'verified': False, 'reason': 'frame_geometry_changed'}
+    first = boxes(before['lines'], 'Linux fixture')
+    second = boxes(after['lines'], 'Linux fixture')
+    if len(first) != 1 or len(second) != 1 or any(abs(a-b) > 3 for a, b in zip(first[0], second[0])):
+        return {'verified': False, 'reason': 'role_anchor_changed'}
+    x1, y1, x2, y2 = first[0]
+    left, right = max(0, x1-12), min(CROP_WIDTH, x2+90)
+    top, bottom = max(0, y1-10), min(CROP_HEIGHT, y2+12)
+    changed = 0
+    for y in range(top, bottom):
+        for x in range(left, right):
+            if max(abs(a-b) for a, b in zip(pixel(before['rgb'], x, y), pixel(after['rgb'], x, y))) >= 16:
+                changed += 1
+    previous = primary_adjacent(before['lines'], before['rgb'], 'Refresh roles')
+    current = primary_adjacent(after['lines'], after['rgb'], 'Refresh roles')
+    return {'verified': changed >= 40 and previous is None and current is not None,
+            'roleChangedPixels': changed, 'savePreviouslyEnabled': previous is not None,
+            'saveNowEnabled': current is not None}
