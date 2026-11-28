@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="check" data-style="mono" role="img" aria-label="Check">
+  <title>Check</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M7.4 22.6 C9.1 20.9 11.8 20.9 13.5 22.6 L18.2 27.3 Q19.5 28.6 20.7 27.1 L34.7 10.2 C36.3 8.2 39.2 8 41.1 9.6 C43.1 11.2 43.3 14.1 41.7 16 L23 38.4 Q20.2 41.8 17 38.6 L7.4 29 C5.7 27.3 5.7 24.3 7.4 22.6 Z"/>
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M33 12.26 L34.7 10.2 C36.3 8.2 39.2 8 41.1 9.6 C43.1 11.2 43.3 14.1 41.7 16 L39.9 18.16 Z"/>
+</svg>

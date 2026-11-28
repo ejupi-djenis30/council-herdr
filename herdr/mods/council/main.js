@@ -153,6 +153,7 @@ export default class Council extends View {
     this.pollSection = 'results';
     this.listFilter = 'all';
     this.wide = false;
+    this.wideNavigation = false;
     this.folder = null;
     this.spaceId = null;
     this.recovering = false;
@@ -186,7 +187,7 @@ export default class Council extends View {
     this.panelFocus.focus();
     this.search = InputState.new({ placeholder: 'Search by title, project or ID' });
     this.search.on('change', (_e, cx) => cx.notify());
-    this.activitySearch = InputState.new({ placeholder: 'Search runs or paths' });
+    this.activitySearch = InputState.new({ placeholder: 'Search…' });
     this.activitySearch.on('change', (_e, cx) => cx.notify());
     this.reply = InputState.new({ placeholder: 'Write a reply…' });
     this.reply.on('change', (_e, cx) => cx.notify());
@@ -942,7 +943,10 @@ export default class Council extends View {
   renderContent(t, space) {
     if (this.configError) return label(this.configError, 13, t.blocked);
     if (!space?.folder) return panel(t).child(label('Open a Herdr space with a project folder.', 13, t.muted));
-    if (space.id !== this.spaceId || space.folder !== this.folder || (!this.data && !this.readError)) return label('Loading project…', 12, t.muted);
+    if (space.id !== this.spaceId || space.folder !== this.folder || (!this.data && !this.readError)) {
+      return this.tab === 'activity' ? panel(t).role('status').child(cardHeading(t, 'Loading Workspace…', 'activity'))
+        : label('Loading project…', 12, t.muted);
+    }
     if (!this.data && this.readError) return div();
     if (this.tab === 'activity') {
       const project = this.data.project;
@@ -1182,10 +1186,11 @@ export default class Council extends View {
     const sameSpace = Boolean(this.config && space?.folder && space.folder === this.folder && space.id === this.spaceId);
     const current = this.currentSpace(space);
     const tabs = h_flex().w_full().gap(4).p(3).rounded(9).border_1().border_color(t.border).bg(t.background)
+      .when(!this.wideNavigation, row => row.flex_wrap())
       .role('tab_list').accessibility_label('Council sections').children(sections.map(({ id, title }, position) =>
         sectionTab(t, id, title, this.tab === id, (_e, cx) => {
           if (this.tab !== id) this.navigate(cx, id);
-        }, this.saving).set_position(position + 1, sections.length)));
+        }, this.saving, this.wideNavigation).set_position(position + 1, sections.length)));
     const header = v_flex().flex_shrink_0().gap(12).p(14).bg(t.surface).border_b_1().border_color(t.border)
       .child(h_flex().gap(10).items_center()
         .child(brandMark(40))
@@ -1239,8 +1244,10 @@ export default class Council extends View {
       })
       .on_size_change((size, cx) => {
         const wide = size.width >= 670;
-        if (wide === this.wide) return;
+        const wideNavigation = size.width >= 800;
+        if (wide === this.wide && wideNavigation === this.wideNavigation) return;
         this.wide = wide;
+        this.wideNavigation = wideNavigation;
         cx.notify();
       })
       .child(header).child(body.child(this.renderContent(t, space)));

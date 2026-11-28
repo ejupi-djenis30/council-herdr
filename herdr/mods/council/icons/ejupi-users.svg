@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="users" data-style="mono" role="img" aria-label="Users">
+  <title>Users</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M24 15C24 18.866 20.866 22 17 22C13.134 22 10 18.866 10 15C10 11.134 13.134 8 17 8C20.866 8 24 11.134 24 15Z"/>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M5 40C5 32.8 10.4 27 17 27C23.6 27 29 32.8 29 40C29 41.1 28.1 42 27 42H7C5.9 42 5 41.1 5 40Z"/>
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M40 14C40 17.3137 37.3137 20 34 20C30.6863 20 28 17.3137 28 14C28 10.6863 30.6863 8 34 8C37.3137 8 40 10.6863 40 14Z"/>
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M32 27.2C32.7 27.1 33.3 27 34 27C39.5 27 44 32.5 44 39C44 40.1 43.1 41 42 41H33C32.4 41 32 40.6 32 40Z"/>
+</svg>

@@ -1,29 +1,38 @@
 import { div, svg } from 'gpui-kit';
 import { Button, h_flex, v_flex, Input } from 'gpui-base';
 
+const officialGlyphs = {
+  activity: 'grid', polls: 'list', delegations: 'pipeline', schedules: 'calendar',
+  debates: 'message', reviews: 'shield-check', team: 'users', project: 'folder',
+  plan: 'file-text', changes: 'code', terminal: 'terminal', copy: 'copy',
+  search: 'search', add: 'plus', warning: 'warning', file: 'file',
+  working: 'clock', done: 'check'
+};
+
 export function label(value, size = 13, color) {
   return div().min_w_0().text_size(size).whitespace_normal().child(String(value))
     .when(Boolean(color), node => node.text_color(color));
 }
 
 export function glyph(name, size = 15) {
-  return svg(`mods/council/icons/${name === 'debates' || name === 'team' ? 'people' : name}.svg`).size(size).flex_shrink_0();
+  const official = officialGlyphs[name];
+  return svg(`mods/council/icons/${official ? `ejupi-${official}` : name}.svg`).size(size).flex_shrink_0();
 }
 
 export function brandMark(size = 36) {
   return h_flex().size(size).rounded(8).items_center().justify_center().flex_shrink_0()
-    .border_1().border_color('#705bb2').bg('#211945').text_color('#d2c6ff')
-    .child(glyph('brand', Math.round(size * 0.64)));
+    .border_1().border_color('#7866ba').bg('#17132b').text_color('#dfff5e')
+    .child(glyph('brand', Math.round(size * 0.8)));
 }
 
 export function iconTile(t, name, size = 34) {
   return h_flex().size(size).flex_shrink_0().rounded(8).bg(t.selected)
-    .text_color(t.accent).items_center().justify_center().child(glyph(name, 17));
+    .text_color(t.foreground).items_center().justify_center().child(glyph(name, 24));
 }
 
 export function cardHeading(t, title, icon) {
   return h_flex().gap(7).items_center()
-    .child(glyph(icon, 15).text_color(t.accent))
+    .child(glyph(icon, 20).text_color(t.foreground))
     .child(label(title, 14, t.foreground).font_semibold());
 }
 
@@ -41,7 +50,7 @@ export function button(t, id, title, click, variant = 'normal', disabled = false
     .when(!disabled, node => node.cursor_pointer().hover(s => s.bg(primary ? t.accent : t.raised))
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation()).on_click(click))
     .child(h_flex().gap(5).items_center()
-      .when(Boolean(icon), node => node.child(glyph(icon, 14)))
+      .when(Boolean(icon), node => node.child(glyph(icon, officialGlyphs[icon] ? 18 : 14)))
       .when(Boolean(title), node => node.child(title)));
 }
 
@@ -50,8 +59,9 @@ export function panel(t) {
     .border_1().border_color(t.border).bg(t.surface);
 }
 
-export function sectionTab(t, id, title, selected, click, disabled = false) {
-  return Button.new(id).flex_1().min_w_0().h(34).items_center().justify_center().px(5).rounded(7)
+export function sectionTab(t, id, title, selected, click, disabled = false, wide = true) {
+  return Button.new(id).min_w_0().h(34).items_center().justify_center().px(wide ? 5 : 8).rounded(7)
+    .when(wide, tab => tab.flex_1())
     .disabled(disabled).selected(selected).tab_stop(!disabled).role('tab').accessibility_label(title)
     .border_1().border_color(t.background).focus(s => s.border_color(t.accent))
     .when(selected, node => node.bg(t.selected))
@@ -59,7 +69,7 @@ export function sectionTab(t, id, title, selected, click, disabled = false) {
     .when(!disabled, node => node.cursor_pointer().hover(s => s.bg(t.raised))
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation()).on_click(click))
     .child(h_flex().gap(7).min_w_0().items_center()
-      .child(glyph(id, 16).text_color(selected ? t.accent : t.muted))
+      .child(glyph(id, 20).text_color(selected ? t.foreground : t.muted))
       .child(div().min_w_0().truncate().child(title)));
 }
 
@@ -71,13 +81,13 @@ export function columns(wide, primary, secondary, primaryWidth = 270) {
     .child(div().min_w_0().flex_1().child(secondary));
 }
 
-export function input(t, state, icon) {
-  const control = Input.new(state).w_full().min_w_0().h(34).px(9).text_size(13).text_color(t.foreground).tab_stop(true);
-  if (icon === 'search') control.accessibility_label('Search by title, project or ID');
+export function input(t, state, icon, searchLabel = 'Search by title, project or ID') {
+  const control = Input.new(state).w_full().min_w_0().h(34).px(9).text_size(13).text_color(t.foreground);
+  if (icon === 'search') control.accessibility_label(searchLabel);
   if (!icon) return control.rounded(6).border_1().border_color(t.input).bg(t.background);
   return h_flex().w_full().min_w_0().items_center().pl(10).rounded(6).border_1()
     .border_color(t.input).bg(t.background)
-    .child(glyph(icon, 15).text_color(t.muted)).child(control.flex_1());
+    .child(glyph(icon, 20).text_color(t.muted)).child(control.flex_1());
 }
 
 export function field(t, name, state) {
@@ -89,9 +99,9 @@ export function statusDot(color) {
   return div().w(6).h(6).rounded(3).bg(color).flex_shrink_0();
 }
 
-export function statusPill(t, title, color = t.muted) {
+export function statusPill(t, title, color = t.muted, textColor = color) {
   return h_flex().gap(5).items_center().px(7).py(4).rounded(5).bg(t.raised).flex_shrink_0()
-    .child(statusDot(color)).child(label(title, 11, color).font_medium());
+    .child(statusDot(color)).child(label(title, 11, textColor).font_medium());
 }
 
 export function progress(t, title, count, total, color = t.accent) {

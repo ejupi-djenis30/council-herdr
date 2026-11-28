@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="file" data-style="mono" role="img" aria-label="File">
+  <title>File</title>
+  <path d="M10 6H25V16Q25 22 31 22H39Q42 22 42 25V38Q42 42 38 42H10Q6 42 6 38V10Q6 6 10 6Z" data-tone="primary" fill="currentColor" fill-rule="evenodd" />
+  <path d="M30 6.5L40.7 16.7Q42 18 40 18H33Q29 18 29 14V8Q29 5.5 30 6.5Z" data-tone="secondary" fill="currentColor" fill-rule="evenodd" />
+</svg>
