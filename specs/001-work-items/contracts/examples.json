@@ -1,0 +1,159 @@
+{
+  "createInput": {
+    "id": "wi-project-readme",
+    "title": "Summarize the project README",
+    "roleId": "verifier",
+    "criteria": [
+      "Quote the first Markdown heading exactly.",
+      "Name one section from that file.",
+      "Report one next action for the lead."
+    ]
+  },
+  "create": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-project-readme",
+      "title": "Summarize the project README",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "draft",
+      "nextAction": "Delegate this item to verifier.",
+      "canDelegate": true,
+      "job": null,
+      "attention": null,
+      "criteria": [
+        "Quote the first Markdown heading exactly.",
+        "Name one section from that file.",
+        "Report one next action for the lead."
+      ],
+      "result": null
+    }
+  },
+  "list": {
+    "success": true,
+    "project": "/example/Council project",
+    "items": [
+      {
+        "id": "wi-project-readme",
+        "title": "Summarize the project README",
+        "roleId": "verifier",
+        "createdAt": "2026-11-28T09:00:00.000Z",
+        "state": "draft",
+        "nextAction": "Delegate this item to verifier.",
+        "canDelegate": true,
+        "job": null,
+        "attention": null
+      }
+    ],
+    "errors": [
+      {
+        "id": "wi-unreadable",
+        "code": "integrity_error",
+        "message": "The work-item definition is unreadable."
+      }
+    ]
+  },
+  "delegating": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-project-readme",
+      "title": "Summarize the project README",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "in_progress",
+      "nextAction": "Inspect the linked job or refresh this item.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-3d0958b3-0876-4a82-8e46-b7618bef083d",
+        "linked": true,
+        "outcome": "deliberating",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:03:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Quote the first Markdown heading exactly.",
+        "Name one section from that file.",
+        "Report one next action for the lead."
+      ],
+      "result": null
+    }
+  },
+  "unconfirmed": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-project-readme",
+      "title": "Summarize the project README",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "needs_attention",
+      "nextAction": "Inspect the reserved session in Herdr, then refresh this item.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-3d0958b3-0876-4a82-8e46-b7618bef083d",
+        "linked": false,
+        "outcome": "unconfirmed_start",
+        "deliveryState": null,
+        "deadlineAt": null,
+        "address": null
+      },
+      "attention": {
+        "code": "unconfirmed_start",
+        "message": "An intent was saved. The linked job could not be verified."
+      },
+      "criteria": [
+        "Quote the first Markdown heading exactly.",
+        "Name one section from that file.",
+        "Report one next action for the lead."
+      ],
+      "result": null
+    }
+  },
+  "resultReady": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-project-readme",
+      "title": "Summarize the project README",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "result_ready",
+      "nextAction": "Review the handoff against the acceptance criteria.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-3d0958b3-0876-4a82-8e46-b7618bef083d",
+        "linked": true,
+        "outcome": "completed",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:03:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Quote the first Markdown heading exactly.",
+        "Name one section from that file.",
+        "Report one next action for the lead."
+      ],
+      "result": {
+        "output": "Heading: # Council\nSection: Install\nNext action: Verify the local installation.",
+        "source": "terminal_screen",
+        "captureScope": "screen",
+        "artifactPath": null,
+        "turn": 2,
+        "completedAt": "2026-11-28T09:01:34.000Z"
+      }
+    }
+  },
+  "conflict": {
+    "success": false,
+    "project": "/example/Council project",
+    "error": {
+      "code": "conflict",
+      "message": "This ID belongs to a work item with different inputs."
+    }
+  }
+}

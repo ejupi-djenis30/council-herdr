@@ -111,7 +111,7 @@ function deliveryView(t, delivery, { canAct, disabled, check, retry }) {
     .child(h_flex().gap(6).items_center().justify_between().flex_wrap()
       .child(label(`Invitations · ${sent}/${delivery.targets.length} sent`, 12, t.foreground).font_semibold())
       .when(pending.some(needsSetup), row => row.child(button(t, 'invitation-setup-guide', 'Setup guide', (_e, cx) =>
-        cx.open_url('https://github.com/ejupi-djenis30/council-herdr/blob/main/docs/alignment.md')))));
+        cx.open_url('https://github.com/Ejupi-Labs/council-herdr/blob/main/docs/alignment.md')))));
   if (delivery.active || expired) section.child(label(delivery.active ? `Delivery ends ${when}` : `Delivery window ended ${when}`, 11, t.muted));
   if (delivery.claimed && !delivery.active && pending.some(person => person.state === 'expired')) {
     section.child(label('An invitation worker still holds the delivery. Check its terminal before retrying.', 11, t.muted));
