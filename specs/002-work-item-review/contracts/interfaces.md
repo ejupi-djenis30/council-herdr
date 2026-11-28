@@ -1,5 +1,7 @@
 # CLI and MCP work-item lifecycle contract
 
+This implementation amendment adds a single policy field to the [frozen COU-8 interface contract](https://github.com/Ejupi-Labs/council-herdr/blob/e43ae3d4f7cf567bd9b1e3c4aca06f05dfa8a52a/specs/002-work-item-review/contracts/interfaces.md).
+
 The [COU-2 inputs and responses](../../001-work-items/contracts/interfaces.md) remain the base. Project scope, canonical local identity, flag-only CLI output, exit codes and MCP text JSON with `isError` stay consistent. The CLI defaults to cwd and accepts `--project <absolute-folder>`. MCP requires explicit `project` when the configured project guard requires it. Stderr remains for diagnostics.
 
 ## Operations
@@ -58,6 +60,7 @@ Filters are AND-combined. `needsAttention: true` selects attention items and `fa
 
 Detail adds under `lifecycle`:
 
+- `formalRequired` is a boolean derived from the item's validated lifecycle history. It starts false, becomes true when the first formal review starts, stays true in all later cycles and survives return before attach, closure, reopening and restart. True requires formal policy for every future review. An engine implementing this amendment emits the field on every item detail, including the projected legacy record and mutation replies. List summaries may omit it. An older detail may omit the field. Treat its policy as unknown and apply the [Workspace compatibility rule](workspace.md#review-policy-compatibility). A present non-boolean value is malformed. This field leaves the review snapshot, evidence token, historical verdict and acceptance checks intact.
 - `integrity` is null or `{code, message}`. If replay can validate a prefix only, expose that prefix with all mutations unavailable. A corrupted intent keeps a valid item in the list.
 - `review` is null or `{id, cycle, workRevision, reviewOwnerRoleId, policy, definition, snapshotSha256, capture, evidenceToken, notes, formal}`, where `definition` is `{title, roleId, criteria}`. `capture` is `{sessionId, sha256, byteCount, output, source, captureScope, turn, completedAt, verified}`. `output` is null if unavailable. `evidenceToken` is null when the freeze cannot be verified. Each note is `{kind, actor, text, at, revision}`. `formal` is null for operator policy or `{sessionId, round, state, verdict, proposalSha256, manifestSha256, dissent}`, with nullable session/round/verdict/digests before verification. `dissent` contains `{voter, vote, rationale}` from verified direct reject/amend votes. Formal findings and informational contributions remain available through the original reviewed session. Open that session using the existing Reviews surface in the same project.
 - `decision` is null or the latest decision `{id, reviewId, cycle, workRevision, disposition, actor, reason, nextAction, at, snapshotSha256, evidenceToken, formal}`. Dispositions are `accepted` and `changes_requested`. Persist the formal state, verdict, session, round, proposal and manifest digests as observed at decision time. Reopen never turns a prior decision into the current cycle's authority.
