@@ -16,7 +16,8 @@ export function computeFingerprint(options = {}, workflow = null) {
     keepTerminals: Boolean(options.keepTerminals || options.keep),
     ...(workflow ? { workflow } : {}),
     ...(options.team ? { team: options.team.id } : {}),
-    ...(options.workItemId ? { workItemId: options.workItemId } : {})
+    ...(options.workItemId ? { workItemId: options.workItemId } : {}),
+    ...(options.workItemBinding ? { workItemBinding: options.workItemBinding } : {})
   };
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }

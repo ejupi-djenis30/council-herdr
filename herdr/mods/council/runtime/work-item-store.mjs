@@ -17,10 +17,13 @@ export class WorkItemStore {
     const dir = join(this.dir, id);
     return isDirectory(dir, { create }) ? dir : null;
   }
-  read(id, revision) {
+  readRaw(id, revision) {
     const dir = this.directory(id);
     if (!dir) return null;
-    const raw = readBytes(join(dir, `${String(revision).padStart(8, '0')}.json`), 65536);
+    return readBytes(join(dir, `${String(revision).padStart(8, '0')}.json`), 65536);
+  }
+  read(id, revision) {
+    const raw = this.readRaw(id, revision);
     if (raw === null) return null;
     let text;
     try {
