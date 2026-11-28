@@ -441,6 +441,7 @@ class WorkItemPlane {
     this.options = options;
     this.checked = false;
     this.pending = false;
+    this.generation = 0;
     this.forgetInstallation();
   }
 
@@ -477,10 +478,23 @@ class WorkItemPlane {
     return 'prepare';
   }
 
+  get handoffAction() {
+    const intent = this.action;
+    return intent && { intent, installationId: this.installationId, generation: this.generation,
+      screen: this.screen, scope: this.screen.scope, item: this.screen.item };
+  }
+
+  canOpen(binding) {
+    return Boolean(binding && binding.screen === this.screen && binding.scope === this.screen.scope &&
+      binding.item === this.screen.item && binding.installationId === this.installationId &&
+      binding.generation === this.generation && this.action === binding.intent);
+  }
+
   async read(operationId, replacement = null) {
     const { options, screen } = this;
     const expectedInstallation = this.installationId;
     const sequence = options.nextRequest();
+    if (this.cache) this.cache.latestRead = sequence;
     const { installationId, plane } = await planeCommand(options.runCli, screen.scope, screen.id, 'show', operationId);
     if (!options.active() && expectedInstallation !== installationId) return;
     if (replacement && replacement !== installationId) throw problem('scope_conflict');
@@ -503,12 +517,15 @@ class WorkItemPlane {
       throw problem('unavailable');
     }
     const cache = options.cacheFor(installationId);
+    // A newer request for this attested key supersedes receipts as well as the projection.
+    if (sequence < cache.latestRead) return;
+    cache.latestRead = sequence;
     if (options.active()) {
       this.installationId = installationId;
       this.cache = cache;
     }
     if (plane.link && cache.link && !samePlaneLink(cache.link, plane.link)) throw problem('scope_conflict');
-    // Positive scoped evidence survives selection changes and out-of-order reads.
+    // Keep accepted receipts with their attested scope even after selection changes.
     const operation = plane.operation;
     const verified = operation && cache.receipts.get(operation.operationId);
     const pinned = verified ?? (operation?.operationId === cache.operation?.operationId ? cache.operation : null);
@@ -520,12 +537,9 @@ class WorkItemPlane {
     if (operation?.state === 'published' && !cache.receipts.has(operation.operationId)) {
       cache.receipts.set(operation.operationId, operation);
     }
-    if (sequence >= cache.applied) {
-      cache.applied = sequence;
-      const previous = cache.operation && (cache.receipts.get(cache.operation.operationId) ?? cache.operation);
-      if (previous?.state !== 'delivery_uncertain' || operation?.operationId === previous.operationId &&
-          ['delivery_uncertain', 'published'].includes(operation.state)) cache.operation = operation;
-    }
+    const previous = cache.operation && (cache.receipts.get(cache.operation.operationId) ?? cache.operation);
+    if (previous?.state !== 'delivery_uncertain' || operation?.operationId === previous.operationId &&
+        ['delivery_uncertain', 'published'].includes(operation.state)) cache.operation = operation;
     if (options.active()) {
       this.availability = plane.availability;
       this.currentLink = plane.link;
@@ -536,6 +550,7 @@ class WorkItemPlane {
 
   async check(task) {
     if (!this.options.active() || this.pending) return;
+    this.generation++;
     this.checked = true;
     this.pending = true;
     this.issue = null;
@@ -556,16 +571,17 @@ class WorkItemPlane {
     return this.check(() => this.read(operation?.state === 'delivery_uncertain' ? operation.operationId : null));
   }
 
-  open(intent) {
-    if (this.action !== intent) return;
+  open(binding) {
+    if (!this.canOpen(binding)) return;
+    const { intent, installationId: expectedInstallation } = binding;
     const operation = this.operation;
     const operationId = intent === 'check' || intent === 'prepare' && ['prepared', 'approved_unsent'].includes(operation?.state)
       ? operation.operationId : null;
-    const expectedInstallation = this.installationId;
     return this.check(async () => {
       if (intent === 'check') {
         await this.read(operationId);
-        if (!this.options.active() || expectedInstallation !== this.installationId || this.operation?.state !== 'delivery_uncertain' ||
+        if (!this.options.active() || expectedInstallation !== this.installationId || this.operation?.operationId !== operationId ||
+            this.operation.state !== 'delivery_uncertain' ||
             this.availability !== 'operator_available' || this.freshness !== 'current') return;
       }
       const { screen, options } = this;
@@ -670,7 +686,7 @@ export class WorkItems {
         cacheFor: installationId => {
           const key = JSON.stringify([recoveryScope(scope), id, installationId]);
           if (!this.planeCache.has(key)) {
-            this.planeCache.set(key, { link: null, operation: null, receipts: new Map(), applied: 0 });
+            this.planeCache.set(key, { link: null, operation: null, receipts: new Map(), latestRead: 0 });
           }
           return this.planeCache.get(key);
         }

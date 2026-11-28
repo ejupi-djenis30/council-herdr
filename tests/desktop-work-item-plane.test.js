@@ -65,7 +65,7 @@ test('a verified reader hands off only a local reference and preserves the publi
   assert.equal(current.action, 'prepare');
   assert.equal(current.link.itemId, fixture.source.link.itemId);
   assert.equal(current.operation.receipt.commentId, fixture.positiveComment.id);
-  await current.open('prepare');
+  await current.open(current.handoffAction);
   assert.deepEqual(current.handoff, {
     intent: 'prepare', disposition: 'manual_operator_session', localRef: replies.openA.planeHandoff.localRef
   });
@@ -88,7 +88,7 @@ test('a missing, null or malformed installation leaves the ordinary work item us
     assert.equal(current.link, null);
     assert.deepEqual(current.receipts, []);
     assert.equal(workItemActionEnabled(current.screen.item, 'return'), true);
-    await current.open('prepare');
+    await current.open(current.handoffAction);
     assert.deepEqual(h.verbs(), [['show'], ['show']]);
   })));
 });
@@ -119,7 +119,7 @@ test('replacement at the same path from show waits for a fresh show and does not
   await refresh;
   assert.equal(current.installationId, replies.showB.installationId);
   assert.equal(current.action, 'link');
-  await current.open('link');
+  await current.open(current.handoffAction);
   assert.equal(current.handoff.localRef, replies.openB.planeHandoff.localRef);
   assert.deepEqual(h.verbs(), [['show'], ['show'], ['show'], ['open']]);
 });
@@ -132,13 +132,13 @@ test('replacement revealed by open discards its reference and never auto-opens',
   });
   const current = await h.select();
   await current.refresh();
-  await current.open('prepare');
+  await current.open(current.handoffAction);
   assert.equal(current.handoff, null);
   assert.equal(current.installationId, replies.showB.installationId);
   assert.equal(current.action, 'link');
   assert.deepEqual(current.receipts, []);
   assert.deepEqual(h.verbs(), [['show'], ['open'], ['show']]);
-  await current.open('link');
+  await current.open(current.handoffAction);
   assert.equal(current.handoff.localRef, replies.openB.planeHandoff.localRef);
 });
 
@@ -149,13 +149,13 @@ test('uncertain delivery reads the original operation and opens only its reconci
   }, project));
   const current = await h.select();
   await current.refresh();
-  await current.open('prepare');
+  await current.open({ ...current.handoffAction, intent: 'prepare' });
   assert.equal(current.action, 'check');
-  await current.open('check');
+  await current.open(current.handoffAction);
   assert.equal(current.handoff.intent, 'check');
   assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['open', '--operation-id', scoped]]);
   positive = true;
-  await current.open('check');
+  await current.open(current.handoffAction);
   assert.equal(current.handoff, null);
   assert.equal(current.operation.receipt.commentId, fixture.positiveComment.id);
   assert.deepEqual(h.verbs().slice(3), [['show', '--operation-id', scoped]]);
@@ -202,7 +202,7 @@ test('both same-path installation replacement and a different machine discard la
         wire(replies[replacement ? 'showB' : 'showA'], project));
       const first = await h.select();
       await first.refresh();
-      const handoff = first.open('prepare');
+      const handoff = first.open(first.handoffAction);
       replacement = true;
       const second = await h.select(target);
       await second.refresh();
@@ -245,6 +245,25 @@ test('a late bound receipt stays with its original UUID, machine and operation',
   assert.equal(original.action, null);
   assert.equal(original.receipts[0].receipt.commentId, fixture.positiveComment.id);
   assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['show'], ['show']]);
+});
+
+test('review regression: a superseded Show cannot resolve the current selection’s uncertainty', async () => {
+  const late = delayed();
+  let shows = 0;
+  const h = harness(({ project }) => ++shows === 2 ? late.result : wire(uncertain, project));
+  const first = await h.select();
+  await first.refresh();
+  const old = first.refresh();
+  const current = await h.select();
+  await current.refresh();
+  assert.equal(current.installationId, first.installationId);
+  assert.equal(current.action, 'check');
+  late.resolve(wire(replies.showA, scope.project));
+  await old;
+  assert.deepEqual({
+    state: current.operation.state, action: current.action, receipts: current.receipts.length
+  }, { state: 'delivery_uncertain', action: 'check', receipts: 0 });
+  assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['show']]);
 });
 
 test('the same UUID and item on another canonical project cannot see the original receipt', async () => {
@@ -292,7 +311,7 @@ test('a wrong project envelope and a nonmatching operation echo cannot grant a h
   assert.equal(current.action, null);
   correct = true;
   await current.refresh();
-  await current.open('check');
+  await current.open(current.handoffAction);
   assert.equal(current.handoff, null);
   assert.equal(current.issue, 'unavailable');
   assert.equal(current.operation.state, 'delivery_uncertain');
@@ -320,7 +339,7 @@ test('reject unsafe returned commands, opaque references and evidence URLs', asy
     const h = harness(({ project, verb }) => wire(verb === 'show' ? replies.showB : { ...replies.openB, planeHandoff: handoff }, project));
     const current = await h.select();
     await current.refresh();
-    await current.open('link');
+    await current.open(current.handoffAction);
     assert.equal(current.handoff, null);
     assert.equal(current.issue, 'unavailable');
     assert.deepEqual(h.verbs(), [['show'], ['open']]);
@@ -358,7 +377,7 @@ function find(node, id) {
   return null;
 }
 
-test('normal Plane controls preserve focus, expose fixed handoff instructions and copy only the opaquely scoped reference', async () => {
+function renderer() {
   const exports = {
     'gpui-kit': ['div', 'svg'],
     'gpui-base': ['Button', 'Editor', 'Input', 'InputState', 'Textarea', 'TextareaState', 'v_flex', 'h_flex']
@@ -373,16 +392,20 @@ test('normal Plane controls preserve focus, expose fixed handoff instructions an
       return modules[specifier] ? { url: modules[specifier], shortCircuit: true } : next(specifier, context);
     }
   `), import.meta.url);
-  const { workItemView } = await import('../herdr/mods/council/work-item-view.js');
-  const missing = delayed();
-  const h = harness(({ project, verb }) => verb === 'show' ? wire(replies.showB, project) : missing.result);
-  const plane = await h.select();
+  return import('../herdr/mods/council/work-item-view.js');
+}
+
+const planeRenderer = renderer();
+
+async function viewHarness(plane) {
+  const { workItemView } = await planeRenderer;
   const tasks = [];
   const clipboard = [];
+  const focusChanges = [];
   let focus;
   const cx = {
     focus_handle: () => {
-      const handle = { focus: () => { focus = handle; }, is_focused: () => focus === handle };
+      const handle = { focus: () => { focus = handle; focusChanges.push(handle); }, is_focused: () => focus === handle };
       return handle;
     },
     spawn: action => tasks.push(action(cx)),
@@ -393,13 +416,21 @@ test('normal Plane controls preserve focus, expose fixed handoff instructions an
   const settle = () => Promise.all(tasks.splice(0));
   control(`work-item-plane-${plane.viewId}`).props.on_size_change({}, cx);
   await settle();
+  return { control, cx, settle, clipboard, focusChanges, focus: () => focus };
+}
+
+test('normal Plane controls preserve focus, expose fixed handoff instructions and copy only the opaquely scoped reference', async () => {
+  const missing = delayed();
+  const h = harness(({ project, verb }) => verb === 'show' ? wire(replies.showB, project) : missing.result);
+  const plane = await h.select();
+  const { control, cx, settle, clipboard, focus } = await viewHarness(plane);
   assert.equal(control('open-plane-console').props.accessibility_label, 'Link Plane item');
   control('open-plane-console').props.on_click(null, cx);
-  assert.equal(focus, plane.refreshFocus);
+  assert.equal(focus(), plane.refreshFocus);
   missing.resolve(wire(replies.openB, scope.project));
   await settle();
   const copy = control('copy-plane-reference');
-  assert.equal(focus, plane.referenceFocus);
+  assert.equal(focus(), plane.referenceFocus);
   assert.match(copy.props.accessibility_label, /fixture-scope-item-b.*authenticated operator session/);
   copy.props.on_click(null, cx);
   h.leave();
@@ -407,4 +438,48 @@ test('normal Plane controls preserve focus, expose fixed handoff instructions an
   assert.deepEqual(clipboard, [replies.openB.planeHandoff.localRef]);
   assert.equal(control('publish'), null);
   assert.deepEqual(h.verbs(), [['show'], ['open']]);
+});
+
+test('review regression: A’s retained Prepare has no effect when B offers the same action', async () => {
+  const linkedB = { ...replies.showB, plane: { ...replies.showB.plane, link: fixture.homonym.link } };
+  let current = 'A';
+  const h = harness(({ project, verb }) => wire(
+    verb === 'open' ? replies[`open${current}`] : current === 'A' ? replies.showA : linkedB, project));
+  const plane = await h.select();
+  const { control, cx, settle, focusChanges } = await viewHarness(plane);
+  const retained = control('open-plane-console');
+  assert.equal(retained.props.accessibility_label, 'Prepare Plane update');
+  current = 'B';
+  await plane.refresh();
+  assert.equal(plane.installationId, replies.showB.installationId);
+  assert.equal(control('open-plane-console').props.accessibility_label, 'Prepare Plane update');
+
+  retained.props.on_click(null, cx);
+  await settle();
+  assert.deepEqual({
+    calls: h.verbs().filter(([verb]) => verb === 'open').length,
+    focusChanges: focusChanges.length, ref: plane.handoff?.localRef ?? null
+  }, { calls: 0, focusChanges: 0, ref: null });
+  assert.equal(control('copy-plane-reference'), null);
+
+  control('open-plane-console').props.on_click(null, cx);
+  await settle();
+  assert.deepEqual(h.verbs(), [['show'], ['show'], ['show'], ['open']]);
+  assert.equal(plane.handoff.localRef, replies.openB.planeHandoff.localRef);
+});
+
+test('a refreshed projection invalidates the old Prepare callback with the same UUID and action', async () => {
+  const h = harness(({ project, verb }) => wire(replies[verb === 'show' ? 'showA' : 'openA'], project));
+  const plane = await h.select();
+  const { control, cx, settle, focusChanges } = await viewHarness(plane);
+  const retained = control('open-plane-console');
+  await plane.refresh();
+  retained.props.on_click(null, cx);
+  await settle();
+  assert.deepEqual(h.verbs(), [['show'], ['show']]);
+  assert.deepEqual(focusChanges, []);
+  assert.equal(plane.handoff, null);
+  control('open-plane-console').props.on_click(null, cx);
+  await settle();
+  assert.equal(plane.handoff.localRef, replies.openA.planeHandoff.localRef);
 });

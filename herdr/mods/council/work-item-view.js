@@ -595,7 +595,7 @@ function planeReceipt(t, plane, operation, previous = false) {
 }
 
 function planePanel(t, plane) {
-  const { link, operation, handoff, action, freshness } = plane;
+  const { link, operation, handoff, handoffAction, freshness } = plane;
   const status = planeStatus(plane);
   const operationStatus = operation && planeStates[operation.state];
   const run = (cx, task) => cx.spawn(async cx => {
@@ -617,10 +617,10 @@ function planePanel(t, plane) {
       .child(button(t, 'refresh-plane', 'Refresh Plane status', (_e, cx) => run(cx, () => plane.refresh()))
         .accessibility_label([`Refresh Plane status. ${status}`, operationStatus].filter(Boolean).join(' '))
         .when(Boolean(plane.refreshFocus), node => node.track_focus(plane.refreshFocus)))
-      .when(Boolean(action), row => row.child(button(t, 'open-plane-console', planeActions[action], (_e, cx) => {
-        if (plane.action !== action) return;
+      .when(Boolean(handoffAction), row => row.child(button(t, 'open-plane-console', planeActions[handoffAction.intent], (_e, cx) => {
+        if (!plane.canOpen(handoffAction)) return;
         plane.refreshFocus?.focus();
-        run(cx, () => plane.open(action));
+        run(cx, () => plane.open(handoffAction));
       }))))
     .child(label(status, 12, plane.issue ? t.blocked : t.muted).role('status').accessibility_label(status));
   if (handoff) {
