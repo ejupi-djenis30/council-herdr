@@ -74,6 +74,16 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
     if (current.installationId !== installationId || current.itemId !== itemId || current.itemRevision !== s.itemRevision ||
         current.linkRevision !== s.linkRevision || current.status !== s.status || !same(current.target, targetPin)) throw problem('scope_conflict');
   }
+  function guardCommit(snapshot, event, deadline) {
+    github.assertDeadline(deadline);
+    const before = now();
+    if (!timestamp(before) || before < event.data.at) throw Object.assign(problem('stale_preview'), { rollbackAt:event.data.at });
+    fresh(snapshot, before);
+    const after = now();
+    if (!timestamp(after) || after < before) throw Object.assign(problem('stale_preview'), { rollbackAt:before });
+    if (after >= snapshot.expiresAt) throw Object.assign(problem('stale_preview'), { expiredAt:after });
+    github.assertDeadline(deadline);
+  }
   // Replay validates hashes and transitions; malformed tails never grant a send.
   function fold(state, event) {
     if (!event) return { operations:{}, active:null, lastAt:0 };
@@ -225,7 +235,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       const when = at(state); fresh(proposed, when);
       return { data:{ at:when, operationId:proposed.operationId, snapshot:proposed, scope, target:targetPin,
         payloadDigest:digest(payload(proposed)), snapshotKey:key } };
-    }, () => github.assertDeadline(deadline));
+    }, event => guardCommit(proposed,event,deadline));
     github.assertDeadline(deadline);
     return output ?? projection(saved(proposed.operationId));
   }
@@ -253,7 +263,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       const operation=await prepareVerified(snapshot,deadline);
       if (!['prepared','approved_unsent','offline'].includes(operation.state)) return {operation,preview:null};
       const record=saved(operation.operationId);
-      fresh(record.snapshot,now());
+      fresh(record.snapshot,at(current()));
       github.assertDeadline(deadline);
       return { operation, preview:{ operationId:record.snapshot.operationId, scopeRef:scope, installationId, itemId,
         itemRevision:record.snapshot.itemRevision, linkRevision:record.snapshot.linkRevision, status:record.snapshot.status,
@@ -317,16 +327,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
           if (r.approval !== approvalId) return { result:projection(r) };
           const when = at(s); fresh(r.snapshot, when);
           return { data:{at:when,operationId:id,approvalId,payloadDigest:r.payloadDigest} };
-        }, event => {
-          github.assertDeadline(deadline);
-          const before = now();
-          if (!timestamp(before) || before < event.data.at) throw Object.assign(problem('stale_preview'), { rollbackAt:event.data.at });
-          fresh(record.snapshot, before);
-          const after = now();
-          if (!timestamp(after) || after < before) throw Object.assign(problem('stale_preview'), { rollbackAt:before });
-          if (after >= record.snapshot.expiresAt) throw Object.assign(problem('stale_preview'), { expiredAt:after });
-          github.assertDeadline(deadline);
-        });
+        }, event => guardCommit(record.snapshot,event,deadline));
         if (!resultStart.written) return resultStart.result;
         // Only this live call has a positive acknowledgement for its own Start.
         hook('after_start', 'start');

@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { createGitHubVerifier, createAnonymousGitHubTransport } from '../herdr/mods/council/runtime/plane-github.mjs';
 import { createFixtureOperator } from '../herdr/mods/council/runtime/plane-fixture.mjs';
 import { createFixturePlane } from '../herdr/mods/council/runtime/plane-transport-fixture.mjs';
@@ -206,6 +207,98 @@ test('revision change during preparation GET leaves no intent or send',async t=>
   ctx.githubState.mutate=async()=>{if(ctx.githubState.calls.length===2) assert.equal((await ctx.triage()).success,true);};
   await assert.rejects(ctx.publisher.prepareEvidence(github.pull.html_url),{code:'scope_conflict'});
   assert.equal(ctx.events().length,0); assert.equal(ctx.plane.snapshot().posts,0);
+});
+
+test('intent commit rejects expiry or rollback without leaving an intent or temporary file',async t=>{
+  for (const fault of ['expiry','rollback']) {
+    const ctx=await setup(t); let fired=false;
+    const publisher=ctx.create({hook:(point,type)=>{
+      if (!fired && point==='before_link' && type==='intent') {
+        fired=true; ctx.clock.now=fault==='expiry'?310000:9999;
+      }
+    }});
+    await assert.rejects(publisher.prepareEvidence(github.pull.html_url),{code:'stale_preview'});
+    assert.equal(ctx.events().length,0); assert.equal(ctx.plane.snapshot().posts,0);
+    const dir=join(ctx.privateRoot,readdirSync(ctx.privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+    assert.equal(readdirSync(dir).some(name=>name.endsWith('.tmp')),false);
+    if (fault==='rollback') ctx.clock.now=10000;
+    const retry=await publisher.prepareEvidence(github.pull.html_url);
+    assert.equal(retry.operation.state,'prepared');
+    assert.equal(ctx.events().filter(event=>event.type==='intent').length,1);
+    assert.equal(ctx.events().filter(event=>event.type==='start').length,0); assert.equal(ctx.plane.snapshot().posts,0);
+  }
+});
+
+test('real COU-8 CLI triage at the intent boundary leaves no stale intent and allows the new revision',async t=>{
+  const ctx=await setup(t); let fired=false;
+  const publisher=ctx.create({hook:(point,type)=>{
+    if (!fired && point==='before_link' && type==='intent') {
+      fired=true;
+      const input={id:'wi-t006',ifRevision:1,requestId:'boundary-triage',actor:'Fixture',patch:{priority:'high'}};
+      const child=spawnSync(process.execPath,[resolve('bin/council.js'),'work-item','triage','--input-json',JSON.stringify(input),'--project',ctx.project],{encoding:'utf8'});
+      assert.equal(child.status,0,child.stderr); assert.equal(JSON.parse(child.stdout).item.lifecycle.revision,2);
+    }
+  }});
+  await assert.rejects(publisher.prepareEvidence(github.pull.html_url),{code:'scope_conflict'});
+  assert.equal(ctx.readCurrent().itemRevision,2); assert.equal(ctx.events().length,0); assert.equal(ctx.plane.snapshot().posts,0);
+  const dir=join(ctx.privateRoot,readdirSync(ctx.privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+  assert.equal(readdirSync(dir).some(name=>name.endsWith('.tmp')),false);
+  const retry=await publisher.prepareEvidence(github.pull.html_url);
+  assert.equal(retry.preview.itemRevision,2); assert.equal(retry.operation.state,'prepared');
+  const events=ctx.events(); assert.equal(events.length,1); assert.equal(events[0].type,'intent');
+  assert.equal(events[0].data.snapshot.itemRevision,2); assert.equal(ctx.plane.snapshot().posts,0);
+});
+
+test('intent boundary rechecks time after the synchronous reader and rejects changed pins',async t=>{
+  for (const fault of ['reader-expiry','reader-rollback','installation','link','status','author']) {
+    const ctx=await setup(t); let atBoundary=false;
+    const publisher=ctx.create({
+      hook:(point,type)=>{if(point==='before_link' && type==='intent') atBoundary=true;},
+      readCurrent:()=>{
+        const local=ctx.readCurrent();
+        if(atBoundary) {
+          if(fault==='reader-expiry') ctx.clock.now=310000;
+          if(fault==='reader-rollback') ctx.clock.now=9999;
+          if(fault==='installation') local.installationId='1b6eba33-7959-4d8b-9387-576ac77ea410';
+          if(fault==='link') local.linkRevision++;
+          if(fault==='status') local.status='closed';
+          if(fault==='author') local.target={...local.target,authorId:'e709703f-50b5-4f0c-80a1-d5a78d62574a'};
+        }
+        return local;
+      }
+    });
+    await assert.rejects(publisher.prepareEvidence(github.pull.html_url),{code:fault.startsWith('reader-')?'stale_preview':'scope_conflict'});
+    assert.equal(ctx.events().length,0,fault); assert.equal(ctx.plane.snapshot().posts,0,fault);
+    const dir=join(ctx.privateRoot,readdirSync(ctx.privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+    assert.equal(readdirSync(dir).some(name=>name.endsWith('.tmp')),false,fault);
+  }
+});
+
+test('concurrent Prepare calls converge on one verified intent',async t=>{
+  const ctx=await setup(t);
+  const [first,second]=await Promise.all([
+    ctx.publisher.prepareEvidence(github.pull.html_url),ctx.publisher.prepareEvidence(github.pull.html_url)
+  ]);
+  assert.equal(first.operation.operationId,second.operation.operationId);
+  assert.equal(first.preview.operationId,second.preview.operationId);
+  assert.equal(ctx.events().filter(event=>event.type==='intent').length,1);
+  assert.equal(ctx.events().filter(event=>event.type==='start').length,0); assert.equal(ctx.plane.snapshot().posts,0);
+});
+
+test('a true post-commit revision change is still detected before preview is returned',async t=>{
+  const ctx=await setup(t); let fired=false;
+  const publisher=ctx.create({hook:(point,type)=>{
+    if(!fired && point==='after_link' && type==='intent') {
+      fired=true;
+      const input={id:'wi-t006',ifRevision:1,requestId:'post-commit-triage',actor:'Fixture',patch:{priority:'high'}};
+      const child=spawnSync(process.execPath,[resolve('bin/council.js'),'work-item','triage','--input-json',JSON.stringify(input),'--project',ctx.project],{encoding:'utf8'});
+      assert.equal(child.status,0,child.stderr); assert.equal(JSON.parse(child.stdout).item.lifecycle.revision,2);
+    }
+  }});
+  await assert.rejects(publisher.prepareEvidence(github.pull.html_url),{code:'scope_conflict'});
+  const events=ctx.events(); assert.equal(events.length,1); assert.equal(events[0].type,'intent');
+  assert.equal(events[0].data.snapshot.itemRevision,1); assert.equal(ctx.readCurrent().itemRevision,2);
+  assert.equal(ctx.plane.snapshot().posts,0);
 });
 
 test('expiry or COU-8 corruption during preparation GET leaves no intent or send',async t=>{
