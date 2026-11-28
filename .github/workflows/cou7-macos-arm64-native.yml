@@ -1,0 +1,35 @@
+name: COU-7 isolated macOS arm64 native probe
+on:
+  push:
+    branches: [codex/cou-7-macos-arm64-probe]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: e8974841558641faaa9aecab7386fa7001928137
+          path: council
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          architecture: arm64
+      - name: Probe isolated package, Core and native session
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/harness/.github/cou7-macos/probe.sh"
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cou7-macos-arm64-native
+          path: ${{ runner.temp }}/cou7-macos-evidence
+          retention-days: 3
+          if-no-files-found: warn
