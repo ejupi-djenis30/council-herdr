@@ -39,6 +39,7 @@ summary() {
 }
 trap summary EXIT
 cp "$harness/.github/cou7-macos/session-replay.json" "$evidence/offline-session-replay.json"
+cp "$harness/.github/cou7-macos/ui-gate-replay.json" "$evidence/offline-ui-gate-replay.json"
 say "harness_sha=$GITHUB_SHA"
 say "council_sha=$(git -C "$council" rev-parse HEAD)"
 say "council_tree=$(git -C "$council" rev-parse 'HEAD^{tree}')"
@@ -136,7 +137,7 @@ fi
 
 if [ -x "$root/arch-probe" ]; then
   found=0
-  for pid in $(pgrep -f "$root/bin/(hc|herdr-core)" || true); do
+  for pid in $(pgrep -x '(hc|herdr-core)' || true); do
     if "$root/arch-probe" "$corebinary" "$pid" >> "$root/core-architectures.jsonl" 2>/dev/null; then found=$((found+1)); fi
   done
   say "owned_core_architecture_processes=$found"
@@ -171,14 +172,40 @@ except OSError: pass
 PY
 fi
 
-if [ "$input" = pass ]; then
-  ui=not_run_requires_native_UI_harness
-  first=native_UI_harness_required
+if [ "$input" = pass ] && kill -0 "$app_pid" 2>/dev/null && [ -x "$root/native-probe" ]; then
+  if run native_herdr_focus 20 "$root/native-probe" focus "$app_pid"; then
+    cat "$root/native_herdr_focus.out" >> "$facts"
+    if run ui_precondition 10 "$nodebin" "$harness/.github/cou7-macos/ui-gate.cjs" "$root/native_herdr_focus.out" "$root/desktop_window_inspection.out"; then
+      cat "$root/ui_precondition.out" >> "$facts"
+      if run desktop_space_new 35 "$app" do space.new --name 'COU7 macOS fixture' --folder "$root/project" --argv '["/usr/bin/printf","COU7_MAC_PROJECT"]'; then
+        node - "$root/desktop_space_new.out" >> "$facts" <<'NODE'
+const fs=require('fs');try{const x=JSON.parse(fs.readFileSync(process.argv[2]));console.log(JSON.stringify({stage:'project_terminal',address:x.terminal??null,interface:'Desktop_command'}))}catch{console.log('project_terminal=unavailable')}
+NODE
+        if run desktop_mod_open 30 "$app" do mod.open --name council; then
+          ui=workspace_opened_item_actions_not_run
+          run desktop_workspace_status 20 "$app" status || true
+          node - "$root/desktop_workspace_status.out" >> "$facts" <<'NODE'
+const fs=require('fs');try{const x=JSON.parse(fs.readFileSync(process.argv[2]));console.log(JSON.stringify({stage:'workspace_status',interface:'Desktop_command_readonly',councilOverlay:Array.isArray(x.overlays)&&x.overlays.includes('council')}))}catch{console.log('workspace_status_parse=failed')}
+NODE
+          if run desktop_workspace_shot 20 "$app" shot "$evidence/workspace-internal.png"; then say 'workspace_screenshot=app_internal_frame_not_native_input'; fi
+          run workspace_AX_inspection 20 "$root/native-probe" inspect "$app_pid" || true
+          cat "$root/workspace_AX_inspection.out" >> "$facts" 2>/dev/null || true
+          first=native_work_item_UI_harness_required
+        else ui=desktop_mod_open_failed; first=desktop_mod_open_failed; diagnostic desktop_mod_open_error "$root/desktop_mod_open.err"; fi
+      else ui=desktop_space_new_failed; first=desktop_space_new_failed; diagnostic desktop_space_new_error "$root/desktop_space_new.err"; fi
+    else
+      cat "$root/ui_precondition.out" >> "$facts" 2>/dev/null || true
+      ui=blocked_before_any_UI_mutation; first=native_herdr_focus_not_proven
+    fi
+  else ui=blocked_before_any_UI_mutation; first=native_herdr_focus_probe_failed; fi
+elif [ "$input" = pass ]; then
+  ui=blocked_before_any_UI_mutation
+  first=desktop_process_or_native_probe_unavailable
 else
   ui=blocked_before_any_UI_mutation
   first="$input"
 fi
-say 'ui_mutations=none'
+say 'work_item_ui_mutations=none'
 say 'cli_fallback=not_run'
 say 'cleanup=only_finished_owned_probe_removed_remaining_isolated_processes_to_runner_teardown'
 if [ -n "$app_pid" ] && kill -0 "$app_pid" 2>/dev/null; then kill "$app_pid" 2>/dev/null || true; fi

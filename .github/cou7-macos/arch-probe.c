@@ -1,6 +1,7 @@
 #include <libproc.h>
-#include <sys/proc_info.h>
-#include <mach/machine.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/proc.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,10 +15,16 @@ int main(int argc, char **argv) {
   pid_t pid = (pid_t)strtol(argv[2], NULL, 10);
   int length = proc_pidpath(pid, actual, sizeof(actual));
   if (length <= 0 || !realpath(actual, canonical) || strcmp(expected, canonical)) return 4;
-  struct proc_archinfo info = {0};
-  int n = proc_pidinfo(pid, PROC_PIDARCHINFO, 0, &info, sizeof(info));
-  if (n != sizeof(info)) return 5;
-  printf("{\"pathMatchesOwnedBinary\":true,\"cpuType\":%d,\"cpuSubtype\":%d,\"arm64\":%s,\"posixSession\":%d}\n",
-    info.p_cputype, info.p_cpusubtype, info.p_cputype == CPU_TYPE_ARM64 ? "true" : "false", getsid(pid));
+  struct kinfo_proc info = {0};
+  size_t n = sizeof(info);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  if (sysctl(mib, 4, &info, &n, NULL, 0) != 0 || n != sizeof(info)) return 5;
+#ifdef P_TRANSLATED
+  const char *translated = (info.kp_proc.p_flag & P_TRANSLATED) ? "true" : "false";
+#else
+  const char *translated = "null";
+#endif
+  printf("{\"pathMatchesOwnedBinary\":true,\"translated\":%s,\"posixSession\":%d,\"sameUid\":%s}\n", translated, getsid(pid),
+    info.kp_eproc.e_ucred.cr_uid == getuid() ? "true" : "false");
   return 0;
 }
