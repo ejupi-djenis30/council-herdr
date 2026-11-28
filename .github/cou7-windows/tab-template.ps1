@@ -32,3 +32,13 @@ function Get-Cou7ItemPlan([Drawing.Bitmap]$frame,[Drawing.Bitmap]$title,[Drawing
   if ($titleScore -gt 3.0 -or $buttonScore -gt 3.0) { return @{matched=$false;reason='item_template_mismatch';titleScore=$titleScore;buttonScore=$buttonScore;point=$null} }
   return @{matched=$true;titleScore=$titleScore;buttonScore=$buttonScore;local=@(150,575);origin=@(($windowLeft+16),($windowTop+16));point=@(($windowLeft+16+150),($windowTop+16+575))}
 }
+function Get-Cou7HandoffPlan([Drawing.Bitmap]$frame,[Drawing.Bitmap]$header,[Drawing.Bitmap]$guidance,[Drawing.Bitmap]$button,[int]$windowLeft,[int]$windowTop) {
+  if ($frame.Width -ne 1008 -or $frame.Height -ne 696 -or $header.Width -ne 155 -or $header.Height -ne 24 -or $guidance.Width -ne 370 -or $guidance.Height -ne 39 -or $button.Width -ne 143 -or $button.Height -ne 23) {
+    return @{matched=$false;reason='unexpected_geometry';point=$null}
+  }
+  $headerScore=Get-Cou7RegionScore $frame $header 84 143
+  $guidanceScore=Get-Cou7RegionScore $frame $guidance 84 229
+  $buttonScore=Get-Cou7RegionScore $frame $button 777 141
+  if($headerScore -gt 3.0 -or $guidanceScore -gt 3.0 -or $buttonScore -gt 3.0) {return @{matched=$false;reason='handoff_template_mismatch';headerScore=$headerScore;guidanceScore=$guidanceScore;buttonScore=$buttonScore;point=$null}}
+  return @{matched=$true;headerScore=$headerScore;guidanceScore=$guidanceScore;buttonScore=$buttonScore;local=@(850,153);origin=@(($windowLeft+16),($windowTop+16));point=@(($windowLeft+16+850),($windowTop+16+153))}
+}

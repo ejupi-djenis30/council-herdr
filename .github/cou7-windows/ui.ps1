@@ -241,6 +241,42 @@ function HandoffText {
   }
   return ($parts -join "`n")
 }
+function VerifyHandoffByCopy($item) {
+  if ($item.nextAction -ne 'Review the handoff against the acceptance criteria.') { throw 'handoff_guidance_readback_mismatch' }
+  CheckWindow
+  $r=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)){throw 'window_geometry_unavailable'}
+  [void][Cou7UiInput]::SetCursorPos($r.Left+24,$r.Top+24)
+  FrameBarrier
+  $frame=CaptureWindow
+  $header=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/handoff-header-template.png'))
+  $guidance=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/handoff-guidance-template.png'))
+  $button=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/handoff-copy-template.png'))
+  try {$plan=Get-Cou7HandoffPlan $frame $header $guidance $button $r.Left $r.Top}
+  finally {$frame.Dispose();$header.Dispose();$guidance.Dispose();$button.Dispose()}
+  Record 'ui_handoff_visual_plan' $plan
+  if(-not $plan.matched){throw 'handoff_visual_guard_failed'}
+  $script:root=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+  $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $copies=@(foreach($element in $all) { try { if (([string]$element.Current.Name).StartsWith('Copy saved handoff') -and -not $element.Current.IsOffscreen) { $element } } catch { } })
+  if($copies.Count -gt 1){throw 'handoff_copy_control_not_unique'}
+  [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
+  $watch=[Cou7ClipboardWatch]::new()
+  try {
+    if($copies.Count -eq 1){Click $copies[0]}
+    else {
+      CheckWindow
+      $current=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$current)){throw 'window_geometry_unavailable'}
+      if($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom){throw 'window_geometry_changed'}
+      EmitClick $plan.point[0] $plan.point[1]
+    }
+    if(-not $watch.WaitForChange(12000)){throw 'clipboard_update_not_observed'}
+  } finally {$watch.Dispose()}
+  FrameBarrier
+  $copied=[Windows.Forms.Clipboard]::GetText() -replace "`r`n","`n"
+  $expected=([string]$item.result.output) -replace "`r`n","`n"
+  if($copied -ne $expected -or -not $copied.Contains('Heading: # Windows Native Checkpoint') -or -not $copied.Contains('Next action: compare the heading with the saved criteria.')) {throw 'handoff_copy_mismatch'}
+  Record 'ui_handoff_content' @{ heading=$true;outputNext=$true;guidance=$true;method='native_copy_matches_installed_result_and_visible_guidance' }
+}
 function Diagnostic {
   try {
     $allow=@('Work items','New work item','Save work item','Refresh roles','Windows fixture · verifier','Delegate','Confirm delegation','Open delegation','Read saved handoff','Back to work item','Copy session ID','Open work item','Open work item Windows native checkpoint')
@@ -319,8 +355,9 @@ try {
     ClickOpenItem; Await 'Read saved handoff'; Await 'Open delegation'; Shot 'reopened-item'
     Click (One 'Read saved handoff'); Await 'Back to work item'; Shot 'reopened-handoff'; Mark 'reopened_handoff'
     $visibleText=HandoffText
-    if (-not $visibleText.Contains('Heading: # Windows Native Checkpoint') -or -not $visibleText.Contains('Next action: compare the heading with the saved criteria.') -or -not $visibleText.Contains('Review the handoff against the acceptance criteria.')) { throw 'uia_handoff_content_not_observed' }
-    Record 'ui_handoff_content' @{ heading=$true; outputNext=$true; guidance=$true }
+    if ($visibleText.Contains('Heading: # Windows Native Checkpoint') -and $visibleText.Contains('Next action: compare the heading with the saved criteria.') -and $visibleText.Contains('Review the handoff against the acceptance criteria.')) {
+      Record 'ui_handoff_content' @{ heading=$true; outputNext=$true; guidance=$true; method='native_UIA_text' }
+    } else { VerifyHandoffByCopy $item }
     Click (One 'Back to work item'); Await 'Open delegation'; Click (One 'Open delegation'); Await 'Copy session ID'
     [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
     $watch=[Cou7ClipboardWatch]::new()

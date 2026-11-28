@@ -52,6 +52,7 @@ try {
     fixturePidMatchesNode=$sameNode; fixturePidAliveAfterWorker=$participantAlive;
     jobReadback=@{sessionId=$status.sessionId;state=$status.state;deliveryState=$status.deliveryState;address=$status.participant.address;power=$status.participant.power;workerAddress=$status.worker.address};
     resultReadback=@{sessionId=$result.sessionId;ready=$result.ready;turn=$result.turn};
+    resultSource=$item.result.source; captureScope=$item.result.captureScope;
     expectedHeading=$output.Contains('Heading: # Windows Native Checkpoint'); expectedNext=$output.Contains('Next action: compare the heading with the saved criteria.');
     events=@($events | ForEach-Object event); assignmentCount=@($events | Where-Object event -eq 'assignment').Count; launchCount=$launches.Count }
   Fact 'delivery_observation' $record
@@ -60,7 +61,7 @@ try {
        $status.sessionId -eq $session -and $result.sessionId -eq $session -and $result.ready -eq $true -and $status.participant.address -eq $fixture.address -and $status.participant.power -eq 'off' -and
        $worker.address -eq $status.worker.address -and $p.ended -eq $true -and $p.reason -eq 'status' -and $p.status -eq 'done' -and $pWait.ExitCode -eq 0 -and $p.turn -gt $participant.turn -and $participant.status.state -eq 'working' -and $result.turn -eq $p.turn -and
        $w.ended -eq $true -and $w.reason -eq 'exit' -and $w.exit_code -eq 0 -and $wWait.ExitCode -eq 0 -and $sameNode -and -not $participantAlive -and
-       $record.expectedHeading -and $record.expectedNext -and $item.nextAction -eq 'Review the handoff against the acceptance criteria.' -and $record.assignmentCount -eq 1 -and $record.launchCount -eq 1 -and @($record.events | Where-Object { $_ -eq 'result' }).Count -eq 1 -and 'error' -notin $record.events)
+       $record.expectedHeading -and $record.expectedNext -and $record.resultSource -eq 'terminal_screen' -and $item.nextAction -eq 'Review the handoff against the acceptance criteria.' -and $record.assignmentCount -eq 1 -and $record.launchCount -eq 1 -and @($record.events | Where-Object { $_ -eq 'result' }).Count -eq 1 -and 'error' -notin $record.events)
   Fact 'delivery_verdict' @{ pass=$ok }
   if (-not $ok) { exit 1 }
 } catch {

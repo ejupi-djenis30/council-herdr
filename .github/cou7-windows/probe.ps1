@@ -13,6 +13,7 @@ Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/tab-rep
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/confirm-replay.json') (Join-Path $evidence 'offline-confirm-replay.json')
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/item-replay.json') (Join-Path $evidence 'offline-item-replay.json')
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/clipboard-replay.json') (Join-Path $evidence 'offline-clipboard-replay.json')
+Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/handoff-replay.json') (Join-Path $evidence 'offline-handoff-replay.json')
 $env:COU7_ROOT = $root
 $env:COU7_EVIDENCE = $evidence
 $env:APPDATA = Join-Path $root 'appdata'
