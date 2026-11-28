@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="clock" data-style="mono" role="img" aria-label="Clock">
+  <title>Clock</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M21 5.24C11.9 6.69 5 14.54 5 24C5 34.49 13.51 43 24 43C33.46 43 41.31 36.1 42.76 27H37.68C36.3 33.3 30.7 38 24 38C16.27 38 10 31.73 10 24C10 17.3 14.7 11.7 21 10.32Z" />
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M26 5.1C35.1 6.05 41.95 12.9 42.9 22H37.86C36.95 15.66 32.34 11.05 26 10.14Z" />
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M24 13C25.1 13 26 13.9 26 15V22H32C33.1 22 34 22.9 34 24C34 25.1 33.1 26 32 26H24C22.9 26 22 25.1 22 24V15C22 13.9 22.9 13 24 13Z" />
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="folder" data-style="mono" role="img" aria-label="Folder">
+  <title>Folder</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M10 8H18C20 8 21 9 23 11L26 14H38Q42 14 42 18V36Q42 40 38 40H10Q6 40 6 36V12Q6 8 10 8Z M12 18H36Q38 18 38 20Q38 22 36 22H12Q10 22 10 20Q10 18 12 18Z" />
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M30 26H38Q42 26 42 30V35L30 26Z" />
+</svg>

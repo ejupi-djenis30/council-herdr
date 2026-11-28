@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" data-icon="message" data-style="mono" role="img" aria-label="Message">
+  <title>Message</title>
+  <path data-tone="primary" fill="currentColor" fill-rule="evenodd" d="M12 7H27V13.5C27 16.3 28.2 18 30.4 19.4L42 26.5V30C42 33.3 39.3 36 36 36H18L9.6 42.3C8.9 42.8 8 42.3 8 41.5V34.5C6.8 33.4 6 31.8 6 30V13C6 9.7 8.7 7 12 7ZM15 17H21C22.1046 17 23 17.8954 23 19V19C23 20.1046 22.1046 21 21 21H15C13.8954 21 13 20.1046 13 19V19C13 17.8954 13.8954 17 15 17ZM15 25H29C30.1046 25 31 25.8954 31 27V27C31 28.1046 30.1046 29 29 29H15C13.8954 29 13 28.1046 13 27V27C13 25.8954 13.8954 25 15 25Z"/>
+  <path data-tone="secondary" fill="currentColor" fill-rule="evenodd" d="M30 7H36C39.3 7 42 9.7 42 13V22.3L32.2 16.3C30.7 15.4 30 14.5 30 13Z"/>
+</svg>

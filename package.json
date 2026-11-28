@@ -26,6 +26,7 @@
     "herdr/mods/council/*.js",
     "herdr/mods/council/mod.json",
     "herdr/mods/council/icons/*.svg",
+    "herdr/mods/council/icons/LICENSE.ejupilabs-icons.txt",
     "herdr/mods/council/runtime/*.mjs",
     "plugin.json",
     "mcp.json",
