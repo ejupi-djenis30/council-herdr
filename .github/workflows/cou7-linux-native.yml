@@ -1,0 +1,37 @@
+name: COU-7 isolated Linux native probe
+on:
+  push:
+    branches: [codex/cou-7-linux-native-probe]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: e8974841558641faaa9aecab7386fa7001928137
+          path: council
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install disposable runner graphical prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xauth x11-utils xdotool imagemagick tesseract-ocr dbus-x11 vulkan-tools mesa-vulkan-drivers libvulkan1
+      - name: Run isolated native probe
+        run: xvfb-run -a -s '-screen 0 1440x1000x24' dbus-run-session -- bash "$GITHUB_WORKSPACE/harness/.github/cou7-linux/probe.sh"
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cou7-linux-native
+          path: ${{ runner.temp }}/cou7-evidence
+          retention-days: 3
+          if-no-files-found: warn
