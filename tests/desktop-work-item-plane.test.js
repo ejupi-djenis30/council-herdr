@@ -431,6 +431,10 @@ function find(node, id) {
   return null;
 }
 
+function visibleText(node) {
+  return typeof node === 'string' ? [node] : (node?.nodes ?? []).flatMap(visibleText);
+}
+
 function renderer() {
   const exports = {
     'gpui-kit': ['div', 'svg'],
@@ -492,6 +496,51 @@ test('normal Plane controls preserve focus, expose fixed handoff instructions an
   assert.deepEqual(clipboard, [replies.openB.planeHandoff.localRef]);
   assert.equal(control('publish'), null);
   assert.deepEqual(h.verbs(), [['show'], ['open']]);
+});
+
+test('Plane explains a damaged history alongside the original receipt until a fresh healthy Show', async () => {
+  const healthy = replies.showA;
+  const damaged = { ...healthy, plane: { ...healthy.plane, availability: 'read_only', freshness: 'cached',
+    operation: { ...healthy.plane.operation, reason: 'integrity_error' } } };
+  const reason = 'Plane updates are read-only because part of the local Plane history could not be verified.';
+  let reply = healthy;
+  const h = harness(({ project }) => wire(reply, project));
+  const plane = await h.select();
+  const view = await viewHarness(plane);
+  const initial = plane.receipts[0];
+  const receiptId = `copy-plane-receipt-${initial.operationId}`;
+  const retained = view.control('open-plane-console');
+  assert.equal(retained.props.accessibility_label, 'Prepare Plane update');
+
+  reply = damaged;
+  await plane.refresh();
+  const verifyDamaged = (current, rendered) => {
+    assert.deepEqual(current.receipts, [initial]);
+    assert.equal(current.receipts[0], initial);
+    assert.equal(current.operation, initial);
+    assert.equal(initial.reason, null);
+    assert.equal(current.freshness, 'cached');
+    assert.equal(rendered.control('open-plane-console'), null);
+    assert.ok(visibleText(rendered.control(`work-item-plane-${current.viewId}`)).includes(reason));
+    assert.equal(rendered.control('refresh-plane').props.accessibility_label, `Refresh Plane status. ${reason} Published`);
+    assert.match(rendered.control(receiptId).props.accessibility_label,
+      new RegExp(`Copy receipt ID ${initial.receipt.commentId}.*Source: Read-only reconciliation`));
+  };
+  verifyDamaged(plane, view);
+  retained.props.on_click(null, view.cx);
+  await view.settle();
+  assert.deepEqual(view.focusChanges, []);
+
+  const returned = await h.select();
+  const returnedView = await viewHarness(returned);
+  verifyDamaged(returned, returnedView);
+
+  reply = healthy;
+  await returned.refresh();
+  assert.equal(returned.operation, initial);
+  assert.equal(returnedView.control('open-plane-console').props.accessibility_label, 'Prepare Plane update');
+  assert.ok(!visibleText(returnedView.control(`work-item-plane-${returned.viewId}`)).includes(reason));
+  assert.deepEqual(h.verbs(), [['show'], ['show'], ['show'], ['show']]);
 });
 
 test('review regression: A’s retained Prepare has no effect when B offers the same action', async () => {
