@@ -95,7 +95,10 @@ test('v1 fixture rejects scope, role, item, status and transport mismatches befo
   const cases = [
     (route,r) => { if (route === '/api/v1/users/me/') r.body.id = issueIds[1]; },
     (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.identifier = 'OTHER'; },
-    (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.member_role = 'guest'; },
+    (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.member_role = 10; },
+    (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.member_role = '20'; },
+    (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.is_member = false; },
+    (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) delete r.body.is_member; },
     (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.deleted_at = '2020-01-01'; },
     (route,r) => { if (route.endsWith(`/projects/${profile.projectId}/`)) r.body.archived_at = '2020-01-01'; },
     (route,r) => { if (route.endsWith('/COU-12/')) r.body.workspace = issueIds[1]; },
@@ -116,7 +119,8 @@ test('profile pins and item references reject invalid scope and support exact UU
   const { make, privateRoot } = await setup(t);
   for (const replacement of [
     {origin:'http://example.test:4321'}, {origin:'https://example.test/path'}, {workspaceSlug:'../other'},
-    {projectKey:'cou'}, {projectId:issueIds[0].toUpperCase()}, {principalId:'bad'}, {allowedRoles:[]}
+    {projectKey:'cou'}, {projectId:issueIds[0].toUpperCase()}, {principalId:'bad'}, {allowedRoles:[]},
+    {allowedRoles:['20']}, {allowedRoles:[-1]}, {allowedRoles:[20.5]}
   ]) assert.throws(() => make(undefined, {profile:{...profile,...replacement}}), {code:'invalid_input'});
   const operator = make();
   for (const reference of ['COU-012', 'OTHER-12', '../COU-12', 'COU-9007199254740992']) await assert.rejects(operator.resolve('wi-shared', reference));
@@ -164,6 +168,65 @@ test('confirmation rechecks target, time, local item and scope before writing', 
   clock = 301001;
   await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
   clock = 999;
+  await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  assert.deepEqual(readdirSync(privateRoot), []);
+});
+
+test('numeric v1 membership is required at confirmation before any link write', async t => {
+  for (const membership of [false, undefined]) {
+    const { make, privateRoot } = await setup(t);
+    let changed = false;
+    const transport = fixtureTransport(profile, (route, response) => {
+      if (changed && route.endsWith(`/projects/${profile.projectId}/`)) {
+        if (membership === undefined) delete response.body.is_member;
+        else response.body.is_member = membership;
+      }
+    });
+    const operator = make(undefined, { transport });
+    const candidate = await operator.resolve('wi-shared', 'COU-12');
+    changed = true;
+    await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+    assert.deepEqual(readdirSync(privateRoot), []);
+    assert.equal(transport.posts, 0);
+  }
+  const { make, privateRoot } = await setup(t);
+  const operator = make();
+  const candidate = await operator.resolve('wi-shared', 'COU-12');
+  assert.equal((await operator.confirm('wi-shared', candidate.candidateId, candidate.localRef)).itemId, issueIds[0]);
+  assert.equal(readdirSync(privateRoot).length, 1);
+});
+
+test('expiry and clock rollback during provider reads never publish a link', async t => {
+  for (const afterGet of [301000, 301001, 1500]) {
+    const { make, privateRoot } = await setup(t);
+    let clock = 1000;
+    let verifying = false;
+    const transport = fixtureTransport(profile, (route) => {
+      if (verifying && route.endsWith(`/work-items/${issueIds[0]}/`)) clock = afterGet;
+    });
+    const operator = make(undefined, { transport, now: () => clock });
+    const candidate = await operator.resolve('wi-shared', 'COU-12');
+    verifying = true; clock = 2000;
+    await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+    assert.deepEqual(readdirSync(privateRoot), []);
+    assert.equal(transport.posts, 0);
+  }
+  const { make, privateRoot } = await setup(t);
+  let clock = 1000;
+  const operator = make(undefined, { now: () => clock });
+  const candidate = await operator.resolve('wi-shared', 'COU-12');
+  clock = 301000;
+  await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  assert.deepEqual(readdirSync(privateRoot), []);
+  clock = 300999;
+  assert.equal((await operator.confirm('wi-shared', candidate.candidateId, candidate.localRef)).itemId, issueIds[0]);
+});
+
+test('expiry after staging removes the temporary file without publishing', async t => {
+  const { make, privateRoot } = await setup(t);
+  const times = [1000, 2000, 2000, 2000, 301000];
+  const operator = make(undefined, { now: () => times.shift() });
+  const candidate = await operator.resolve('wi-shared', 'COU-12');
   await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
   assert.deepEqual(readdirSync(privateRoot), []);
 });

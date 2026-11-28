@@ -35,7 +35,7 @@ function validateProfile(profile) {
       /[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(profile.instanceLabel) || profile.instanceLabel.trim() !== profile.instanceLabel ||
       typeof profile.workspaceSlug !== 'string' || profile.workspaceSlug.length > 63 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(profile.workspaceSlug) ||
       typeof profile.projectKey !== 'string' || !/^[A-Z][A-Z0-9]{0,19}$/.test(profile.projectKey) ||
-      !Array.isArray(profile.allowedRoles) || !profile.allowedRoles.length || !profile.allowedRoles.every(r => typeof r === 'string' && /^[a-z0-9_-]{1,32}$/.test(r))) throw error('invalid_input');
+      !Array.isArray(profile.allowedRoles) || !profile.allowedRoles.length || !profile.allowedRoles.every(r => Number.isSafeInteger(r) && r >= 0)) throw error('invalid_input');
   let url;
   try { url = new URL(profile.origin); } catch { throw error('invalid_input'); }
   if (url.origin !== profile.origin || url.username || url.password || !((url.protocol === 'https:') ||
@@ -58,7 +58,7 @@ async function verify(profile, ref, transport) {
   if (user.id !== profile.principalId) throw error('authorization_denied');
   const project = await get(transport, `${base}/projects/${profile.projectId}/`);
   if (project.id !== profile.projectId || project.workspace !== profile.workspaceId || project.identifier !== profile.projectKey ||
-      project.archived_at !== null || project.deleted_at !== null || !profile.allowedRoles.includes(project.member_role)) throw error('scope_conflict');
+      project.archived_at !== null || project.deleted_at !== null || project.is_member !== true || !profile.allowedRoles.includes(project.member_role)) throw error('scope_conflict');
   let id = ref, sequence;
   if (!uuid(ref)) {
     const pattern = new RegExp(`^${profile.projectKey}-([1-9][0-9]*)$`);
@@ -137,11 +137,18 @@ export function createFixtureOperator({ privateRoot, project, installationId, pr
       requireItem(id);
       const c = candidates.get(candidateId);
       const confirmedAt = now();
-      if (!c || !Number.isSafeInteger(confirmedAt) || c.item !== id || c.scope !== scope || localRef !== refFor(id) || confirmedAt < c.createdAt || confirmedAt - c.createdAt > 300000) throw error('scope_conflict');
+      if (!c || !Number.isSafeInteger(confirmedAt) || c.item !== id || c.scope !== scope || localRef !== refFor(id) || confirmedAt < c.createdAt || confirmedAt - c.createdAt >= 300000) throw error('scope_conflict');
+      const checkedTime = previous => {
+        const value = now();
+        if (!Number.isSafeInteger(value) || value < previous || value - c.createdAt >= 300000) throw error('scope_conflict');
+        return value;
+      };
       const current = await verify(pins, c.ref, transport);
       requireItem(id);
+      const verifiedAt = checkedTime(confirmedAt);
       if (JSON.stringify(current) !== JSON.stringify(c.link)) throw error('scope_conflict');
       const prior = read(id);
+      const readAt = checkedTime(verifiedAt);
       if (prior) {
         if (JSON.stringify(prior) !== JSON.stringify(c.link)) throw error('scope_conflict');
         return prior;
@@ -150,6 +157,7 @@ export function createFixtureOperator({ privateRoot, project, installationId, pr
       const temporary = join(privateDir, `.${randomUUID()}.tmp`);
       writeFileSync(temporary, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
       try {
+        checkedTime(readAt);
         try { linkSync(temporary, pathFor(id)); } catch (e) { if (e.code !== 'EEXIST') throw e; }
       } finally { unlinkSync(temporary); }
       const existing = read(id);
