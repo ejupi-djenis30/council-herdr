@@ -280,7 +280,7 @@ function VerifyHandoffByCopy($item) {
 function ClickSessionCopy {
   $script:stage='Copy session ID'
   $nodes=@(Nodes 'Copy session ID' | Where-Object { -not $_.Current.IsOffscreen })
-  if($nodes.Count -eq 1){Click $nodes[0]; return 'native_UIA_and_clipboard'}
+  if($nodes.Count -eq 1){Click $nodes[0]; $script:sessionCopyInterface='native_UIA_and_clipboard'; return}
   if($nodes.Count -gt 1){throw 'session_copy_control_not_unique'}
   CheckWindow
   $r=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)){throw 'window_geometry_unavailable'}
@@ -300,7 +300,28 @@ function ClickSessionCopy {
   $current=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$current)){throw 'window_geometry_unavailable'}
   if($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom){throw 'window_geometry_changed'}
   EmitClick $plan.point[0] $plan.point[1]
-  return 'native_guarded_click_and_clipboard'
+  $script:sessionCopyInterface='native_guarded_click_and_clipboard'
+}
+function ConfirmDelegationOnce {
+  CheckWindow
+  $r=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)){throw 'window_geometry_unavailable'}
+  [void][Cou7UiInput]::SetCursorPos($r.Left+24,$r.Top+24)
+  FrameBarrier
+  $frame=CaptureWindow
+  $titleTemplate=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/confirm-title-template.png'))
+  $roleTemplate=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/confirm-role-template.png'))
+  $buttonTemplate=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/confirm-button-template.png'))
+  try {
+    $frame.Save((Join-Path $env:COU7_EVIDENCE 'ui-confirm-guard.png'),[Drawing.Imaging.ImageFormat]::Png)
+    $plan=Get-Cou7ConfirmPlan $frame $titleTemplate $roleTemplate $buttonTemplate $r.Left $r.Top
+  } finally {$frame.Dispose();$titleTemplate.Dispose();$roleTemplate.Dispose();$buttonTemplate.Dispose()}
+  Record 'ui_confirm_visual_plan' $plan
+  if(-not $plan.matched){throw 'confirm_visual_guard_failed'}
+  CheckWindow
+  $current=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$current)){throw 'window_geometry_unavailable'}
+  if($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom){throw 'window_geometry_changed'}
+  Attempt 'delegate'
+  EmitClick $plan.point[0] $plan.point[1]
 }
 function Diagnostic {
   try {
@@ -358,7 +379,7 @@ try {
     FrameBarrier
     $confirm=One 'Confirm delegation'; if ((PrimaryState $confirm) -ne 'enabled') { throw 'confirm_not_visually_enabled' }
     Shot 'delegate-form'; Mark 'delegate_form'
-    Attempt 'delegate'; Click $confirm
+    ConfirmDelegationOnce
     $uiObserved=$false
     try { Await 'Open delegation'; Shot 'delegated'; Mark 'delegated'; $uiObserved=$true }
     catch {
@@ -388,14 +409,14 @@ try {
     [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
     $watch=[Cou7ClipboardWatch]::new()
     try {
-      $copyInterface=ClickSessionCopy
+      ClickSessionCopy
       if (-not $watch.WaitForChange(12000)) { throw 'clipboard_update_not_observed' }
     } finally { $watch.Dispose() }
     FrameBarrier
     $copied=[Windows.Forms.Clipboard]::GetText().Trim()
     if ($copied -ne $item.job.sessionId) { throw 'reopened_session_id_mismatch' }
     Shot 'reopened-delegation'; Mark 'reopened_delegation'
-    Record 'ui_session_match' @{ match=$true; sessionId=$item.job.sessionId; interface=$copyInterface }
+    Record 'ui_session_match' @{ match=$true; sessionId=$item.job.sessionId; interface=$script:sessionCopyInterface }
   }
   Record 'ui_success' @{ mode=$Mode }
 } catch {

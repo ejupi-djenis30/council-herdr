@@ -50,3 +50,11 @@ function Get-Cou7DelegationPlan([Drawing.Bitmap]$frame,[Drawing.Bitmap]$criteria
   if($criteriaScore -gt 3.0 -or $buttonScore -gt 3.0 -or $captureScore -gt 3.0) { return @{matched=$false;reason='delegation_template_mismatch';criteriaScore=$criteriaScore;buttonScore=$buttonScore;captureScore=$captureScore;point=$null} }
   return @{matched=$true;criteriaScore=$criteriaScore;buttonScore=$buttonScore;captureScore=$captureScore;local=@(150,426);origin=@(($windowLeft+16),($windowTop+16));point=@(($windowLeft+166),($windowTop+442))}
 }
+function Get-Cou7ConfirmPlan([Drawing.Bitmap]$frame,[Drawing.Bitmap]$title,[Drawing.Bitmap]$role,[Drawing.Bitmap]$button,[int]$windowLeft,[int]$windowTop) {
+  if($frame.Width -ne 1008 -or $frame.Height -ne 696 -or $title.Width -ne 275 -or $title.Height -ne 22 -or $role.Width -ne 110 -or $role.Height -ne 18 -or $button.Width -ne 146 -or $button.Height -ne 30) {return @{matched=$false;reason='unexpected_geometry';point=$null}}
+  $titleScore=Get-Cou7RegionScore $frame $title 70 128
+  $roleScore=Get-Cou7RegionScore $frame $role 85 280
+  $buttonScore=Get-Cou7RegionScore $frame $button 85 410
+  if($titleScore -gt 3.0 -or $roleScore -gt 3.0 -or $buttonScore -gt 3.0) {return @{matched=$false;reason='confirm_template_mismatch';titleScore=$titleScore;roleScore=$roleScore;buttonScore=$buttonScore;point=$null}}
+  return @{matched=$true;titleScore=$titleScore;roleScore=$roleScore;buttonScore=$buttonScore;local=@(158,425);origin=@(($windowLeft+16),($windowTop+16));point=@(($windowLeft+174),($windowTop+441))}
+}
