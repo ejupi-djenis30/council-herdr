@@ -277,6 +277,31 @@ function VerifyHandoffByCopy($item) {
   if($copied -ne $expected -or -not $copied.Contains('Heading: # Windows Native Checkpoint') -or -not $copied.Contains('Next action: compare the heading with the saved criteria.')) {throw 'handoff_copy_mismatch'}
   Record 'ui_handoff_content' @{ heading=$true;outputNext=$true;guidance=$true;method='native_copy_matches_installed_result_and_visible_guidance' }
 }
+function ClickSessionCopy {
+  $script:stage='Copy session ID'
+  $nodes=@(Nodes 'Copy session ID' | Where-Object { -not $_.Current.IsOffscreen })
+  if($nodes.Count -eq 1){Click $nodes[0]; return 'native_UIA_and_clipboard'}
+  if($nodes.Count -gt 1){throw 'session_copy_control_not_unique'}
+  CheckWindow
+  $r=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)){throw 'window_geometry_unavailable'}
+  [void][Cou7UiInput]::SetCursorPos($r.Left+24,$r.Top+24)
+  FrameBarrier
+  $frame=CaptureWindow
+  $criteria=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/delegation-criteria-template.png'))
+  $button=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/delegation-copy-template.png'))
+  $capture=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/delegation-capture-template.png'))
+  try {
+    $frame.Save((Join-Path $env:COU7_EVIDENCE 'ui-delegation-copy-guard.png'),[Drawing.Imaging.ImageFormat]::Png)
+    $plan=Get-Cou7DelegationPlan $frame $criteria $button $capture $r.Left $r.Top
+  } finally {$frame.Dispose();$criteria.Dispose();$button.Dispose();$capture.Dispose()}
+  Record 'ui_delegation_visual_plan' $plan
+  if(-not $plan.matched){throw 'delegation_visual_guard_failed'}
+  CheckWindow
+  $current=[Cou7UiInput+RECT]::new();if(-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$current)){throw 'window_geometry_unavailable'}
+  if($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom){throw 'window_geometry_changed'}
+  EmitClick $plan.point[0] $plan.point[1]
+  return 'native_guarded_click_and_clipboard'
+}
 function Diagnostic {
   try {
     $allow=@('Work items','New work item','Save work item','Refresh roles','Windows fixture · verifier','Delegate','Confirm delegation','Open delegation','Read saved handoff','Back to work item','Copy session ID','Open work item','Open work item Windows native checkpoint')
@@ -358,18 +383,19 @@ try {
     if ($visibleText.Contains('Heading: # Windows Native Checkpoint') -and $visibleText.Contains('Next action: compare the heading with the saved criteria.') -and $visibleText.Contains('Review the handoff against the acceptance criteria.')) {
       Record 'ui_handoff_content' @{ heading=$true; outputNext=$true; guidance=$true; method='native_UIA_text' }
     } else { VerifyHandoffByCopy $item }
-    Click (One 'Back to work item'); Await 'Open delegation'; Click (One 'Open delegation'); Await 'Copy session ID'
+    Click (One 'Back to work item'); Await 'Open delegation'; Click (One 'Open delegation')
+    try { Await 'Copy session ID' } catch { if ($_.Exception.Message -ne 'uia_expected_control_absent') { throw } }
     [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
     $watch=[Cou7ClipboardWatch]::new()
     try {
-      Click (One 'Copy session ID')
+      $copyInterface=ClickSessionCopy
       if (-not $watch.WaitForChange(12000)) { throw 'clipboard_update_not_observed' }
     } finally { $watch.Dispose() }
     FrameBarrier
     $copied=[Windows.Forms.Clipboard]::GetText().Trim()
     if ($copied -ne $item.job.sessionId) { throw 'reopened_session_id_mismatch' }
     Shot 'reopened-delegation'; Mark 'reopened_delegation'
-    Record 'ui_session_match' @{ match=$true; sessionId=$item.job.sessionId; interface='native_UIA_and_clipboard' }
+    Record 'ui_session_match' @{ match=$true; sessionId=$item.job.sessionId; interface=$copyInterface }
   }
   Record 'ui_success' @{ mode=$Mode }
 } catch {
