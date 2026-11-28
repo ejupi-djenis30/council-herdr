@@ -17,7 +17,7 @@ Follow the work of your agents, coordinate a handoff, and record decisions. Open
 Open Herdr Desktop once to initialize your layouts. Council needs Node.js 20 or newer.
 
 ```bash
-git clone https://github.com/ejupi-djenis30/council-herdr.git
+git clone https://github.com/Ejupi-Labs/council-herdr.git
 cd council-herdr
 node herdr/install.js --menu --shortcut
 ```

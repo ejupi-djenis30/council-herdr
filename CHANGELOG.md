@@ -79,7 +79,7 @@
 - Invite active agents in the space automatically when you create a poll or debate in Desktop. Withheld invitations can go out after an agent registers within the delivery window.
 - Preview and install project-scoped Council skill and MCP settings for Claude Code, Junie, and OpenCode with `council alignment setup`.
 
-Upgrade the Council skill and plugin or MCP connection on existing agents, then reload those integrations and request alignment. See the [host setup guide](https://github.com/ejupi-djenis30/council-herdr/blob/v3.0.0/docs/alignment.md).
+Upgrade the Council skill and plugin or MCP connection on existing agents, then reload those integrations and request alignment. See the [host setup guide](https://github.com/Ejupi-Labs/council-herdr/blob/v3.0.0/docs/alignment.md).
 
 ## 2.0.1
 
