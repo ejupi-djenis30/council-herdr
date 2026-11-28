@@ -33,6 +33,7 @@ trap finalize EXIT
 cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/calibration.json" "$evidence/offline-calibration.json"
 cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/handoff-calibration.json" "$evidence/offline-handoff-calibration.json"
 cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/return-calibration.json" "$evidence/offline-return-calibration.json"
+cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/copy-calibration.json" "$evidence/offline-copy-calibration.json"
 say "harness_sha=$GITHUB_SHA"
 say "council_sha=$(git -C "$GITHUB_WORKSPACE/council" rev-parse HEAD)"
 say "council_tree=$(git -C "$GITHUB_WORKSPACE/council" rev-parse 'HEAD^{tree}')"
@@ -254,7 +255,7 @@ for(const line of lines){try{const v=JSON.parse(line);if(v.label==='ui')ui=v;if(
 const i=ui?.item||{}, worker=ui?.workerWait||{}, participant=ui?.participantWait||{};
 const checks={prerequisites:['display_check=pass','dbus_check=pass','software_vulkan=pass','package_smoke=pass','mod_receipt=present','installed_doctor=pass','installed_mod_check=pass','core_status=pass','core_terminal_transport=pass','desktop_window=visible','npm_test_exit=0'].every(v=>lines.includes(v)),
   createdAndDelegated:lines.includes('ui_gate=created_and_delegated'),overlayCloseAndReopen:lines.includes('ui_overlay_close_and_reopen=observed'),
-  reopenedHandoffAndDelegation:lines.includes('ui_reopen_handoff_and_delegation=observed'),
+  reopenedHandoffAndDelegation:lines.includes('ui_reopen_handoff_and_delegation=observed')&&lines.includes('UI_SESSION_CLIPBOARD_MATCH=true'),
   inputsAndRole:lines.includes('UI_REACHED=criteria-entered')&&lines.includes('UI_REACHED=role-selection-verified')&&selection?.verified===true&&selection?.savePreviouslyEnabled===false&&selection?.saveNowEnabled===true,
   singleGestures:lines.filter(l=>l==='UI_MUTATION_ATTEMPTED=save').length===1&&lines.filter(l=>l==='UI_MUTATION_ATTEMPTED=delegate').length===1,
   definition:i.id===created?.id&&i.title==='Linux native checkpoint'&&i.roleId==='verifier'&&JSON.stringify(i.criteria)===JSON.stringify(['Name the first heading.','Give a concrete next action.'])&&Number.isInteger(created?.revision)&&Number.isInteger(i.revision)&&i.revision>=created.revision,

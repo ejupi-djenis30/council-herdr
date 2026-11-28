@@ -150,6 +150,26 @@ def emit_return_from_handoff(frame, send):
     send(window_point(frame, point))
     return True
 
+def copy_session_plan(frame):
+    lines, rgb = frame['lines'], frame['rgb']
+    if len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:
+        return None
+    if not all((in_region(lines, 'Linux native checkpoint', (500, 220, 800, 265)),
+                in_region(lines, 'Acceptance criteria', (70, 285, 280, 320)),
+                in_region(lines, 'Name the first heading', (80, 320, 320, 350)),
+                in_region(lines, 'Give a concrete next action', (80, 350, 360, 385)))):
+        return None
+    if not all(min(pixel(rgb, x, y)) >= 250 for x,y in ((85,469),(206,469))):
+        return None
+    return (145, 469)
+
+def emit_copy_session(frame, send):
+    point = copy_session_plan(frame)
+    if point is None:
+        return False
+    send(window_point(frame, point))
+    return True
+
 def primary_adjacent(lines, rgb, anchor, side='left'):
     labels = boxes(lines, anchor)
     if len(labels) != 1 or len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:

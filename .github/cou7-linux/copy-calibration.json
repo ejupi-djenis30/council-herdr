@@ -1,0 +1,113 @@
+{
+  "sourceRun": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46177367894",
+  "sourceSha256": {
+    "ui-failed-reopened-delegation.png": "7e0a026610d8e8269ba0465eef8414e18643163ffe953e4dd59323395e7526be",
+    "ui-returned-to-item.png": "74b856ef6481cde6bef3c97f072dbb5d0db07cd0b07ad54c39a21a31df7b9ebe"
+  },
+  "ocr": "tesseract v5.5.3.20260724 PSM 11",
+  "cases": [
+    {
+      "case": "delegation",
+      "sourceSize": [
+        1000,
+        800
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "localPoint": [
+        145,
+        469
+      ],
+      "windowPoint": [
+        145,
+        469
+      ],
+      "mockInputCount": 1
+    },
+    {
+      "case": "delegation",
+      "sourceSize": [
+        1440,
+        1000
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": [
+        145,
+        469
+      ],
+      "windowPoint": [
+        365,
+        569
+      ],
+      "mockInputCount": 1
+    },
+    {
+      "case": "delegation",
+      "sourceSize": [
+        1441,
+        1001
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": [
+        145,
+        469
+      ],
+      "windowPoint": [
+        365,
+        569
+      ],
+      "mockInputCount": 1
+    },
+    {
+      "case": "item",
+      "sourceSize": [
+        1000,
+        800
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0
+    },
+    {
+      "case": "item",
+      "sourceSize": [
+        1440,
+        1000
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0
+    },
+    {
+      "case": "item",
+      "sourceSize": [
+        1441,
+        1001
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0
+    }
+  ],
+  "limitation": "Offline OCR differs from Ubuntu; no native input or clipboard read was performed."
+}

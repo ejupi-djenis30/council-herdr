@@ -68,7 +68,7 @@ def export_tokens(snapshot, name):
     with open(os.path.join(evidence, 'ui-' + name + '-ocr.json'), 'w', encoding='utf-8') as handle:
         json.dump(diagnostic, handle)
 
-def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=False, handoff_guard=False):
+def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=False, handoff_guard=False, delegation_guard=False):
     global stage
     stage = name
     end = time.monotonic() + seconds
@@ -81,7 +81,8 @@ def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=Fa
                 and (not alternatives or any(text_has(lines, x) for x in alternatives))
                 and not any(text_has(lines, x) for x in absent)
                 and (not queue_guard or vision.queue_plan(last[2]) is not None)
-                and (not handoff_guard or vision.handoff_plan(last[2]) is not None)):
+                and (not handoff_guard or vision.handoff_plan(last[2]) is not None)
+                and (not delegation_guard or vision.copy_session_plan(last[2]) is not None)):
                 export_image(last[0], name)
                 mark(name)
                 return last
@@ -170,6 +171,30 @@ def click_return_from_handoff(snapshot):
         click_xy(current, *point)
     if not vision.emit_return_from_handoff(frame, send):
         raise RuntimeError('current handoff does not match the calibrated return control')
+
+def copy_and_verify_session(snapshot, expected):
+    subprocess.run(['xclip', '-selection', 'clipboard', '-i'], input='COU7 synthetic sentinel', text=True,
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    focus_window(snapshot)
+    current = capture(time.monotonic() + 15)
+    focus_window(current)
+    frame = current[2]
+    def send(point):
+        print('UI_COPY_SESSION_POINT=' + json.dumps({'origin': [frame['left'], frame['top']],
+              'local': list(vision.copy_session_plan(frame)), 'window': list(point)}), flush=True)
+        click_xy(current, *point)
+    if not vision.emit_copy_session(frame, send):
+        raise RuntimeError('delegation does not match the calibrated copy-session control')
+    end = time.monotonic() + 15
+    while time.monotonic() < end:
+        try:
+            copied = run('xclip', '-selection', 'clipboard', '-o', timeout=min(3, end-time.monotonic())).stdout
+            if copied.strip() == expected:
+                print('UI_SESSION_CLIPBOARD_MATCH=true', flush=True)
+                return
+        except (subprocess.SubprocessError, OSError):
+            pass
+    raise RuntimeError('copied session ID did not match the installed CLI job readback')
 
 def click_primary(snapshot, anchor, required, role_before=None):
     focus_window(snapshot)
@@ -269,7 +294,9 @@ try:
         click_return_from_handoff(snap)
         snap = ready('returned-to-item', [title, 'Open delegation'])
         click(snap, 'Open delegation')
-        snap = ready('reopened-delegation', ['Copy session ID'], alternatives=[session, session[:15]])
+        snap = ready('reopened-delegation', [title, 'Acceptance criteria', 'Name the first heading',
+                                           'Give a concrete next action'], delegation_guard=True)
+        copy_and_verify_session(snap, session)
         print('UI_REOPENED_HANDOFF_AND_DELEGATION=' + session, flush=True)
         sys.exit(0)
 
