@@ -179,6 +179,7 @@ async function main() {
 council work-item review <start|note|attach|return> --input-json <JSON> | --input-file <path>
 council work-item list [--role <id>] [--state <state>] [--needs-attention] [--sort created|priority]
 council work-item show --id <id> [--review-id <id>]
+council work-item plane show|open --id <id> [--operation-id <ref>]
 council work-item delegate --id <id> [--timeout <seconds>] [--if-revision <rev> --request-id <id> --actor <name>]
 council work-item history --id <id> [--before <rev> --limit <n> | --request-id <id>]
 All commands accept --project <absolute-folder>.`);
@@ -187,14 +188,17 @@ All commands accept --project <absolute-folder>.`);
     let result;
     try {
       const reviewAction = action === 'review' ? args.shift() : null;
+      const planeAction = action === 'plane' ? args.shift() : null;
       if (action === 'review' && !['start', 'note', 'attach', 'return'].includes(reviewAction)) throw Error('Choose a review operation.');
+      if (action === 'plane' && !['show', 'open'].includes(planeAction)) throw Error('Choose a Plane inspection operation.');
       const inputFlags = ['input-json', 'input-file', 'project'];
       const allowed = {
         create: inputFlags, triage: inputFlags, close: inputFlags, reopen: inputFlags, review: inputFlags,
         list: ['project', 'role', 'state', 'needs-attention', 'sort'],
         show: ['id', 'project', 'review-id'],
         delegate: ['id', 'timeout', 'project', 'if-revision', 'request-id', 'actor'],
-        history: ['id', 'project', 'before', 'limit', 'request-id']
+        history: ['id', 'project', 'before', 'limit', 'request-id'],
+        plane: ['id', 'project', 'operation-id']
       }[action];
       if (!allowed) throw Error('Unknown work-item operation.');
       const opts = {};
@@ -225,6 +229,7 @@ All commands accept --project <absolute-folder>.`);
       } else {
         input.id = opts.id;
         if (opts['review-id'] !== undefined) input.reviewId = opts['review-id'];
+        if (opts['operation-id'] !== undefined) input.operationId = opts['operation-id'];
         if (opts.timeout !== undefined) input.timeoutSec = integer(opts.timeout);
         if (opts['if-revision'] !== undefined) input.ifRevision = integer(opts['if-revision']);
         if (opts['request-id'] !== undefined) input.requestId = opts['request-id'];
@@ -232,7 +237,7 @@ All commands accept --project <absolute-folder>.`);
         if (opts.before !== undefined) input.beforeRevision = integer(opts.before);
         if (opts.limit !== undefined) input.limit = integer(opts.limit);
       }
-      result = await workItemOperation(action, input, { project: opts.project ?? process.cwd() });
+      result = await workItemOperation(action === 'plane' ? `plane_${planeAction}` : action, input, { project: opts.project ?? process.cwd() });
     } catch (error) { result = { success: false, project: null, error: { code: 'invalid_input', message: error.message } }; }
     console.log(JSON.stringify(result));
     if (!result.success) process.exitCode = 1;
