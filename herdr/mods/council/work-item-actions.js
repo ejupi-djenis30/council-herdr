@@ -350,7 +350,7 @@ export function newWorkItemId() {
 }
 
 export function workItemScopeKey(scope) {
-  return JSON.stringify([scope.space, scope.engine.machine ?? null, folderKey(scope.project)]);
+  return JSON.stringify([scope.space, ...planeReaderScope(scope)]);
 }
 
 export function workItemScreenVisible(screen, { space, workspaceActive, target }) {
@@ -361,6 +361,254 @@ export function workItemScreenVisible(screen, { space, workspaceActive, target }
 
 function recoveryScope(scope) {
   return JSON.stringify([scope.engine.machine ?? null, folderKey(scope.project)]);
+}
+
+function planeReaderScope({ engine, project }) {
+  return [engine.machine ?? null, folderKey(project), folderKey(engine.node), folderKey(engine.entry), folderKey(engine.cli)];
+}
+
+const planeAvailability = ['disabled', 'read_only', 'operator_available'];
+const planeFreshness = ['current', 'cached', 'unavailable'];
+const planeStates = ['prepared', 'approved_unsent', 'expired', 'cancelled', 'conflict', 'offline', 'delivery_uncertain', 'published'];
+const planeErrors = ['plane_disabled', 'operator_required', 'offline', 'authorization_denied', 'stale_preview',
+  'scope_conflict', 'evidence_unverified', 'storage_error', 'integrity_error', 'invalid_input', 'not_found'];
+const uuid = value => typeof value === 'string' && value.length === 36 && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
+const operationRef = value => typeof value === 'string' && value.length === 32 && /^[0-9a-f]{32}$/.test(value);
+const plainLabel = value => text(value) && value.length <= 160 && !control.test(value) && !lineBreak.test(value);
+const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const exactKeys = (value, keys) => isObject(value) && Object.keys(value).length === keys.length &&
+  keys.every(key => Object.hasOwn(value, key));
+const linkPins = ['linkRevision', 'instanceId', 'workspaceId', 'workspaceSlug', 'projectKey', 'projectId', 'itemIdentifier', 'itemId'];
+const operationPins = ['operationId', 'itemRevision', 'linkRevision', 'status', 'evidenceUrl', 'visibility'];
+
+function validPlaneLink(link) {
+  if (!exactKeys(link, [...linkPins, 'instanceLabel']) || !positive(link.linkRevision) || !plainLabel(link.instanceLabel) ||
+      ![link.instanceId, link.workspaceId, link.projectId, link.itemId].every(uuid) ||
+      !plainLabel(link.workspaceSlug) || !/^[a-z0-9][a-z0-9_-]{0,79}$/.test(link.workspaceSlug) ||
+      !plainLabel(link.projectKey) || !/^[A-Z0-9][A-Z0-9_-]{0,31}$/.test(link.projectKey) ||
+      !plainLabel(link.itemIdentifier) || !link.itemIdentifier.startsWith(link.projectKey + '-')) return false;
+  const sequence = link.itemIdentifier.slice(link.projectKey.length + 1);
+  return /^[1-9][0-9]*$/.test(sequence) && positive(Number(sequence));
+}
+
+function samePlaneLink(first, second) {
+  return linkPins.every(key => first[key] === second[key]);
+}
+
+function validPlaneEvidence(url) {
+  if (typeof url !== 'string' || url.length > 300 || control.test(url) || lineBreak.test(url)) return false;
+  const match = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+\/(?:pull\/([1-9][0-9]*)|commit\/[a-f0-9]{40})$/.exec(url);
+  return Boolean(match && (!match[1] || positive(Number(match[1]))));
+}
+
+function validPlaneOperation(operation, link, expected) {
+  if (!exactKeys(operation, [...operationPins, 'state', 'reason', 'receipt']) ||
+      !operationRef(operation.operationId) || (expected && expected !== operation.operationId) ||
+      !positive(operation.itemRevision) || operation.linkRevision !== link?.linkRevision ||
+      !lifecycleStates.includes(operation.status) || !validPlaneEvidence(operation.evidenceUrl) ||
+      operation.visibility !== 'INTERNAL' || !planeStates.includes(operation.state) ||
+      ![null, 'receipt_not_proven', ...planeErrors].includes(operation.reason)) return false;
+  const { receipt } = operation;
+  if (operation.state !== 'published') return receipt === null;
+  return exactKeys(receipt, ['commentId', 'operationId', 'verifiedAt', 'source']) && uuid(receipt.commentId) &&
+    receipt.operationId === operation.operationId && plainLabel(receipt.verifiedAt) &&
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(receipt.verifiedAt) &&
+    Number.isFinite(Date.parse(receipt.verifiedAt)) && ['response', 'reconciliation'].includes(receipt.source);
+}
+
+async function planeCommand(runCli, scope, id, verb, operationId) {
+  let response;
+  try {
+    response = await runCli(scope.project, ['work-item', 'plane', verb, '--id', id, '--project', scope.project,
+      ...(operationId ? ['--operation-id', operationId] : [])], scope.engine);
+  } catch {
+    throw problem('offline');
+  }
+  let record;
+  try { record = JSON.parse(response.stdout); } catch { throw problem('unavailable'); }
+  const bound = typeof record?.project === 'string' && folderKey(record.project) === folderKey(scope.project);
+  if (response.code !== 0 || record?.success !== true || !bound) {
+    const code = record?.error?.code;
+    throw problem(bound && planeErrors.includes(code) ? code : 'unavailable');
+  }
+  return record;
+}
+
+class WorkItemPlane {
+  constructor(screen, viewId, options) {
+    this.screen = screen;
+    this.viewId = viewId;
+    this.options = options;
+    this.checked = false;
+    this.pending = false;
+    this.generation = 0;
+    this.forgetInstallation();
+  }
+
+  forgetInstallation(availability) {
+    this.installationId = null;
+    this.cache = null;
+    this.currentLink = null;
+    this.availability = availability;
+    this.freshness = 'unavailable';
+    this.handoffRequest = null;
+  }
+
+  get link() {
+    return this.cache?.link ?? null;
+  }
+
+  get receipts() {
+    return this.cache ? [...this.cache.receipts.values()] : [];
+  }
+
+  get operation() {
+    const operation = this.cache?.operation;
+    return operation ? this.cache.receipts.get(operation.operationId) ?? operation : null;
+  }
+
+  get action() {
+    if (!this.options.active() || !this.installationId || !this.screen.item?.lifecycle || this.screen.staleRead || this.pending ||
+        this.freshness !== 'current' || this.availability !== 'operator_available') return null;
+    if (!this.link) return 'link';
+    if (!this.currentLink) return null;
+    const operation = this.operation;
+    if (operation?.state === 'delivery_uncertain') return 'check';
+    if (operation?.state === 'published' && operation.itemRevision >= this.screen.item.lifecycle.revision) return null;
+    return 'prepare';
+  }
+
+  get handoffAction() {
+    const intent = this.action;
+    return intent && { intent, installationId: this.installationId, generation: this.generation,
+      screen: this.screen, scope: this.screen.scope, item: this.screen.item };
+  }
+
+  canOpen(binding) {
+    return Boolean(binding && binding.screen === this.screen && binding.scope === this.screen.scope &&
+      binding.item === this.screen.item && binding.installationId === this.installationId &&
+      binding.generation === this.generation && this.action === binding.intent);
+  }
+
+  async read(operationId, replacement = null) {
+    const { options, screen } = this;
+    const expectedInstallation = this.installationId;
+    const finish = options.beginRead();
+    let record;
+    try {
+      record = await planeCommand(options.runCli, screen.scope, screen.id, 'show', operationId);
+    } catch (error) {
+      if (finish()) throw error;
+      return;
+    }
+    if (!finish()) return;
+    const { installationId, plane } = record;
+    if (!options.active() && expectedInstallation !== installationId) return;
+    if (replacement && replacement !== installationId) throw problem('scope_conflict');
+    if (expectedInstallation && expectedInstallation !== installationId) {
+      this.forgetInstallation();
+      if (uuid(installationId)) return this.read(null, installationId);
+    }
+    if (!isObject(plane) || !planeAvailability.includes(plane.availability) || !planeFreshness.includes(plane.freshness)) {
+      throw problem('unavailable');
+    }
+    if (!uuid(installationId)) {
+      if (options.active()) {
+        this.forgetInstallation(plane.availability);
+        if (plane.availability !== 'disabled') this.issue = 'installation_unverified';
+      }
+      return;
+    }
+    if ((plane.link !== null && !validPlaneLink(plane.link)) ||
+        (plane.operation === null ? Boolean(operationId) : !validPlaneOperation(plane.operation, plane.link, operationId))) {
+      throw problem('unavailable');
+    }
+    const cache = options.cacheFor(installationId);
+    if (options.active()) {
+      this.installationId = installationId;
+      this.cache = cache;
+    }
+    if (plane.link && cache.link && !samePlaneLink(cache.link, plane.link)) throw problem('scope_conflict');
+    // Keep accepted receipts with their attested scope even after selection changes.
+    const operation = plane.operation;
+    const verified = operation && cache.receipts.get(operation.operationId);
+    const pinned = verified ?? (operation?.operationId === cache.operation?.operationId ? cache.operation : null);
+    if (pinned && (operationPins.some(key => pinned[key] !== operation[key]) ||
+        verified && operation.receipt && verified.receipt.commentId !== operation.receipt.commentId)) {
+      throw problem('integrity_error');
+    }
+    cache.link ??= plane.link;
+    if (operation?.state === 'published' && !cache.receipts.has(operation.operationId)) {
+      cache.receipts.set(operation.operationId, operation);
+    }
+    const previous = cache.operation && (cache.receipts.get(cache.operation.operationId) ?? cache.operation);
+    if (previous?.state !== 'delivery_uncertain' || operation?.operationId === previous.operationId &&
+        ['delivery_uncertain', 'published'].includes(operation.state)) cache.operation = operation;
+    if (options.active()) {
+      this.availability = plane.availability;
+      this.currentLink = plane.link;
+      this.freshness = cache.link && (plane.freshness === 'unavailable' || !plane.link) ? 'cached' : plane.freshness;
+    }
+    return operation;
+  }
+
+  async check(task) {
+    if (!this.options.active() || this.pending) return;
+    this.generation++;
+    this.checked = true;
+    this.pending = true;
+    this.issue = null;
+    this.handoff = null;
+    try { await task(); }
+    catch (error) {
+      if (this.options.active()) {
+        this.issue = planeErrors.includes(error.code) ? error.code : 'unavailable';
+        this.freshness = this.link ? 'cached' : 'unavailable';
+      }
+    } finally {
+      this.pending = false;
+    }
+  }
+
+  refresh() {
+    const operation = this.operation;
+    return this.check(() => this.read(operation?.state === 'delivery_uncertain' ? operation.operationId : null));
+  }
+
+  open(binding) {
+    if (!this.canOpen(binding)) return;
+    const { intent, installationId: expectedInstallation } = binding;
+    const operation = this.operation;
+    const operationId = intent === 'check' || intent === 'prepare' && ['prepared', 'approved_unsent'].includes(operation?.state)
+      ? operation.operationId : null;
+    return this.check(async () => {
+      if (intent === 'check') {
+        const inspected = await this.read(operationId);
+        if (!inspected || !this.options.active() || expectedInstallation !== this.installationId ||
+            this.operation?.operationId !== operationId ||
+            this.operation.state !== 'delivery_uncertain' ||
+            this.availability !== 'operator_available' || this.freshness !== 'current') return;
+      }
+      const { screen, options } = this;
+      const generation = options.nextRequest();
+      this.handoffRequest = generation;
+      const { installationId, planeHandoff } = await planeCommand(options.runCli, screen.scope, screen.id, 'open', operationId);
+      if (!options.active() || this.handoffRequest !== generation) return;
+      if (installationId !== expectedInstallation) {
+        this.forgetInstallation();
+        if (uuid(installationId)) await this.read(null, installationId);
+        else this.issue = 'installation_unverified';
+        return;
+      }
+      const { disposition, localRef, operationId: echoed } = planeHandoff ?? {};
+      if (echoed !== operationId || !exactKeys(planeHandoff, ['disposition', 'localRef', 'operationId']) ||
+          !['operator_console', 'manual_operator_session', 'unavailable'].includes(disposition) ||
+          (disposition === 'unavailable' ? localRef !== null :
+            !plainLabel(localRef) || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(localRef))) throw problem('unavailable');
+      if (disposition === 'unavailable') throw problem('operator_required');
+      this.handoff = { disposition, localRef, intent };
+    });
+  }
 }
 
 export class WorkItems {
@@ -375,6 +623,10 @@ export class WorkItems {
     this.delegates = new Map();
     this.mutations = new Map();
     this.queues = new Map();
+    this.planeCache = new Map();
+    this.planeReads = new Map();
+    this.planeViews = 0;
+    this.planeRequests = 0;
   }
 
   leave() {
@@ -426,10 +678,41 @@ export class WorkItems {
 
   async restore(scope, id, archive) {
     if (!itemId.test(id)) return;
-    this.current = { kind: 'detail', scope, id };
-    const screen = this.current;
+    const screen = this.selectDetail(scope, id);
     await this.refresh(screen);
     if (archive) await this.openArchived(screen, archive);
+  }
+
+  selectDetail(scope, id, item) {
+    const screen = { kind: 'detail', scope, id, item };
+    if (this.lifecycle) {
+      const target = JSON.stringify([recoveryScope(scope), id]);
+      screen.plane = new WorkItemPlane(screen, ++this.planeViews, {
+        runCli: this.runCli, active: () => this.isCurrent(screen) && !screen.archived,
+        nextRequest: () => ++this.planeRequests,
+        beginRead: () => this.beginPlaneRead(target),
+        cacheFor: installationId => {
+          const key = JSON.stringify([target, installationId]);
+          if (!this.planeCache.has(key)) {
+            this.planeCache.set(key, { link: null, operation: null, receipts: new Map() });
+          }
+          return this.planeCache.get(key);
+        }
+      });
+    }
+    this.current = screen;
+    return screen;
+  }
+
+  beginPlaneRead(target) {
+    // A new view supersedes older reads for the target before its installation is known.
+    const request = Symbol();
+    this.planeReads.set(target, request);
+    return () => {
+      if (this.planeReads.get(target) !== request) return false;
+      this.planeReads.delete(target);
+      return true;
+    };
   }
 
   async filter(screen, filters) {
@@ -576,7 +859,7 @@ export class WorkItems {
     }
     if (this.isCurrent(screen)) {
       this.creates.delete(recoveryScope(attempt.scope));
-      this.current = { kind: 'detail', scope: screen.scope, id: item.id, item };
+      this.selectDetail(screen.scope, item.id, item);
     } else {
       attempt.phase = 'saved';
       attempt.message = 'The original save finished. Refresh the saved item to reopen it.';

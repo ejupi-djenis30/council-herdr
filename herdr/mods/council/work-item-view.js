@@ -486,7 +486,10 @@ function detailView(t, screen, ui, actions) {
   if (inspecting && screen.receipt) body.child(label(
     `Saved request ${screen.receipt.requestId} · revision ${screen.receipt.revision}`, 12, t.foreground).role('status'));
   if (inspecting && screen.history) body.child(historyView(t, screen.history, actions));
-  if (!item) return body;
+  if (!item) {
+    if (screen.error && !screen.pending && screen.plane) body.child(planePanel(t, screen.plane));
+    return body;
+  }
   const lifecycle = item.lifecycle;
   if (!lifecycle) body.child(notice(t, 'Update Council on the project machine',
     'This engine can read the previous execution view. Update it to make lifecycle changes.'));
@@ -502,6 +505,7 @@ function detailView(t, screen, ui, actions) {
       ['start', 'close'].includes(operation) ? 'primary' : 'normal', screen.pending)
       .when(operation === 'delegate', control => control.track_focus(ui.focus.delegate)))));
   }
+  if (screen.plane) body.child(planePanel(t, screen.plane));
   if (lifecycle?.review) body.child(reviewView(t, lifecycle.review, ui, actions));
   body.child(panel(t).child(facts(t, [['Work item ID', item.id], ['Responsible role', item.roleId]]))
     .child(metadata(t, 'Project', screen.scope.project))
@@ -530,6 +534,128 @@ function detailView(t, screen, ui, actions) {
       .child(facts(t, fields)));
   }
   return body;
+}
+
+const planeActions = { link: 'Link Plane item', prepare: 'Prepare Plane update', check: 'Check delivery' };
+const planeStates = {
+  prepared: 'Preview prepared. Confirm it in the operator console.',
+  approved_unsent: 'Approval recorded. Update unsent. A fresh confirmation is required.',
+  expired: 'Preview expired. Update unsent.',
+  cancelled: 'Preview cancelled. Update unsent.',
+  conflict: 'The preview conflicts with current evidence or target. Update unsent.',
+  offline: 'The preview could not be verified offline. Update unsent.',
+  delivery_uncertain: 'Delivery unverified. Check the original operation in the operator console.',
+  published: 'Published'
+};
+const planeProblems = {
+  unavailable: 'Plane status is unavailable. Refresh or update Council on the project machine.',
+  installation_unverified: 'The Council installation identity is unavailable. Refresh or update Council to verify it.',
+  invalid_input: 'This Council installation could not read the Plane selection. Refresh or update Council.',
+  not_found: 'The selected Plane record could not be read.',
+  plane_disabled: 'Plane publishing is disabled for this installation.',
+  operator_required: 'The trusted operator console is unavailable for this selection.',
+  offline: 'Council is offline for this Plane selection.',
+  authorization_denied: 'The operator is not authorized for this Plane selection.',
+  stale_preview: 'The selected preview is out of date. Verify it again in the operator console.',
+  scope_conflict: 'The Plane target no longer matches the verified scope.',
+  evidence_unverified: 'The evidence could not be verified.',
+  storage_error: 'The local Plane projection could not be read.',
+  integrity_error: 'The Plane evidence does not match the verified record.',
+  receipt_not_proven: 'A matching receipt has not been verified.'
+};
+const handoffNotes = {
+  link: 'Verify the Plane origin, workspace, project and item IDs in the console before confirming the link.',
+  prepare: 'Enter the evidence URL and review the target, preview and INTERNAL visibility in the console before confirming publication.',
+  check: 'Use Check delivery for the original operation in the console. This check only reads Plane.'
+};
+
+function planeStatus(plane) {
+  if (!plane.checked || plane.pending) return 'Reading Plane status…';
+  if (plane.issue) return planeProblems[plane.issue];
+  if (plane.availability === 'disabled') return planeProblems.plane_disabled;
+  if (plane.freshness === 'unavailable') return planeProblems.unavailable;
+  if (plane.availability === 'read_only') return 'Plane metadata is read-only here.';
+  if (plane.freshness === 'cached') return 'Showing cached Plane metadata.';
+  return plane.link ? 'Current linked Plane item.' : 'No Plane item linked.';
+}
+
+function planeReceipt(t, plane, operation, previous = false) {
+  const { receipt, status, evidenceUrl, itemRevision, operationId, visibility } = operation;
+  const older = itemRevision < plane.screen.item?.lifecycle?.revision;
+  const source = receipt.source === 'response' ? 'Verified response' : 'Read-only reconciliation';
+  const title = previous ? 'Previously verified receipt' : 'Published';
+  return v_flex().w_full().gap(5)
+    .child(label(older ? `${title} · Older work item revision` : title, 13, t.foreground).font_semibold())
+    .child(facts(t, [['Receipt', receipt.commentId], ['Operation', operationId], ['Work item revision', itemRevision],
+      ['Status', lifecycleLabels[status]], ['Visibility', visibility], ['Verification source', source], ['Verified at', receipt.verifiedAt]]))
+    .child(metadata(t, 'Evidence URL', evidenceUrl))
+    .child(h_flex().child(button(t, `copy-plane-receipt-${operationId}`, 'Copy receipt ID', (_e, cx) => {
+      if (plane.options.active() && plane.receipts.includes(operation)) cx.write_to_clipboard(receipt.commentId);
+    }, 'normal', false, 'copy').accessibility_label(`Copy receipt ID ${receipt.commentId}. ${title}. Source: ${source}. Evidence: ${evidenceUrl}`)));
+}
+
+function planePanel(t, plane) {
+  const { link, operation, handoff, handoffAction, freshness } = plane;
+  const status = planeStatus(plane);
+  const operationStatus = operation && planeStates[operation.state];
+  const run = (cx, task) => cx.spawn(async cx => {
+    const read = task();
+    cx.notify();
+    await read;
+    if (plane.options.active() && plane.handoff && plane.refreshFocus?.is_focused()) plane.referenceFocus?.focus();
+    cx.notify();
+  });
+  const card = panel(t).id(`work-item-plane-${plane.viewId}`)
+    // Start the side read after the Work item is rendered so a slow Plane reader cannot hold up the detail.
+    .on_size_change((_size, cx) => {
+      if (plane.checked || !plane.options.active()) return;
+      plane.refreshFocus = cx.focus_handle();
+      plane.referenceFocus = cx.focus_handle();
+      run(cx, () => plane.refresh());
+    })
+    .child(h_flex().gap(7).items_center().flex_wrap().child(cardHeading(t, 'Plane', 'project').flex_1())
+      .child(button(t, 'refresh-plane', 'Refresh Plane status', (_e, cx) => run(cx, () => plane.refresh()))
+        .accessibility_label([`Refresh Plane status. ${status}`, operationStatus].filter(Boolean).join(' '))
+        .when(Boolean(plane.refreshFocus), node => node.track_focus(plane.refreshFocus)))
+      .when(Boolean(handoffAction), row => row.child(button(t, 'open-plane-console', planeActions[handoffAction.intent], (_e, cx) => {
+        if (!plane.canOpen(handoffAction)) return;
+        plane.refreshFocus?.focus();
+        run(cx, () => plane.open(handoffAction));
+      }))))
+    .child(label(status, 12, plane.issue ? t.blocked : t.muted).role('status').accessibility_label(status));
+  if (handoff) {
+    const instruction = handoff.disposition === 'operator_console' ? 'Continue in the trusted Council operator console.' :
+      'Open the installed Council operator console in the authenticated operator session.';
+    card.child(label(`${instruction} ${handoffNotes[handoff.intent]}`, 13, t.foreground).role('status'))
+      .child(metadata(t, 'Operator reference', handoff.localRef))
+      .child(h_flex().child(button(t, 'copy-plane-reference', 'Copy operator reference', (_e, cx) => {
+        if (plane.options.active() && plane.handoff === handoff) cx.write_to_clipboard(handoff.localRef);
+      }, 'normal', false, 'copy')
+        .accessibility_label(`Copy operator reference ${handoff.localRef}. ${instruction}`)
+        .when(Boolean(plane.referenceFocus), node => node.track_focus(plane.referenceFocus))));
+  }
+  if (link) {
+    const target = `Instance ${link.instanceLabel}, workspace ${link.workspaceSlug}, project ${link.projectKey}, item ${link.itemIdentifier}`;
+    const idsTitle = plane.showIds ? 'Hide target UUIDs' : 'Show target UUIDs';
+    card.child(facts(t, [['Instance', link.instanceLabel], ['Workspace', link.workspaceSlug], ['Project', link.projectKey],
+      ['Plane item', link.itemIdentifier], ['Freshness', freshness === 'current' ? 'Current' : 'Cached']]))
+      .child(h_flex().child(button(t, 'plane-target-ids', idsTitle, (_e, cx) => {
+        if (!plane.options.active()) return;
+        plane.showIds = !plane.showIds;
+        cx.notify();
+      }).accessibility_label(`${idsTitle}. ${target}${plane.showIds ?
+        `. Instance UUID ${link.instanceId}, workspace UUID ${link.workspaceId}, project UUID ${link.projectId}, item UUID ${link.itemId}` : ''}`)));
+    if (plane.showIds) card.child(facts(t, [['Instance UUID', link.instanceId], ['Workspace UUID', link.workspaceId],
+      ['Project UUID', link.projectId], ['Item UUID', link.itemId]]));
+  }
+  if (operation?.receipt) card.child(planeReceipt(t, plane, operation));
+  else if (operation) {
+    card.child(label(planeStates[operation.state], 13, t.foreground).role('status'))
+      .child(facts(t, [['Operation', operation.operationId], ['Work item revision', operation.itemRevision]]));
+    if (operation.reason && planeProblems[operation.reason]) card.child(label(planeProblems[operation.reason], 12, t.muted));
+  }
+  card.children(plane.receipts.filter(value => value !== operation).map(value => planeReceipt(t, plane, value, true)));
+  return card;
 }
 
 export function workItemView(t, screen, ui, actions) {
