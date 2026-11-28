@@ -570,9 +570,12 @@ const handoffNotes = {
 };
 
 function planeStatus(plane) {
-  if (!plane.checked || plane.pending) return 'Reading Plane status…';
-  if (plane.issue) return planeProblems[plane.issue];
-  if (plane.integrityBlocked) return 'Plane updates are read-only because part of the local Plane history could not be verified.';
+  const refreshStatus = !plane.checked || plane.pending ? 'Reading Plane status…' : planeProblems[plane.issue];
+  if (plane.integrityBlocked) {
+    const explanation = 'Plane updates are read-only because part of the local Plane history could not be verified.';
+    return refreshStatus ? `${explanation} ${refreshStatus}` : explanation;
+  }
+  if (refreshStatus) return refreshStatus;
   if (plane.availability === 'disabled') return planeProblems.plane_disabled;
   if (plane.freshness === 'unavailable') return planeProblems.unavailable;
   if (plane.availability === 'read_only') return 'Plane metadata is read-only here.';
