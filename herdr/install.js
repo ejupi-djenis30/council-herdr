@@ -24,7 +24,7 @@ const legacy = {
 };
 const files = [
   'mod.json', 'components.js', 'delegation-view.js', 'discussion-view.js', 'machine-engine.js', 'navigation.js', 'poll-text.js', 'poll-view.js',
-  'round-actions.js', 'schedule-launch.js', 'schedule-view.js', 'task-launch.js', 'team-view.js', 'workspace-view.js', 'main.js',
+  'round-actions.js', 'schedule-launch.js', 'schedule-view.js', 'task-launch.js', 'team-view.js', 'work-item-actions.js', 'work-item-view.js', 'workspace-view.js', 'main.js',
   'runtime/activity.mjs', 'runtime/activity-command.mjs', 'runtime/activity-git.mjs', 'runtime/activity-log.mjs', 'runtime/activity-plan.mjs',
   'runtime/alignment.mjs', 'runtime/council.mjs', 'runtime/debate-command.mjs', 'runtime/debate-room.mjs', 'runtime/delegations.mjs', 'runtime/desktop.mjs',
   'runtime/discussion.mjs', 'runtime/invitations.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs', 'runtime/wait-alignment.mjs',
