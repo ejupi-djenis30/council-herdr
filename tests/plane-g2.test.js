@@ -261,6 +261,47 @@ test('Start storage faults never grant a send, including lost acknowledgement', 
   }
 });
 
+test('Start commit boundary rejects expiry, scope changes and clock rollback', async t => {
+  for (const change of ['expiry','revision','rollback','installation','link','status','target']) {
+    let mutate = () => {};
+    const {publisher,plane,approve,clock,current,privateRoot}=setup(t,{
+      hook:(point,type)=>{ if (point === 'before_link' && type === 'start') mutate(); }
+    });
+    const s=snapshot(); publisher.prepare(s);
+    mutate=()=>{
+      if (change === 'expiry') clock.now=s.expiresAt;
+      if (change === 'revision') current.itemRevision++;
+      if (change === 'rollback') clock.now=1999;
+      if (change === 'installation') current.installationId=randomUUID();
+      if (change === 'link') current.linkRevision++;
+      if (change === 'status') current.status='closed';
+      if (change === 'target') current.target={...target,authorId:randomUUID()};
+    };
+    const result=await publisher.confirm(s.operationId,approve(s));
+    assert.equal(result.state,change === 'expiry' ? 'expired' : 'conflict',change);
+    assert.equal(result.reason,['expiry','rollback'].includes(change) ? 'stale_preview' : 'scope_conflict',change);
+    const dir=join(privateRoot,readdirSync(privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+    const events=readdirSync(dir).filter(name=>/^\d{8}\.json$/.test(name)).map(name=>JSON.parse(readFileSync(join(dir,name))));
+    assert.equal(events.filter(event=>event.type === 'start').length,0,change);
+    assert.equal(readdirSync(dir).some(name=>name.endsWith('.tmp')),false,change);
+    assert.equal(plane.snapshot().posts,0,change);
+  }
+});
+
+test('Start commit rechecks time after the synchronous scope reader returns', async t => {
+  let atBoundary=false;
+  const context=setup(t,{
+    hook:(point,type)=>{ if (point === 'before_link' && type === 'start') atBoundary=true; },
+    readCurrent:()=>{ if (atBoundary) context.clock.now=301000; return context.current; }
+  });
+  const s=snapshot(); context.publisher.prepare(s);
+  const result=await context.publisher.confirm(s.operationId,context.approve(s));
+  assert.equal(result.state,'expired'); assert.equal(result.reason,'stale_preview');
+  assert.equal(context.plane.snapshot().posts,0);
+  const dir=join(context.privateRoot,readdirSync(context.privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+  assert.equal(readdirSync(dir).filter(name=>/^\d{8}\.json$/.test(name)).map(name=>JSON.parse(readFileSync(join(dir,name)))).some(event=>event.type==='start'),false);
+});
+
 test('intent, approval, post and receipt interruptions keep truthful restart state', async t => {
   for (const point of ['before_link:intent','after_link:intent','before_link:approval','after_link:approval','after_post:start','before_link:receipt']) {
     let active=true;
@@ -410,6 +451,22 @@ test('reconciliation proves one hit on second page and rejects ambiguity or malf
   }
 });
 
+test('terminal v1 page accepts a cursor and metadata but never follows that cursor', async t => {
+  for (const extra of [{}, {count:1,total_pages:1,prev_page_results:false,prev_cursor:'opaque-previous'}]) {
+    const {publisher,plane,approve,create}=setup(t);
+    const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
+    assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'delivery_uncertain');
+    const original=plane.snapshot().comments[0]; plane.setMode('normal');
+    plane.setPages([{...extra,results:[original],next_page_results:false,next_cursor:'opaque-terminal'}]);
+    const result=await create().reconcile(s.operationId);
+    assert.equal(result.state,'published'); assert.equal(result.receipt.commentId,original.id);
+    const calls=plane.snapshot().calls;
+    assert.equal(calls.filter(call=>call.kind === 'page').length,1);
+    assert.ok(calls.some(call=>call.kind === 'detail' && call.route.endsWith(`/${original.id}/`)));
+    assert.equal(plane.snapshot().posts,1);
+  }
+});
+
 test('concurrent GET-only reconciliation records the same unique receipt', async t => {
   const {publisher,plane,approve,create}=setup(t);
   const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
@@ -442,9 +499,51 @@ test('damaged journal is blocked and does not produce a new send', async t => {
   const dir=join(privateRoot,readdirSync(privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
   const tail=readdirSync(dir).filter(n=>/^\d{8}\.json$/.test(n)).sort().at(-1);
   writeFileSync(join(dir,tail),Buffer.from([255]));
-  assert.throws(()=>create().inspect(s.operationId),{code:'integrity_error'});
+  const prefix=create().inspect(s.operationId);
+  assert.equal(prefix.state,'delivery_uncertain'); assert.equal(prefix.reason,'integrity_error');
   await assert.rejects(create().confirm(s.operationId,approve(s)),{code:'integrity_error'});
   assert.equal(plane.snapshot().posts,1);
+});
+
+test('a corrupt later intent leaves the prior receipt visible with integrity error and blocks mutations', async t => {
+  const {publisher,plane,approve,current,privateRoot,project,create}=setup(t);
+  new TeamStore(project).set({id:'dev',agent:'codex',role:'Dev'});
+  assert.equal((await workItemOperation('create',{id:'wi-shared',title:'Fixture',roleId:'dev',criteria:['done']},{project})).success,true);
+  const links=createFixtureOperator({project,privateRoot,installationId,profile,transport:fixtureTransport(),itemExists:()=>true});
+  const candidate=await links.resolve('wi-shared','COU-12'); await links.confirm('wi-shared',candidate.candidateId,candidate.localRef);
+  const first=snapshot(); publisher.prepare(first);
+  const published=await publisher.confirm(first.operationId,approve(first));
+  assert.equal(published.state,'published');
+  current.itemRevision=5;
+  const second={...snapshot(2),itemRevision:5}; publisher.prepare(second);
+  const dir=join(privateRoot,readdirSync(privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+  const receiptFile=readdirSync(dir).find(name=>/^\d{8}\.json$/.test(name) && JSON.parse(readFileSync(join(dir,name))).type === 'receipt');
+  const originalReceiptBytes=readFileSync(join(dir,receiptFile));
+  const tail=readdirSync(dir).filter(name=>/^\d{8}\.json$/.test(name)).sort().at(-1);
+  writeFileSync(join(dir,tail),Buffer.from([255]));
+  const files=()=>readdirSync(dir).sort().map(name=>[name,readFileSync(join(dir,name)).toString('hex')]);
+  const before=files(), callsBefore=plane.snapshot().calls.length;
+  const restarted=create();
+  const prefix=restarted.inspect(first.operationId);
+  assert.equal(prefix.state,'published'); assert.deepEqual(prefix.receipt,published.receipt); assert.equal(prefix.reason,'integrity_error');
+  assert.deepEqual(Buffer.from(JSON.stringify(prefix.receipt)),Buffer.from(JSON.stringify(published.receipt)));
+  assert.deepEqual(readFileSync(join(dir,receiptFile)),originalReceiptBytes);
+  assert.equal(restarted.latest().operationId,first.operationId);
+  assert.throws(()=>restarted.inspect(second.operationId),{code:'integrity_error'});
+  const reader=createFixturePublicationReader({links,publisher:restarted});
+  const show=await workItemOperation('plane_show',{id:'wi-shared',operationId:first.operationId},{project,planeFixture:reader});
+  assert.equal(show.success,true); assert.equal(show.installationId,installationId);
+  assert.equal(show.plane.availability,'read_only'); assert.equal(show.plane.freshness,'cached');
+  assert.equal(show.plane.operation.reason,'integrity_error'); assert.deepEqual(show.plane.operation.receipt,published.receipt);
+  const missing=await workItemOperation('plane_show',{id:'wi-shared',operationId:second.operationId},{project,planeFixture:reader});
+  assert.equal(missing.success,false); assert.equal(missing.error.code,'integrity_error');
+  assert.throws(()=>restarted.prepare({...snapshot(3),itemRevision:5}),{code:'integrity_error'});
+  assert.throws(()=>restarted.cancel(first.operationId),{code:'integrity_error'});
+  assert.throws(()=>restarted.supersede(first.operationId),{code:'integrity_error'});
+  await assert.rejects(restarted.confirm(first.operationId,approve(first)),{code:'integrity_error'});
+  await assert.rejects(restarted.reconcile(first.operationId),{code:'integrity_error'});
+  assert.deepEqual(files(),before);
+  assert.equal(plane.snapshot().calls.length,callsBefore); assert.equal(plane.snapshot().posts,1);
 });
 
 test('replacement of the bound journal directory fails closed on reopen', async t => {

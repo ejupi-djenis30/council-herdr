@@ -73,31 +73,39 @@ function makeFixtureJournal({ privateRoot, scope, fold, acknowledgeDirectory, ho
     } catch { throw problem('integrity_error'); }
   }
   verifyDirectory();
-  function read() {
+  function read(allowPrefix = false) {
     verifyDirectory();
     const names = readdirSync(dir).filter(name => /^\d{8}\.json$/.test(name)).sort();
     if (names.length > 10000) throw problem('integrity_error');
     let previous = '0'.repeat(64);
     let state = fold(null, null);
+    let sequence = 0;
+    let integrity = null;
     for (let i = 0; i < names.length; i++) {
-      if (names[i] !== `${String(i + 1).padStart(8, '0')}.json`) throw problem('integrity_error');
-      let event;
-      try { event = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bounded(join(dir, names[i]), 65536))); }
-      catch { throw problem('integrity_error'); }
-      if (!equalKeys(event, ['schema','sequence','scope','previous','type','data','hash']) || event.schema !== 'council.plane-fixture-event/v1' ||
-          event.sequence !== i + 1 || event.scope !== scope || event.previous !== previous ||
-          event.hash !== tupleDigest([event.schema,event.sequence,event.scope,event.previous,event.type,event.data])) throw problem('integrity_error');
-      try { state = fold(state, event); } catch { throw problem('integrity_error'); }
-      previous = event.hash;
+      try {
+        if (names[i] !== `${String(i + 1).padStart(8, '0')}.json`) throw problem('integrity_error');
+        const event = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bounded(join(dir, names[i]), 65536)));
+        if (!equalKeys(event, ['schema','sequence','scope','previous','type','data','hash']) || event.schema !== 'council.plane-fixture-event/v1' ||
+            event.sequence !== i + 1 || event.scope !== scope || event.previous !== previous ||
+            event.hash !== tupleDigest([event.schema,event.sequence,event.scope,event.previous,event.type,event.data])) throw problem('integrity_error');
+        // A failed fold must not partially change the returned prefix.
+        state = fold(structuredClone(state), event);
+        previous = event.hash;
+        sequence++;
+      } catch {
+        if (!allowPrefix) throw problem('integrity_error');
+        integrity = 'integrity_error';
+        break;
+      }
     }
     // Recovery may have observed a linked record whose original publication
     // acknowledgement was lost. The fixture must acknowledge the directory
     // again before treating that read as durable.
     verifyDirectory();
     if (acknowledgeDirectory('read', 'journal') !== true) throw problem('storage_error');
-    return { state, sequence: names.length, previous };
+    return { state, sequence, previous, integrity };
   }
-  function append(type, decide) {
+  function append(type, decide, beforeCommit = () => {}) {
     for (let attempt = 0; attempt < 32; attempt++) {
       const head = read();
       const decision = decide(head.state);
@@ -116,6 +124,7 @@ function makeFixtureJournal({ privateRoot, scope, fold, acknowledgeDirectory, ho
         if (acknowledgeDirectory('before', type) !== true) throw problem('storage_error');
         hook('before_link', type);
         verifyDirectory();
+        beforeCommit(event, head.state);
         try { linkSync(temporary, target); } catch (e) { if (e.code === 'EEXIST') continue; throw e; }
         hook('after_link', type);
         if (acknowledgeDirectory('after', type) !== true) throw problem('storage_error');
@@ -129,10 +138,12 @@ function makeFixtureJournal({ privateRoot, scope, fold, acknowledgeDirectory, ho
   }
   return {
     read() { try { return read(); } catch (error) { throw safeError(error); } },
-    append(type, decide) { try { return append(type, decide); } catch (error) {
+    readPrefix() { try { return read(true); } catch (error) { throw safeError(error); } },
+    append(type, decide, beforeCommit) { try { return append(type, decide, beforeCommit); } catch (error) {
       // Preserve the observed expiry timestamp for a durable retirement event.
       const safe = safeError(error);
       if (safe.code === 'stale_preview' && Number.isSafeInteger(error?.expiredAt)) safe.expiredAt = error.expiredAt;
+      if (safe.code === 'stale_preview' && Number.isSafeInteger(error?.rollbackAt)) safe.rollbackAt = error.rollbackAt;
       throw safe;
     } }
   };

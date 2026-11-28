@@ -104,7 +104,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       existing.conflicts.push(d.commentId);
     } else if (event.type === 'offline' || event.type === 'conflict' || event.type === 'expired') {
       if (!exact(d,['at','operationId','reason']) || !existing || !['prepared','approved_unsent','offline'].includes(existing.state) ||
-          (event.type === 'offline' ? d.reason !== 'offline' : event.type === 'conflict' ? !['scope_conflict','authorization_denied'].includes(d.reason) :
+          (event.type === 'offline' ? d.reason !== 'offline' : event.type === 'conflict' ? !['scope_conflict','authorization_denied','stale_preview'].includes(d.reason) :
             d.reason !== 'stale_preview' || d.at < existing.snapshot.expiresAt)) throw problem('integrity_error');
       existing.state = event.type; existing.reason = d.reason;
     } else if (event.type === 'cancel') {
@@ -120,8 +120,22 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
   // All target variants of a local item share the same barrier journal.
   const journal = fixtureJournal({ privateRoot:privateDir, scope:idScope, fold, acknowledgeDirectory, hook });
   function current() { if (!ownScope()) throw problem('scope_conflict'); return journal.read().state; }
-  function at(state) { const n = now(); if (!timestamp(n) || n < state.lastAt) throw problem('stale_preview'); return n; }
+  function at(state) { const n = now(); if (!timestamp(n) || n < state.lastAt) throw Object.assign(problem('stale_preview'), { rollbackAt:state.lastAt }); return n; }
   function saved(id) { const state = current(); const result = state.operations[id]; if (!result) throw problem('not_found'); return result; }
+  function inspection(id) {
+    if (!ownScope()) throw problem('scope_conflict');
+    const head = journal.readPrefix();
+    const record = id === undefined ? (head.state.active ? head.state.operations[head.state.active] : Object.values(head.state.operations).at(-1)) : head.state.operations[id];
+    if (!record) {
+      if (head.integrity) throw problem('integrity_error');
+      if (id !== undefined) throw problem('not_found');
+      return null;
+    }
+    const view = projection(record);
+    if (!head.integrity) return view;
+    // A damaged suffix may contain a Start even when the prefix does not.
+    return { ...view, state:['prepared','approved_unsent','offline'].includes(view.state) ? 'delivery_uncertain' : view.state, reason:'integrity_error' };
+  }
   function mark(id, type, observedAt, reason) {
     journal.append(type, state => {
       const r = state.operations[id];
@@ -135,6 +149,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
   }
   function failedPrestart(id, e) {
     if (timestamp(e?.expiredAt)) return mark(id,'expired',e.expiredAt);
+    if (timestamp(e?.rollbackAt)) return mark(id,'conflict',e.rollbackAt,'stale_preview');
     if (e?.code === 'offline') return mark(id,'offline');
     if (['scope_conflict','authorization_denied'].includes(e?.code)) return mark(id,'conflict',undefined,e.code);
     throw e;
@@ -200,12 +215,8 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       });
       return output ?? projection(saved(proposed.operationId));
     },
-    inspect(id) { return projection(saved(id)); },
-    latest() {
-      const state = current();
-      const record = state.active ? state.operations[state.active] : Object.values(state.operations).at(-1);
-      return record ? projection(record) : null;
-    },
+    inspect(id) { return inspection(id); },
+    latest() { return inspection(); },
     cancel(id) {
       journal.append('cancel', state => {
         const r = state.operations[id];
@@ -232,7 +243,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       let state = current(); let startTime = at(state);
       try { fresh(record.snapshot, startTime); } catch (e) { return failedPrestart(id,e); }
       try { await plane.verify(targetPin); } catch (e) { if (e.code === 'offline') return mark(id,'offline'); if (['authorization_denied','scope_conflict'].includes(e.code)) return mark(id,'conflict',undefined,e.code); throw e; }
-      state = current(); const checked = at(state); if (checked < startTime) throw problem('stale_preview');
+      state = current(); const checked = at(state); if (checked < startTime) throw Object.assign(problem('stale_preview'), { rollbackAt:startTime });
       try { fresh(record.snapshot, checked); } catch (e) { return failedPrestart(id,e); }
       const approvalId = randomUUID();
       try {
@@ -253,6 +264,13 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
           if (r.approval !== approvalId) return { result:projection(r) };
           const when = at(s); fresh(r.snapshot, when);
           return { data:{at:when,operationId:id,approvalId,payloadDigest:r.payloadDigest} };
+        }, event => {
+          const before = now();
+          if (!timestamp(before) || before < event.data.at) throw Object.assign(problem('stale_preview'), { rollbackAt:event.data.at });
+          fresh(record.snapshot, before);
+          const after = now();
+          if (!timestamp(after) || after < before) throw Object.assign(problem('stale_preview'), { rollbackAt:before });
+          if (after >= record.snapshot.expiresAt) throw Object.assign(problem('stale_preview'), { expiredAt:after });
         });
         if (!resultStart.written) return resultStart.result;
         // Only this live call has a positive acknowledgement for its own Start.
@@ -264,7 +282,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
         return await recordReceipt(id, reply.body.id, 'response');
       } catch (e) {
         const r = saved(id);
-        if (['prepared','approved_unsent','offline'].includes(r.state) && (timestamp(e?.expiredAt) || ['offline','scope_conflict','authorization_denied'].includes(e?.code))) return failedPrestart(id,e);
+        if (['prepared','approved_unsent','offline'].includes(r.state) && (timestamp(e?.expiredAt) || timestamp(e?.rollbackAt) || ['offline','scope_conflict','authorization_denied'].includes(e?.code))) return failedPrestart(id,e);
         return projection(r);
       }
     },
@@ -277,9 +295,11 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
         const cursors = new Set(), ids = new Set();
         for (let i = 0; i < 10; i++) {
           const page = await plane.page(targetPin, cursor);
-          if (!exact(page,['results','next_page_results','next_cursor']) || !Array.isArray(page.results) || page.results.length > 50 ||
+          if (!page || typeof page !== 'object' || Array.isArray(page) || !Object.hasOwn(page,'results') ||
+              !Object.hasOwn(page,'next_page_results') || !Object.hasOwn(page,'next_cursor') || !Array.isArray(page.results) || page.results.length > 50 ||
               Buffer.byteLength(JSON.stringify(page)) > 1024 * 1024 || typeof page.next_page_results !== 'boolean' ||
-              (page.next_page_results ? !page.results.length || typeof page.next_cursor !== 'string' || !page.next_cursor || Buffer.byteLength(page.next_cursor) > 1024 : page.next_cursor !== null)) return projection(saved(id));
+              (page.next_page_results ? !page.results.length || typeof page.next_cursor !== 'string' || !page.next_cursor || Buffer.byteLength(page.next_cursor) > 1024 :
+                page.next_cursor !== null && (typeof page.next_cursor !== 'string' || Buffer.byteLength(page.next_cursor) > 1024))) return projection(saved(id));
           for (const row of page.results) {
             if (!validPageRow(row) || ids.has(row.id)) return projection(saved(id));
             ids.add(row.id);
