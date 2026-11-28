@@ -185,6 +185,28 @@ function ClickWorkItems {
   if ($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom) { throw 'window_geometry_changed' }
   EmitClick $plan.point[0] $plan.point[1]
 }
+function ClickOpenItem {
+  $script:stage='Open work item'
+  try { Await 'Open work item' } catch { if ($_.Exception.Message -ne 'uia_expected_control_absent') { throw } }
+  $nodes=@(Nodes 'Open work item' | Where-Object { -not $_.Current.IsOffscreen })
+  if ($nodes.Count -eq 1) { Click $nodes[0]; return }
+  if ($nodes.Count -gt 1) { throw 'open_item_control_not_unique' }
+  CheckWindow
+  $r=[Cou7UiInput+RECT]::new(); if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$r)) { throw 'window_geometry_unavailable' }
+  [void][Cou7UiInput]::SetCursorPos($r.Left+24,$r.Top+24)
+  FrameBarrier
+  $frame=CaptureWindow
+  $titleTemplate=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/item-title-template.png'))
+  $buttonTemplate=[Drawing.Bitmap]::FromFile((Join-Path $env:COU7_HARNESS '.github/cou7-windows/open-item-template.png'))
+  try { $plan=Get-Cou7ItemPlan $frame $titleTemplate $buttonTemplate $r.Left $r.Top }
+  finally { $frame.Dispose();$titleTemplate.Dispose();$buttonTemplate.Dispose() }
+  Record 'ui_item_visual_plan' $plan
+  if (-not $plan.matched) { throw 'open_item_visual_guard_failed' }
+  CheckWindow
+  $current=[Cou7UiInput+RECT]::new(); if (-not [Cou7UiInput]::GetWindowRect($hwnd,[ref]$current)) { throw 'window_geometry_unavailable' }
+  if ($r.Left -ne $current.Left -or $r.Top -ne $current.Top -or $r.Right -ne $current.Right -or $r.Bottom -ne $current.Bottom) { throw 'window_geometry_changed' }
+  EmitClick $plan.point[0] $plan.point[1]
+}
 function Read-Cou7WorkItem([string[]]$arguments) {
   Push-Location $env:COU7_UI_PROJECT
   try { $output=& $env:COU7_NODE $env:COU7_CLI 'work-item' @arguments 2>$null; if ($LASTEXITCODE -ne 0) { throw 'installed_cli_readback_failed' }; return ($output | Out-String | ConvertFrom-Json) }
@@ -279,9 +301,11 @@ try {
     $saved=Get-Content -Raw (Join-Path $env:COU7_ROOT 'ui-created.json') | ConvertFrom-Json
     $item=(Read-Cou7WorkItem @('show','--id',$saved.id)).item
     if ($item.state -ne 'result_ready' -or -not $item.job.sessionId) { throw 'reopened_item_not_result_ready' }
-    ClickWorkItems; Await 'Open work item'
-    $list=Read-Cou7WorkItem @('list'); if (@($list.items | Where-Object title -eq $title).Count -ne 1) { throw 'reopened_item_not_unique' }
-    Click (One 'Open work item'); Await 'Read saved handoff'; Await 'Open delegation'; Shot 'reopened-item'
+    ClickWorkItems
+    $list=Read-Cou7WorkItem @('list'); $matchingItems=@($list.items | Where-Object title -eq $title)
+    if ($matchingItems.Count -ne 1 -or $matchingItems[0].id -ne $saved.id) { throw 'reopened_item_not_unique_or_matching' }
+    Record 'ui_reopen_same_item' @{id=$item.id;sessionId=$item.job.sessionId;interface='installed_CLI_readonly'}
+    ClickOpenItem; Await 'Read saved handoff'; Await 'Open delegation'; Shot 'reopened-item'
     Click (One 'Read saved handoff'); Await 'Back to work item'; Shot 'reopened-handoff'; Mark 'reopened_handoff'
     $visibleText=HandoffText
     if (-not $visibleText.Contains('Heading: # Windows Native Checkpoint') -or -not $visibleText.Contains('Next action: compare the heading with the saved criteria.') -or -not $visibleText.Contains('Review the handoff against the acceptance criteria.')) { throw 'uia_handoff_content_not_observed' }
