@@ -419,6 +419,22 @@ test('concurrent GET-only reconciliation records the same unique receipt', async
   assert.equal(plane.snapshot().posts,1);
 });
 
+test('a later conflicting positive proof is recorded without replacing the original receipt', async t => {
+  const {publisher,plane,approve,privateRoot,create}=setup(t);
+  const s=snapshot(); publisher.prepare(s);
+  const original=await publisher.confirm(s.operationId,approve(s));
+  const conflicting={...plane.snapshot().comments[0],id:randomUUID()};
+  plane.replaceComments([conflicting]);
+  const next=await create().reconcile(s.operationId);
+  assert.equal(next.state,'published'); assert.deepEqual(next.receipt,original.receipt);
+  const dir=join(privateRoot,readdirSync(privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
+  const conflicts=()=>readdirSync(dir).filter(n=>/^\d{8}\.json$/.test(n)).map(n=>JSON.parse(readFileSync(join(dir,n)))).filter(e=>e.type==='receipt_conflict');
+  assert.equal(conflicts().length,1); assert.equal(conflicts()[0].data.commentId,conflicting.id);
+  await create().reconcile(s.operationId);
+  assert.equal(conflicts().length,1);
+  assert.equal(plane.snapshot().posts,1);
+});
+
 test('damaged journal is blocked and does not produce a new send', async t => {
   const {publisher,plane,approve,privateRoot,create}=setup(t);
   const s=snapshot(); publisher.prepare(s); plane.setMode('drop_without_commit');

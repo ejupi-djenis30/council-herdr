@@ -84,7 +84,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
           d.at < d.snapshot.createdAt || d.at >= d.snapshot.expiresAt ||
           Object.values(state.operations).some(r => r.snapshotKey === d.snapshotKey && !r.superseded) ||
           d.payloadDigest !== digest(payload(d.snapshot)) || d.snapshotKey !== tupleDigest([scope,itemId,d.snapshot.linkRevision,d.snapshot.itemRevision,d.snapshot.status,d.snapshot.evidenceUrl])) throw problem('integrity_error');
-      state.operations[d.operationId] = { snapshot:d.snapshot, payloadDigest:d.payloadDigest, snapshotKey:d.snapshotKey, state:'prepared', receipt:null, approval:null, superseded:false };
+      state.operations[d.operationId] = { snapshot:d.snapshot, payloadDigest:d.payloadDigest, snapshotKey:d.snapshotKey, state:'prepared', receipt:null, approval:null, superseded:false, conflicts:[] };
     } else if (event.type === 'approval') {
       if (!exact(d,['at','operationId','approvalId','operatorId','payloadDigest']) || !existing || !['prepared','approved_unsent','offline'].includes(existing.state) ||
           !uuid(d.approvalId) || d.operatorId !== operatorId || d.payloadDigest !== existing.payloadDigest || d.at < existing.snapshot.createdAt || d.at >= existing.snapshot.expiresAt) throw problem('integrity_error');
@@ -97,6 +97,11 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       if (!exact(d,['at','operationId','commentId','source','payloadDigest']) || !existing || existing.state !== 'delivery_uncertain' || state.active !== d.operationId ||
           !uuid(d.commentId) || !['response','reconciliation'].includes(d.source) || d.payloadDigest !== existing.payloadDigest) throw problem('integrity_error');
       existing.state = 'published'; existing.receipt = { commentId:d.commentId, operationId:d.operationId, verifiedAt:new Date(d.at).toISOString(), source:d.source }; state.active = null;
+    } else if (event.type === 'receipt_conflict') {
+      if (!exact(d,['at','operationId','commentId','source','payloadDigest']) || !existing || existing.state !== 'published' ||
+          !uuid(d.commentId) || d.commentId === existing.receipt.commentId || !['response','reconciliation'].includes(d.source) ||
+          d.payloadDigest !== existing.payloadDigest || existing.conflicts.includes(d.commentId)) throw problem('integrity_error');
+      existing.conflicts.push(d.commentId);
     } else if (event.type === 'offline' || event.type === 'conflict' || event.type === 'expired') {
       if (!exact(d,['at','operationId','reason']) || !existing || !['prepared','approved_unsent','offline'].includes(existing.state) ||
           (event.type === 'offline' ? d.reason !== 'offline' : event.type === 'conflict' ? !['scope_conflict','authorization_denied'].includes(d.reason) :
@@ -151,16 +156,23 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
   }
   async function recordReceipt(id, commentId, source) {
     const record = saved(id);
-    if (record.state === 'published') return projection(record);
+    if (record.state === 'published' && record.receipt.commentId === commentId) return projection(record);
     const detail = await plane.detail(targetPin, commentId);
     if (!validComment(detail, record.snapshot) || detail.id !== commentId) return projection(saved(id));
     try {
-      journal.append('receipt', state => {
+      const result = journal.append('receipt', state => {
         const r = state.operations[id];
-        if (r?.state === 'published') return { result:projection(r) };
+        if (r?.state === 'published') return { result:r.receipt.commentId === commentId ? 'same' : 'conflict' };
         if (r?.state !== 'delivery_uncertain' || state.active !== id) throw problem('scope_conflict');
         return { data:{ at:at(state), operationId:id, commentId, source, payloadDigest:r.payloadDigest } };
       });
+      if (!result.written && result.result === 'conflict') {
+        journal.append('receipt_conflict', state => {
+          const r = state.operations[id];
+          if (r?.state !== 'published' || r.receipt.commentId === commentId || r.conflicts.includes(commentId)) return {};
+          return { data:{ at:at(state), operationId:id, commentId, source, payloadDigest:r.payloadDigest } };
+        });
+      }
     } catch { /* A failed write never invents a receipt. */ }
     return projection(saved(id));
   }
@@ -258,7 +270,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
     },
     async reconcile(id) {
       let record = saved(id);
-      if (record.state !== 'delivery_uncertain') return projection(record);
+      if (!['delivery_uncertain','published'].includes(record.state)) return projection(record);
       try {
         await plane.verify(targetPin);
         let cursor = null, found = null;
