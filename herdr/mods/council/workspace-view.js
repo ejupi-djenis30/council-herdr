@@ -295,7 +295,8 @@ export function workspaceView(t, data, ui, actions) {
     : ui.view === 'changes' ? changesView(t, data.git, ui, actions)
       : ui.view === 'work-items' ? workItemView(t, ui.workItems?.screen, ui.workItems, ui.workItems?.actions)
         : runsView(t, data, ui, actions);
-  if (ui.view === 'work-items' && ui.workItems?.screen?.form && !ui.workItems.screen.form.stale) return view;
+  if (ui.view === 'work-items' && (ui.workItems?.reader ||
+      (ui.workItems?.screen?.form && !ui.workItems.screen.form.stale))) return view;
   return v_flex().w_full().min_w_0().gap(10).child(header).child(nav)
     .when(ui.diagnostics && data.errors.length > 0, body => body.child(panel(t).child(cardHeading(t, 'Read issues', 'warning'))
       .children(data.errors.map(issue => v_flex().gap(3).child(label(issue.source, 12, t.foreground).font_semibold())

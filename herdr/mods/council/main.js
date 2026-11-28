@@ -1,5 +1,5 @@
 import { View, div } from 'gpui-kit';
-import { Button, h_flex, v_flex, InputState } from 'gpui-base';
+import { Button, EditorState, h_flex, v_flex, InputState } from 'gpui-base';
 import { agents, appHome, checking, closeOverlay, exec, focused, hc, notify, panes, props, readTextFile, run, spaces, terminals, theme } from 'herdr';
 import { brandMark, button, cardHeading, columns, field, glyph, iconTile, input, label, panel, progress, reviewStatus, sectionTab, statusPill } from './components.js';
 import { countLabel, decisionSummary, discussionType, invitation, pollStatus, projectLabels, projectName } from './poll-text.js';
@@ -14,7 +14,7 @@ import { hostId, desktopId, focusedProject, participantTerminal, executeEngine, 
 import { taskEditor, teamEditor, teamView } from './team-view.js';
 import { workspaceView } from './workspace-view.js';
 import { folderKey, WorkItems, workItemScopeKey, workItemScreenVisible } from './work-item-actions.js';
-import { makeLifecycleFields, makeWorkItemFields } from './work-item-view.js';
+import { makeLifecycleFields, makeWorkItemFields, workItemHandoff } from './work-item-view.js';
 
 const modes = [
   ['choice', 'Options'],
@@ -182,10 +182,12 @@ export default class Council extends View {
       tab: cx.focus_handle(), queue: cx.focus_handle(), back: cx.focus_handle(), refresh: cx.focus_handle(), formBack: cx.focus_handle(),
       allRoles: cx.focus_handle(), attention: cx.focus_handle(), clearFilters: cx.focus_handle(),
       states: Object.fromEntries(['', 'open', 'in_review', 'closed'].map(state => [state, cx.focus_handle()])),
-      delegate: cx.focus_handle(), copyOutput: cx.focus_handle(), openDelegation: cx.focus_handle(),
+      delegate: cx.focus_handle(), readOutput: cx.focus_handle(), copyOutput: cx.focus_handle(), openDelegation: cx.focus_handle(),
+      readerCopy: cx.focus_handle(),
       confirm: cx.focus_handle(), history: cx.focus_handle(), archive: cx.focus_handle(), output: cx.focus_handle()
     };
     this.lifecycleFields = null;
+    this.handoffReader = null;
     this.pendingWorkItemReturn = null;
     this.workItemForm = null;
     this.activityTarget = null;
@@ -326,7 +328,9 @@ export default class Council extends View {
   }
 
   syncWorkItemFields() {
-    const form = this.workItems.current?.form;
+    const screen = this.workItems.current;
+    if (this.handoffReader && this.handoffReader.screen !== screen) this.releaseHandoffReader();
+    const form = screen?.form;
     if (this.lifecycleFields?.form !== form) {
       if (this.lifecycleFields) for (const state of Object.values(this.lifecycleFields.fields)) state.release();
       this.lifecycleFields = null;
@@ -345,7 +349,6 @@ export default class Council extends View {
         }
       }
     }
-    const screen = this.workItems.current;
     if (this.workItemForm?.screen === screen) return;
     if (this.workItemForm) {
       this.workItemForm.fields.title.release();
@@ -353,6 +356,35 @@ export default class Council extends View {
       this.workItemForm = null;
     }
     if (screen?.kind === 'create') this.workItemForm = { screen, fields: makeWorkItemFields() };
+  }
+
+  openHandoffReader(cx, screen, kind) {
+    if (!this.workItems.isCurrent(screen) || !this.workItemVisible(screen) || screen.pending) return;
+    const handoff = workItemHandoff(screen, kind);
+    if (!handoff) return;
+    this.releaseHandoffReader();
+    const editor = EditorState.new({
+      value: handoff.output, readonly: true, soft_wrap: true, line_numbers: false, folding: false, font_size: 13
+    });
+    const reader = { screen, kind, handoff, editor, focused: false };
+    this.handoffReader = reader;
+    editor.on('focus', (_e, cx) => { reader.focused = true; cx.notify(); });
+    editor.on('blur', (_e, cx) => { reader.focused = false; cx.notify(); });
+    this.lifecycleFocus.readerCopy.focus();
+    cx.notify();
+  }
+
+  releaseHandoffReader() {
+    this.handoffReader?.editor.release();
+    this.handoffReader = null;
+  }
+
+  closeHandoffReader(cx, reader) {
+    if (!reader || this.handoffReader !== reader || !this.workItems.isCurrent(reader.screen) ||
+        !this.workItemVisible(reader.screen)) return;
+    this.releaseHandoffReader();
+    (reader.kind === 'saved' ? this.lifecycleFocus.readOutput : this.lifecycleFocus.output).focus();
+    cx.notify();
   }
 
   leaveWorkItems() {
@@ -448,6 +480,7 @@ export default class Council extends View {
       }) });
     };
     const lifecycle = this.lifecycleFields?.form === screen.form ? this.lifecycleFields : null;
+    const reader = this.handoffReader?.screen === screen ? this.handoffReader : null;
     const mutation = screen.kind === 'detail' ? workItems.mutation(screen) : null;
     const review = screen.archived ? screen.archived.review : screen.item?.lifecycle?.review;
     const formalLink = workItems.formalLink(screen);
@@ -463,7 +496,7 @@ export default class Council extends View {
       cx.notify();
     };
     return {
-      screen, fields, focus, mutation, formalLink, archiveExecution, wide: this.wide,
+      screen, fields, focus, mutation, reader, formalLink, archiveExecution, wide: this.wide,
       formFields: lifecycle?.fields, activeField: lifecycle?.activeField,
       attempt: screen.kind === 'create' ? workItems.createAttempt(screen) : null,
       actions: {
@@ -501,10 +534,13 @@ export default class Council extends View {
         closeArchive: (_e, cx) => closeArchive(cx),
         archiveExecution: (_e, cx) => openLink(cx, archiveExecution),
         formal: (_e, cx) => openLink(cx, formalLink),
-        toggleOutput: (_e, cx) => {
-          if (!workItems.isCurrent(screen) || !review) return;
-          screen.expandedReview = screen.expandedReview === review.id ? null : review.id;
-          cx.notify();
+        readOutput: (_e, cx) => this.openHandoffReader(cx, screen, 'saved'),
+        readFrozen: (_e, cx) => this.openHandoffReader(cx, screen, 'frozen'),
+        closeReader: (_e, cx) => this.closeHandoffReader(cx, reader),
+        copyReader: (_e, cx) => {
+          if (reader && this.handoffReader === reader && this.workItemVisible(screen) && workItems.isCurrent(screen)) {
+            this.copy(cx, reader.handoff.output, reader.kind === 'saved' ? 'Saved handoff copied.' : 'Frozen output copied.');
+          }
         },
         copyBinding: (_e, cx) => {
           if (workItems.isCurrent(screen) && review?.policy === 'formal') {
@@ -1471,7 +1507,8 @@ export default class Council extends View {
           node.child(button(t, 'dismiss-panel', '', () => closeOverlay(overlay), 'normal', false, 'close')
             .w(30).px(0).tooltip('Close Council').accessibility_label('Close Council'))))
       .child(tabs);
-    const body = v_flex().id(`content-${this.tab}-${this.selected?.id ?? 'list'}-${this.form?.kind ?? this.pollSection}`)
+    const body = v_flex().id(this.handoffReader ? 'content-work-item-handoff' :
+      `content-${this.tab}-${this.selected?.id ?? 'list'}-${this.form?.kind ?? this.pollSection}`)
       .flex_1().min_h(0).w_full().gap(10).p(14).overflow_y_scrollbar()
       .on_mouse_down('left', (_e, cx) => cx.stop_propagation());
     if ((current || !this.config) && this.error) body.child(label(this.error, 12, t.blocked));
@@ -1495,7 +1532,8 @@ export default class Council extends View {
         if (this.form) this.cancelForm(cx);
         else if (this.workItems.current && this.workItems.current.kind !== 'list' && this.workItemVisible(this.workItems.current)) {
           const ui = this.workItemViewProps();
-          if (ui.screen?.archived) ui.actions.closeArchive(null, cx);
+          if (ui.reader) ui.actions.closeReader(null, cx);
+          else if (ui.screen?.archived) ui.actions.closeArchive(null, cx);
           else if (ui.screen?.form && !ui.mutation) ui.actions.cancelForm(null, cx);
           else this.backToWorkItems(cx, this.workItems.current);
         } else if (this.trail.length || this.workspaceReturn || this.selected) this.goBack(cx);
