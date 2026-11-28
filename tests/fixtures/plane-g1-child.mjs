@@ -6,7 +6,7 @@ const operator = createFixtureOperator({ project, privateRoot, installationId, p
 const candidate = await operator.resolve('wi-shared', itemRef);
 process.send({ ready: true });
 process.once('message', async () => {
-  try { process.send({ link: await operator.confirm('wi-shared', candidate.candidateId, candidate.localRef) }); }
+  try { process.send({ link: await operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), installationId: operator.readerIdentity('wi-shared') }); }
   catch (e) { process.send({ error: e.code }); }
   process.disconnect();
 });

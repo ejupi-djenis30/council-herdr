@@ -34,15 +34,21 @@ test('legacy item has disabled additive offline projection and ordinary surfaces
   const run = (...args) => spawnSync(process.execPath, [cli, 'work-item', ...args, '--project', project], { encoding:'utf8' });
   let p = run('plane', 'show', '--id', 'wi-shared');
   assert.equal(p.status, 0, p.stderr);
+  assert.equal(JSON.parse(p.stdout).installationId, null);
   assert.deepEqual(JSON.parse(p.stdout).plane, { availability:'disabled', freshness:'unavailable', link:null, operation:null });
   p = run('plane', 'open', '--id', 'wi-shared');
+  assert.equal(JSON.parse(p.stdout).installationId, null);
   assert.deepEqual(JSON.parse(p.stdout).planeHandoff, { disposition:'unavailable', localRef:null, operationId:null });
-  for (const args of [['plane','confirm','--id','wi-shared'], ['plane','show','--id','wi-shared','--profile','x'], ['plane','show','--id','wi-shared','--operation-id','bad']]) assert.notEqual(run(...args).status, 0);
+  p = spawnSync(process.execPath, [cli, 'work-item', 'plane', 'show', '--id', 'wi-shared', '--project', project],
+    {encoding:'utf8', env:{...process.env, COUNCIL_INSTALLATION_ID:installationId}});
+  assert.equal(JSON.parse(p.stdout).installationId, null);
+  for (const args of [['plane','confirm','--id','wi-shared'], ['plane','show','--id','wi-shared','--profile','x'], ['plane','show','--id','wi-shared','--operation-id','bad'], ['plane','show','--id','wi-shared','--installation-id',installationId], ['plane','open','--id','wi-shared','--installation-id',installationId]]) assert.notEqual(run(...args).status, 0);
   const frames = [
     {jsonrpc:'2.0', id:1, method:'tools/list'},
     {jsonrpc:'2.0', id:2, method:'tools/call', params:{name:'council_work_item_plane_show',arguments:{project,id:'wi-shared'}}},
     {jsonrpc:'2.0', id:3, method:'tools/call', params:{name:'council_work_item_plane_show',arguments:[]}},
-    {jsonrpc:'2.0', id:4, method:'tools/call', params:{name:'council_work_item_plane_show',arguments:{project,id:'wi-shared',profile:'x'}}}
+    {jsonrpc:'2.0', id:4, method:'tools/call', params:{name:'council_work_item_plane_show',arguments:{project,id:'wi-shared',profile:'x'}}},
+    {jsonrpc:'2.0', id:5, method:'tools/call', params:{name:'council_work_item_plane_show',arguments:{project,id:'wi-shared',installationId}}}
   ];
   p = spawnSync(process.execPath, [cli,'mcp'], { cwd:project, input:frames.map(JSON.stringify).join('\n')+'\n', encoding:'utf8' });
   assert.equal(p.status, 0, p.stderr);
@@ -51,7 +57,9 @@ test('legacy item has disabled additive offline projection and ordinary surfaces
   assert.ok(names.includes('council_work_item_plane_show'));
   assert.ok(!names.some(n => /council_work_item_plane_(publish|confirm|link|open)/.test(n)));
   assert.equal(JSON.parse(replies.get(2).content[0].text).plane.availability, 'disabled');
+  assert.equal(JSON.parse(replies.get(2).content[0].text).installationId, null);
   assert.equal(replies.get(3).isError, true); assert.equal(replies.get(4).isError, true);
+  assert.equal(replies.get(5).isError, true);
   assert.equal(JSON.stringify((await workItemOperation('show', { id:'wi-shared' }, { project })).item), before);
   assert.deepEqual(snapshot(), initialEvents);
 });
@@ -71,7 +79,9 @@ test('fixture links are scope bound, persist offline and do not change COU-8', a
   const offline = make(project, { transport: { get() { throw Error('offline'); } } });
   assert.deepEqual(offline.inspect('wi-shared').link, link);
   const projected = await workItemOperation('plane_show', {id:'wi-shared'}, {project, planeFixture:offline});
+  assert.equal(projected.installationId, installationId);
   assert.equal(projected.plane.freshness, 'cached'); assert.deepEqual(projected.plane.link, link);
+  assert.equal((await workItemOperation('plane_open', {id:'wi-shared'}, {project, planeFixture:offline})).installationId, installationId);
   assert.equal((await workItemOperation('plane_show', {id:'wi-shared'}, {project:other, planeFixture:offline})).error.code, 'scope_conflict');
   const after = await workItemOperation('show', {id:'wi-shared'}, {project});
   assert.deepEqual(after.item, before.item);
@@ -162,12 +172,30 @@ test('installation identity separates otherwise identical local scopes', async t
   const { project, make, privateRoot } = await setup(t);
   const first = make(project);
   const second = make(project, { installationId:'1b6eba33-7959-4d8b-9387-576ac77ea410' });
+  for (const action of ['plane_show', 'plane_open']) {
+    assert.equal((await workItemOperation(action, {id:'wi-shared'}, {project, planeFixture:first})).installationId, installationId);
+    assert.equal((await workItemOperation(action, {id:'wi-shared'}, {project, planeFixture:second})).installationId, '1b6eba33-7959-4d8b-9387-576ac77ea410');
+  }
   const c = await first.resolve('wi-shared', 'COU-12');
   await first.confirm('wi-shared', c.candidateId, c.localRef);
   assert.equal(second.inspect('wi-shared').link, null);
   assert.notEqual(first.localRef('wi-shared'), second.localRef('wi-shared'));
   await assert.rejects(second.confirm('wi-shared', c.candidateId, c.localRef), {code:'scope_conflict'});
   assert.equal(readdirSync(privateRoot).length, 1);
+});
+
+test('missing, malformed or unverified reader identity cannot expose a projection or handoff', async t => {
+  const { project, privateRoot } = await setup(t);
+  for (const identity of [null, undefined, 'unattested', 42, 'C0A965AE-F134-4DED-8A66-AB60C366695F', () => { throw Error('unverified'); }]) {
+    const fixture = { owns: () => true, readerIdentity: () => typeof identity === 'function' ? identity() : identity,
+      inspect: () => { throw Error('must not inspect'); } };
+    const show = await workItemOperation('plane_show', {id:'wi-shared'}, {project, planeFixture:fixture});
+    const open = await workItemOperation('plane_open', {id:'wi-shared'}, {project, planeFixture:fixture});
+    assert.equal(show.installationId, null); assert.equal(open.installationId, null);
+    assert.deepEqual(show.plane, {availability:'disabled', freshness:'unavailable', link:null, operation:null});
+    assert.deepEqual(open.planeHandoff, {disposition:'unavailable', localRef:null, operationId:null});
+  }
+  assert.deepEqual(readdirSync(privateRoot), []);
 });
 
 test('another item cannot consume the candidate or a damaged link', async t => {
@@ -196,7 +224,12 @@ test('installed engine without Plane credentials remains disabled', async t => {
   assert.ok(readFileSync(join(engine, 'herdr/mods/council/runtime/plane-fixture.mjs')).length > 0);
   const child = spawnSync(process.execPath, [join(engine,'bin/council.js'), 'work-item', 'plane', 'show', '--id', 'wi-shared', '--project', project], {encoding:'utf8', env});
   assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).installationId, null);
   assert.deepEqual(JSON.parse(child.stdout).plane, { availability:'disabled', freshness:'unavailable', link:null, operation:null });
+  const handoff = spawnSync(process.execPath, [join(engine,'bin/council.js'), 'work-item', 'plane', 'open', '--id', 'wi-shared', '--project', project], {encoding:'utf8', env});
+  assert.equal(handoff.status, 0, handoff.stderr);
+  assert.equal(JSON.parse(handoff.stdout).installationId, null);
+  assert.deepEqual(JSON.parse(handoff.stdout).planeHandoff, {disposition:'unavailable', localRef:null, operationId:null});
 });
 
 test('separate processes converge on same target and reject a different target', async t => {
@@ -213,6 +246,7 @@ test('separate processes converge on same target and reject a different target',
   }
   const same = await race(['COU-12','COU-12']);
   assert.deepEqual(same[0].link, same[1].link);
+  assert.ok(same.every(result => result.installationId === installationId));
   const different = await race(['COU-12','COU-13']);
   assert.equal(different.filter(x => x.error === 'scope_conflict').length, 1);
   assert.equal(different.filter(x => x.link?.itemId === issueIds[0]).length, 1);

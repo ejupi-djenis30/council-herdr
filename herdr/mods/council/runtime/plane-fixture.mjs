@@ -120,6 +120,7 @@ export function createFixtureOperator({ privateRoot, project, installationId, pr
   }
   return {
     owns,
+    readerIdentity(id) { requireItem(id); return installationId; },
     localRef(id) { requireItem(id); return refFor(id); },
     inspect(id) { return { availability: 'read_only', freshness: 'cached', link: read(id), operation: null }; },
     async resolve(id, ref) {
