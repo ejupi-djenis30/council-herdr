@@ -1,0 +1,25 @@
+{
+  "schema": "council.synthetic-package/v1",
+  "packageVersion": "0.1.0-feasibility",
+  "target": {
+    "os": "windows",
+    "arch": "arm64"
+  },
+  "toolchain": {
+    "compiler": "msvc",
+    "compilerVersion": "19.44.35228.0",
+    "windowsSdkVersion": "10.0.26100.0"
+  },
+  "artifacts": [
+    {
+      "name": "council-handoff-probe.exe",
+      "size": 142848,
+      "sha256": "eca06e6af64c9eb3b92896d441ca0c6d3687a8be7886e20df42390ecf710acc0"
+    },
+    {
+      "name": "preflight.mjs",
+      "size": 5213,
+      "sha256": "7ef11012cc313da6ff4ac0ee955b2b5ec5e16d684a3beebea69c57be96551fec"
+    }
+  ]
+}
