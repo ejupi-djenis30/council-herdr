@@ -112,6 +112,11 @@ try {
     Must ((Run 'installed_doctor' $node @($cli,'doctor')) -eq 0) 'installed_doctor_failed'
     Must ((Run 'installed_mod_check' $app @('check',$mod)) -eq 0) 'installed_mod_check_failed'
     $checks.package = 'pass'
+    # Tests may invoke hc from a short-lived project. Start this isolated core
+    # in a stable directory so its working directory cannot pin a test folder.
+    Push-Location $root
+    try { Must ((Run 'core_start' $hc @('server','start')) -eq 0) 'isolated_core_start_failed' }
+    finally { Pop-Location }
     $testCode = Run 'npm_test' 'npm.cmd' @('test')
     $summary = Get-Content (Join-Path $root 'npm_test.out') | Where-Object { $_ -match '^\s*[ℹ#]?\s*(tests|pass|fail|skipped)\s+\d+' } | Select-Object -Last 8
     Fact 'test_summary' @{ exit = $testCode; lines = @($summary) }
@@ -125,7 +130,6 @@ try {
     $checks.tests = if ($testCode -eq 0) { 'pass' } else { 'fail' }
   } finally { Pop-Location }
   'console.log("COU7_CORE_TRANSPORT_OK")' | Set-Content -Encoding utf8 (Join-Path $root 'core-probe.cjs')
-  Must ((Run 'core_start' $hc @('server','start')) -eq 0) 'isolated_core_start_failed'
   Must ((Run 'core_status' $hc @('server','status')) -eq 0) 'isolated_core_status_failed'
   $coreStatus = Get-Content -Raw (Join-Path $root 'core_status.out') | ConvertFrom-Json
   Fact 'core_status_sanitized' @{ version = $coreStatus.version; live = $coreStatus.live; finished = $coreStatus.finished }
@@ -156,16 +160,27 @@ try {
     $checks.cli = 'pass_readback_only'
   } finally { Pop-Location }
   $appOut = Join-Path $root 'desktop-process.out'; $appErr = Join-Path $root 'desktop-process.err'
+  if ($checks.desktopInput -eq 'input_probe_pass') {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $watchReferences = @([System.Windows.Automation.AutomationElement].Assembly.Location, [System.Windows.Automation.TreeScope].Assembly.Location, [System.Runtime.InteropServices.DllImportAttribute].Assembly.Location)
+    Add-Type -Path (Join-Path $harness '.github/cou7-windows/window-watch.cs') -ReferencedAssemblies $watchReferences
+  }
   $startOptions = @{ FilePath = $app; PassThru = $true; RedirectStandardOutput = $appOut; RedirectStandardError = $appErr }
   if ($checks.desktopInput -ne 'input_probe_pass') { $startOptions.WindowStyle = 'Hidden' }
   $desktop = Start-Process @startOptions
   $idle = $false
   try { $idle = $desktop.WaitForInputIdle(15000) } catch { }
   $desktop.Refresh()
-  $appFacts = [ordered]@{ pidOwned = $true; session = $desktop.SessionId; hasExited = $desktop.HasExited; inputIdle = $idle; windowHandlePresent = ($desktop.MainWindowHandle -ne [IntPtr]::Zero); foreground = $false; visible = $false; uiAutomationMatchesPid = $false }
+  $appHandle = $desktop.MainWindowHandle
+  if (-not $desktop.HasExited -and $checks.desktopInput -eq 'input_probe_pass') {
+    $appHandle = [IntPtr][Cou7WindowWatch]::Wait($desktop.Id, 25000)
+    $desktop.Refresh()
+  }
+  $appSession = $null; try { $appSession = $desktop.SessionId } catch { }
+  $appFacts = [ordered]@{ pidOwned = $true; session = $appSession; hasExited = $desktop.HasExited; inputIdle = $idle; windowHandlePresent = ($appHandle -ne [IntPtr]::Zero); foreground = $false; visible = $false; uiAutomationMatchesPid = $false; windowWait = 'uia_window_opened_event_bounded' }
   if (-not $desktop.HasExited) { $appFacts.architecture = ProcessMachine $desktop }
   if (-not $desktop.HasExited -and $appFacts.windowHandlePresent) {
-    Add-Type -AssemblyName UIAutomationClient
     Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -175,11 +190,11 @@ public static class Cou7AppWindow {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 }
 '@
-    $appFacts.visible = [Cou7AppWindow]::IsWindowVisible($desktop.MainWindowHandle)
+    $appFacts.visible = [Cou7AppWindow]::IsWindowVisible($appHandle)
     if ($checks.desktopInput -eq 'input_probe_pass') {
-      [void][Cou7AppWindow]::SetForegroundWindow($desktop.MainWindowHandle)
-      $appFacts.foreground = ([Cou7AppWindow]::GetForegroundWindow() -eq $desktop.MainWindowHandle)
-      try { $element = [System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle); $appFacts.uiAutomationMatchesPid = ($element.Current.ProcessId -eq $desktop.Id) } catch { }
+      [void][Cou7AppWindow]::SetForegroundWindow($appHandle)
+      $appFacts.foreground = ([Cou7AppWindow]::GetForegroundWindow() -eq $appHandle)
+      try { $element = [System.Windows.Automation.AutomationElement]::FromHandle($appHandle); $appFacts.uiAutomationMatchesPid = ($element.Current.ProcessId -eq $desktop.Id) } catch { }
     }
   }
   if ($desktop.HasExited) { $appFacts.exitCode = $desktop.ExitCode }
@@ -187,7 +202,12 @@ public static class Cou7AppWindow {
   if ($checks.desktopInput -eq 'input_probe_pass') {
     if ($appFacts.visible -and $appFacts.foreground -and $appFacts.uiAutomationMatchesPid -and $appFacts.session -eq $inputResult.processSession) {
       $checks.desktopInput = 'pass'; $checks.ui = 'harness_continuation_required'
-    } else { $checks.desktopInput = 'blocked'; $firstFailure = 'desktop_window_focus_visibility_or_uia_failed' }
+      [void](Run 'desktop_status' $app @('status'))
+      [void](Run 'desktop_internal_shot' $app @('shot',(Join-Path $evidence 'desktop-internal.png')))
+    } else {
+      $checks.desktopInput = 'blocked'
+      $firstFailure = if ($appFacts.hasExited) { 'desktop_process_exited' } elseif (-not $appFacts.windowHandlePresent) { 'desktop_window_not_observed_after_uia_event_wait' } elseif (-not $appFacts.visible) { 'desktop_window_not_visible' } elseif (-not $appFacts.foreground) { 'desktop_window_not_foreground' } else { 'desktop_uia_or_session_mismatch' }
+    }
   }
   if ($desktop.HasExited -and -not $firstFailure) { $firstFailure = 'desktop_process_exited' }
 } catch {

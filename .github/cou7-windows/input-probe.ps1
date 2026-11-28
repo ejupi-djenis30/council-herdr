@@ -47,9 +47,10 @@ else {
   elseif (-not $result.nativeInputObserved) { $result.firstFailure = 'native_key_input_postcondition_absent' }
   if ($result.foreground -and $env:COU7_EVIDENCE) {
     try {
-      $bitmap = [Drawing.Bitmap]::new($form.Width, $form.Height)
+      # Capture only the synthetic form interior, never surrounding desktop content.
+      $bitmap = [Drawing.Bitmap]::new(300, 65)
       $graphics = [Drawing.Graphics]::FromImage($bitmap)
-      $graphics.CopyFromScreen($form.Left, $form.Top, 0, 0, $form.Size)
+      $graphics.CopyFromScreen($form.Left + 20, $form.Top + 40, 0, 0, [Drawing.Size]::new(300, 65))
       $bitmap.Save((Join-Path $env:COU7_EVIDENCE 'owned-input-window.png'), [Drawing.Imaging.ImageFormat]::Png)
       $graphics.Dispose(); $bitmap.Dispose()
       $result['ownedWindowScreenshot'] = 'captured'
