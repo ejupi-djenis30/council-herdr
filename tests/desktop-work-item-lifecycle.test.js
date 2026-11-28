@@ -55,7 +55,6 @@ function harness(answer, team = async project => ({ members: [project === peer.p
 
 const verb = argv => argv?.slice(1, 3).filter(value => !value.startsWith('--')).join(' ');
 const submitted = argv => JSON.parse(argv[argv.indexOf('--input-json') + 1]);
-const lookup = (argv, value) => argv[argv.indexOf(value) + 1];
 
 test('queue filters stay on the selected machine and a late read cannot replace a newer selection', async () => {
   const first = deferred();
@@ -220,6 +219,81 @@ test('formal rejection or provisional evidence cannot accept, and a verified for
   assert.equal(work.sessionLink(work.current, 'reviews', '../another-project'), null);
 });
 
+test('attach and return use the frozen review, never interpret a rejected formal verdict as closure, and retain the selected project', async () => {
+  const formalId = examples.formalRejected.item.id;
+  const pending = structuredClone(examples.formalRejected);
+  const lifecycle = pending.item.lifecycle;
+  lifecycle.revision = 4;
+  lifecycle.reviewState = 'pending';
+  lifecycle.actions.attachFormal = true;
+  Object.assign(lifecycle.review.formal, { state: 'pending', sessionId: null, round: null, verdict: null,
+    proposalSha256: null, manifestSha256: null, dissent: [] });
+  const callsToWrite = [];
+  const { work, focus, calls } = harness((args, call) => {
+    if (verb(args) === 'show') return wire(pending, call.cwd);
+    const input = submitted(args);
+    callsToWrite.push({ operation: args[2], input });
+    if (args[2] === 'attach') return wire({ ...examples.formalRejected, receipt: receipt(input.requestId, 5, 'review_attached') }, call.cwd);
+    const returned = structuredClone(examples.reopened);
+    returned.item.id = formalId;
+    returned.item.lifecycle.decision.disposition = 'changes_requested';
+    returned.item.lifecycle.decision.formal = examples.formalRejected.item.lifecycle.review.formal;
+    returned.receipt = receipt(input.requestId, 6, 'review_returned');
+    return wire(returned, call.cwd);
+  });
+  focus(peer);
+  await work.restore(peer, formalId);
+  const screen = work.current;
+  await work.startMutation(screen, 'attach');
+  await work.confirmMutation(screen, { ...actor, formalSessionId: '../other-project', round: '1' });
+  assert.match(screen.error, /session ID/);
+  assert.equal(callsToWrite.length, 0);
+  await work.confirmMutation(screen, { ...actor, formalSessionId: 'review-release-notes', round: '1' });
+  assert.equal(screen.item.lifecycle.review.formal.state, 'rejected');
+  assert.equal(workItemActionEnabled(screen.item, 'close'), false);
+  await work.startMutation(screen, 'return');
+  work.selectMutation(screen, 'roleId', 'verifier');
+  await work.confirmMutation(screen, { ...actor, reason: 'A reviewer found an unclear instruction.', nextAction: 'Rewrite the upgrade step.' });
+  assert.equal(screen.item.lifecycle.cycle, 2);
+  assert.equal(screen.item.lifecycle.decision.disposition, 'changes_requested');
+  assert.equal(screen.item.job, null);
+  assert.deepEqual(callsToWrite.map(({ operation, input }) => [operation, input.reviewId, input.ifRevision, input.evidenceToken]), [
+    ['attach', 'review-4', 4, undefined],
+    ['return', 'review-4', 5, examples.formalRejected.item.lifecycle.review.evidenceToken]
+  ]);
+  assert.ok(calls.every(call => call.cwd === peer.project && call.on === peer.engine.machine));
+});
+
+test('a stale revision rejection with a failed read requires a successful refresh before a fresh confirmation', async () => {
+  let afterRejection = false;
+  let available = false;
+  const { work, calls } = harness((args, call) => {
+    if (verb(args) === 'delegate') {
+      afterRejection = true;
+      return wire(examples.conflict, call.cwd);
+    }
+    if (verb(args) === 'history') return wire({ success: true, id, receipt: null }, call.cwd);
+    if (afterRejection && !available) throw new Error('temporarily disconnected');
+    return wire(available ? examples.reopened : examples.triaged, call.cwd);
+  });
+  await work.restore(local, id);
+  const screen = work.current;
+  await work.startMutation(screen, 'delegate');
+  const oldForm = screen.form;
+  await work.confirmMutation(screen, actor);
+  assert.equal(oldForm.stale, true);
+  assert.equal(screen.staleRead, true);
+  await work.startMutation(screen, 'delegate');
+  assert.equal(screen.form, oldForm);
+  await work.replayMutation(screen);
+  assert.equal(calls.filter(call => call.argv?.[2] === 'delegate').length, 1);
+  available = true;
+  await work.refresh(screen);
+  await work.startMutation(screen, 'delegate');
+  assert.notEqual(screen.form, oldForm);
+  assert.equal(screen.form.item.lifecycle.revision, 6);
+});
+
 const engineScript = String.raw`
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
@@ -279,11 +353,13 @@ if (action === 'list') {
   } else if (op === 'delegate') {
     assert.equal(item.roleId, 'verifier');
     Object.assign(item, { state: 'result_ready', result: state.candidate.result, canDelegate: false, job: state.candidate.job });
+    lifecycle.guidance = 'Freeze the saved handoff for review.';
     Object.assign(lifecycle.actions, { editDefinition: false, delegate: false, startReview: true });
   } else if (op === 'start') {
     assert.equal(input.reviewOwnerRoleId, 'verifier');
     assert.equal(input.policy, 'operator');
     Object.assign(lifecycle, { state: 'in_review', reviewState: 'operator', review: state.candidate.lifecycle.review,
+      guidance: state.candidate.lifecycle.guidance,
       actions: state.candidate.lifecycle.actions });
   } else if (op === 'note') {
     assert.equal(input.reviewId, lifecycle.review.id);
@@ -294,7 +370,7 @@ if (action === 'list') {
     assert.equal(input.reviewId, lifecycle.review.id);
     assert.equal(input.evidenceToken, lifecycle.review.evidenceToken);
     assert.equal(input.decision, 'accept');
-    Object.assign(lifecycle, { state: 'closed', nextAction: input.nextAction, actions: state.closed.actions,
+    Object.assign(lifecycle, { state: 'closed', nextAction: input.nextAction, actions: state.closed.actions, guidance: state.closed.guidance,
       decision: { ...state.closed.decision, id: 'decision-' + revision, actor: input.actor, reason: input.reason,
         nextAction: input.nextAction } });
   } else if (op === 'reopen') {
@@ -303,7 +379,7 @@ if (action === 'list') {
     assert.equal(input.roleId, 'verifier');
     state.archived = lifecycle.review;
     Object.assign(item, { state: 'draft', result: null, job: null });
-    Object.assign(lifecycle, { state: 'open', review: null, reviewState: null, cycle: 2, workRevision: 2,
+    Object.assign(lifecycle, { state: 'open', review: null, reviewState: null, cycle: 2, workRevision: 2, guidance: state.reopened.guidance,
       nextAction: input.nextAction, actions: state.reopened.actions });
   } else assert.fail('Unexpected fixture operation ' + op);
   lifecycle.revision = revision;

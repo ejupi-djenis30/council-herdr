@@ -179,7 +179,10 @@ export default class Council extends View {
       lifecycle: true
     });
     this.lifecycleFocus = {
-      queue: cx.focus_handle(), back: cx.focus_handle(), clearFilters: cx.focus_handle(), formBack: cx.focus_handle(),
+      tab: cx.focus_handle(), queue: cx.focus_handle(), back: cx.focus_handle(), refresh: cx.focus_handle(), formBack: cx.focus_handle(),
+      allRoles: cx.focus_handle(), attention: cx.focus_handle(), clearFilters: cx.focus_handle(),
+      states: Object.fromEntries(['', 'open', 'in_review', 'closed'].map(state => [state, cx.focus_handle()])),
+      delegate: cx.focus_handle(), copyOutput: cx.focus_handle(), openDelegation: cx.focus_handle(),
       confirm: cx.focus_handle(), history: cx.focus_handle(), archive: cx.focus_handle(), output: cx.focus_handle()
     };
     this.lifecycleFields = null;
@@ -196,8 +199,8 @@ export default class Council extends View {
     if (checking()) return;
     // The native multiline Input context otherwise uses Tab for indentation.
     cx.bind_keys([
-      { keystroke: 'tab', action: 'council-lifecycle-next-field', context: 'CouncilLifecycleCriteria > Input' },
-      { keystroke: 'shift-tab', action: 'council-lifecycle-previous-field', context: 'CouncilLifecycleCriteria > Input' }
+      { keystroke: 'tab', action: 'council-work-item-next-field', context: 'CouncilWorkItemCriteria > Input' },
+      { keystroke: 'shift-tab', action: 'council-work-item-previous-field', context: 'CouncilWorkItemCriteria > Input' }
     ]);
     this.panelFocus.focus();
     this.search = InputState.new({ placeholder: 'Search by title, project or ID' });
@@ -357,14 +360,27 @@ export default class Council extends View {
     this.syncWorkItemFields();
   }
 
-  runWorkItemAction(cx, action, onStart) {
+  runWorkItemAction(cx, action, { preserveFocus = false, onStart } = {}) {
     cx.spawn(async cx => {
+      const previous = this.workItems.current;
+      const hadRoles = Boolean(previous?.roles?.length);
       const task = action();
+      const screen = this.workItems.current;
       this.syncWorkItemFields();
+      const transition = screen?.kind === 'create' ? this.workItems.createAttempt(screen) :
+        screen?.kind === 'detail' ? this.workItems.mutation(screen) : null;
+      const redirect = preserveFocus && task && screen && this.workItemVisible(screen) &&
+        (screen !== previous || screen.pending || ['writing', 'checking'].includes(transition?.phase));
+      if (redirect) (screen.kind === 'list' ? this.lifecycleFocus.queue : this.lifecycleFocus.back).focus();
       onStart?.();
       cx.notify();
       await task;
       this.syncWorkItemFields();
+      if (redirect && screen.kind === 'create' && (screen !== previous || !hadRoles) &&
+          this.workItems.isCurrent(screen) && screen.roles?.length &&
+          !this.workItems.createAttempt(screen) && this.lifecycleFocus.back.is_focused()) {
+        this.workItemForm?.fields.title.focus();
+      }
       cx.notify();
     });
   }
@@ -394,10 +410,11 @@ export default class Council extends View {
     if (!this.workItems.isCurrent(screen)) return;
     if (folderKey(this.workItemTarget(localSpace())) === folderKey(screen.scope.anchor)) {
       this.runWorkItemAction(cx, () => this.workItems.isCurrent(screen) && this.workItems.showList(screen.scope),
-        () => this.lifecycleFocus.queue.focus());
+        { preserveFocus: true });
       return;
     }
     this.leaveWorkItems();
+    this.lifecycleFocus.queue.focus();
     this.workspace.pinned = screen.scope.project;
     this.refresh(cx);
     this.syncWorkItems(cx);
@@ -420,13 +437,15 @@ export default class Council extends View {
     const fields = this.workItemForm?.screen === screen ? this.workItemForm?.fields : null;
     if (!screen || !this.workItemVisible(screen)) return { screen: null };
     const focus = this.lifecycleFocus;
-    const perform = (cx, action, onStart) => {
+    const perform = (cx, action, { preserveFocus = false, onStart } = {}) => {
       let started = false;
       this.runWorkItemAction(cx, () => {
         if (!workItems.isCurrent(screen)) return;
         started = true;
         return action();
-      }, onStart && (() => { if (started && workItems.current && this.workItemVisible(workItems.current)) onStart(); }));
+      }, { preserveFocus, onStart: onStart && (() => {
+        if (started && workItems.current && this.workItemVisible(workItems.current)) onStart();
+      }) });
     };
     const lifecycle = this.lifecycleFields?.form === screen.form ? this.lifecycleFields : null;
     const mutation = screen.kind === 'detail' ? workItems.mutation(screen) : null;
@@ -444,45 +463,41 @@ export default class Council extends View {
       cx.notify();
     };
     return {
-      screen, fields, focus, mutation, formalLink, archiveExecution,
+      screen, fields, focus, mutation, formalLink, archiveExecution, wide: this.wide,
       formFields: lifecycle?.fields, activeField: lifecycle?.activeField,
       attempt: screen.kind === 'create' ? workItems.createAttempt(screen) : null,
       actions: {
-        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen), () => {
-          if (screen.kind === 'detail' && (screen.pending || workItems.mutation(screen))) focus.back.focus();
-          if (screen.kind === 'list' && screen.pending) focus.queue.focus();
-        }),
-        create: (_e, cx) => perform(cx, () => workItems.startCreate(screen)),
-        open: (cx, id) => perform(cx, () => workItems.open(screen, id), () => focus.back.focus()),
-        filter: (cx, filters) => perform(cx, () => workItems.filter(screen, filters), () => focus.queue.focus()),
+        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen), { preserveFocus: true }),
+        create: (_e, cx) => perform(cx, () => workItems.startCreate(screen), { preserveFocus: true }),
+        open: (cx, id) => perform(cx, () => workItems.open(screen, id), { preserveFocus: true }),
+        filter: (cx, filters) => perform(cx, () => workItems.filter(screen, filters), { preserveFocus: true }),
         role: (cx, id) => {
           if (!workItems.isCurrent(screen) || workItems.createAttempt(screen)) return;
           screen.roleId = id;
           cx.notify();
         },
         save: (_e, cx) => perform(cx, () => workItems.save(screen,
-          fields && { title: fields.title.value(), criteria: fields.criteria.value() })),
-        discard: (_e, cx) => perform(cx, () => workItems.discardCreate(screen)),
+          fields && { title: fields.title.value(), criteria: fields.criteria.value() }), { preserveFocus: true }),
+        discard: (_e, cx) => perform(cx, () => workItems.discardCreate(screen), { preserveFocus: true }),
         back: (_e, cx) => this.backToWorkItems(cx, screen),
         team: (_e, cx) => this.openWorkItemSection(cx, screen, 'team'),
         delegation: (_e, cx) => openLink(cx, workItems.delegationLink(screen)),
-        mutate: (cx, operation) => perform(cx, () => workItems.startMutation(screen, operation), () => {
+        mutate: (cx, operation) => perform(cx, () => workItems.startMutation(screen, operation), { onStart: () => {
           if (this.lifecycleFields?.form === screen.form) this.lifecycleFields?.fields.actor.focus();
-        }),
+        } }),
         confirm: (_e, cx) => perform(cx, () => lifecycle && workItems.confirmMutation(screen,
-          Object.fromEntries(Object.entries(lifecycle.fields).map(([key, state]) => [key, state.value()]))), () => {
-          if (workItems.mutation(screen)) focus.back.focus();
-        }),
-        cancelForm: (_e, cx) => perform(cx, () => workItems.cancelMutation(screen), () => focus.back.focus()),
+          Object.fromEntries(Object.entries(lifecycle.fields).map(([key, state]) => [key, state.value()]))), { preserveFocus: true }),
+        cancelForm: (_e, cx) => perform(cx, () => workItems.cancelMutation(screen), { onStart: () => focus.back.focus() }),
         formOption: (cx, key, value) => {
           workItems.selectMutation(screen, key, value);
           cx.notify();
         },
-        refreshOptions: (_e, cx) => perform(cx, () => workItems.loadMutationOptions(screen, screen.form), () => focus.formBack.focus()),
-        replay: (_e, cx) => perform(cx, () => workItems.replayMutation(screen), () => focus.back.focus()),
-        history: (_e, cx) => perform(cx, () => workItems.loadHistory(screen), () => focus.back.focus()),
-        moreHistory: (_e, cx) => perform(cx, () => workItems.loadHistory(screen, true), () => focus.history.focus()),
-        archive: (cx, id) => perform(cx, () => workItems.openArchived(screen, id), () => focus.archive.focus()),
+        refreshOptions: (_e, cx) => perform(cx, () => workItems.loadMutationOptions(screen, screen.form),
+          { onStart: () => focus.formBack.focus() }),
+        replay: (_e, cx) => perform(cx, () => workItems.replayMutation(screen), { preserveFocus: true }),
+        history: (_e, cx) => perform(cx, () => workItems.loadHistory(screen), { onStart: () => focus.back.focus() }),
+        moreHistory: (_e, cx) => perform(cx, () => workItems.loadHistory(screen, true), { onStart: () => focus.history.focus() }),
+        archive: (cx, id) => perform(cx, () => workItems.openArchived(screen, id), { onStart: () => focus.archive.focus() }),
         closeArchive: (_e, cx) => closeArchive(cx),
         archiveExecution: (_e, cx) => openLink(cx, archiveExecution),
         formal: (_e, cx) => openLink(cx, formalLink),
@@ -1183,7 +1198,9 @@ export default class Council extends View {
         cx.notify();
       };
       const workItems = this.workspace.view === 'work-items' ? this.workItemViewProps() : null;
-      return workspaceView(t, this.data, { ...this.workspace, projects, live, workItems, wide: this.wide, search: this.activitySearch }, {
+      return workspaceView(t, this.data, {
+        ...this.workspace, projects, live, workItems, workItemsTab: this.lifecycleFocus.tab, wide: this.wide, search: this.activitySearch
+      }, {
         open: (cx, tab, id, origin = project) => this.navigate(cx, tab, { id, project: origin }, { returnTo: this.workspaceBookmark() }),
         history: cx => this.openWorkspaceHistory(cx, project),
         create: (cx, tab) => {

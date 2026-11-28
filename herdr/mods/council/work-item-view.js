@@ -73,12 +73,13 @@ function lifecycleBadge(t, lifecycle) {
   return statusPill(t, lifecycleLabels[lifecycle.state], lifecycle.state === 'closed' ? t.done : t.working, t.foreground);
 }
 
-function choices(t, group, options, change) {
+function choices(t, group, options, change, focus = {}) {
   return v_flex().gap(5).child(label(group, 12, t.foreground).font_medium())
     .child(h_flex().gap(5).flex_wrap().role('group').accessibility_label(group).children(
       options.map(({ id, title, selected, disabled: optionDisabled }) =>
         button(t, `choice-${group}-${id}`, title, (_e, cx) => change(cx, id), selected ? 'active' : 'normal',
-          optionDisabled).accessibility_label(`${group}: ${title}`))));
+          optionDisabled).accessibility_label(`${group}: ${title}`)
+          .when(Object.hasOwn(focus, id), control => control.track_focus(focus[id])))));
 }
 
 function option(id, title, selected) {
@@ -93,13 +94,14 @@ function queueFilters(t, screen, actions, focus) {
   return v_flex().gap(8)
     .child(choices(t, 'Responsible role', [option('', 'All roles', filters.roleId ?? ''),
       ...[...roleChoices].map(([id, name]) => option(id, name, filters.roleId))],
-    (cx, roleId) => actions.filter(cx, { ...filters, roleId })))
+    (cx, roleId) => actions.filter(cx, { ...filters, roleId }), { '': focus.allRoles }))
     .child(choices(t, 'Lifecycle', [option('', 'All states', filters.state ?? ''),
       ...lifecycleStates.map(id => option(id, lifecycleLabels[id], filters.state))],
-    (cx, state) => actions.filter(cx, { ...filters, state })))
+    (cx, state) => actions.filter(cx, { ...filters, state }), focus.states))
     .child(h_flex().gap(6).flex_wrap()
       .child(button(t, 'queue-attention', 'Needs attention', (_e, cx) =>
-        actions.filter(cx, { ...filters, attention: !filters.attention }), filters.attention ? 'active' : 'normal'))
+        actions.filter(cx, { ...filters, attention: !filters.attention }), filters.attention ? 'active' : 'normal')
+        .track_focus(focus.attention))
       .child(button(t, 'queue-clear-filters', 'Clear filters', (_e, cx) => actions.filter(cx, {}), 'normal',
         !Object.values(filters).some(Boolean)).track_focus(focus.clearFilters)));
 }
@@ -107,7 +109,7 @@ function queueFilters(t, screen, actions, focus) {
 function listView(t, screen, actions, focus) {
   const list = v_flex().w_full().gap(9)
     .child(toolbar(t, 'Work items', [
-      button(t, 'refresh-work-items', 'Refresh', actions.refresh, 'normal', screen.pending),
+      button(t, 'refresh-work-items', 'Refresh', actions.refresh, 'normal', screen.pending).track_focus(focus.refresh),
       button(t, 'new-work-item', 'New work item', actions.create, 'primary', false, 'add').track_focus(focus.queue)
     ]));
   if (screen.legacy) list.child(notice(t, 'Update Council on the project machine', screen.scope.project));
@@ -142,7 +144,18 @@ function listView(t, screen, actions, focus) {
   return list;
 }
 
-function createView(t, screen, fields, attempt, actions) {
+function criteriaEditor(t, state, active = false) {
+  return v_flex().gap(4).key_context('CouncilWorkItemCriteria')
+    .on_action('council-work-item-next-field', (_e, cx) => { window.focus_next(); cx.stop_propagation(); })
+    .on_action('council-work-item-previous-field', (_e, cx) => { window.focus_prev(); cx.stop_propagation(); })
+    .child(label('Acceptance criteria', 12, t.foreground).font_medium())
+    .child(label('Enter one criterion per line, in review order.', 12, t.muted))
+    .child(Textarea.new(state).w_full().min_w_0().h(100).px(8).py(6).text_size(13)
+      .rounded(6).border_1().border_color(active ? t.accent : t.input).bg(t.background).text_color(t.foreground)
+      .accessibility_label('Acceptance criteria, one criterion per line'));
+}
+
+function createView(t, screen, fields, attempt, actions, backFocus) {
   const card = panel(t).child(cardHeading(t, 'New work item', 'plan')).child(label(screen.scope.project, 12, t.muted));
   if (screen.error) card.child(notice(t, 'Could not save or load the form', screen.error));
   if (attempt) {
@@ -156,7 +169,7 @@ function createView(t, screen, fields, attempt, actions) {
       .when(attempt.phase === 'missing', row => row.child(button(t, 'retry-work-item-save', 'Retry save', actions.save, 'primary')))
       .when(!busy && attempt.phase !== 'conflict', row => row.child(button(t, 'reconcile-work-item-save', 'Refresh saved item', actions.refresh)))
       .when(attempt.phase === 'conflict', row => row.child(button(t, 'discard-work-item', 'Discard draft', actions.discard)))
-      .child(button(t, 'back-work-items', 'Back to work items', actions.back, 'normal', false, 'back')));
+      .child(button(t, 'back-work-items', 'Back to work items', actions.back, 'normal', false, 'back').track_focus(backFocus)));
   }
   if (screen.pending) card.child(label('Loading roles from Team…', 12, t.muted).role('status'));
   else if (!screen.roles) card.child(button(t, 'refresh-work-item-roles', 'Refresh roles', actions.refresh));
@@ -165,12 +178,7 @@ function createView(t, screen, fields, attempt, actions) {
       .child(button(t, 'open-work-item-team', 'Open Team', actions.team, 'normal', false, 'team'));
   } else if (fields) {
     card.child(field(t, 'Title', fields.title))
-      .child(v_flex().gap(4)
-        .child(label('Acceptance criteria', 12, t.foreground).font_medium())
-        .child(label('Enter one criterion per line, in review order.', 12, t.muted))
-        .child(Textarea.new(fields.criteria).w_full().min_w_0().h(100).px(8).py(6).text_size(13)
-          .rounded(6).border_1().border_color(t.input).bg(t.background).text_color(t.foreground)
-          .accessibility_label('Acceptance criteria, one criterion per line')))
+      .child(criteriaEditor(t, fields.criteria))
       .child(v_flex().gap(5)
         .child(label('Responsible role', 12, t.foreground).font_medium())
         .child(h_flex().gap(5).flex_wrap().role('group').accessibility_label('Responsible role')
@@ -180,10 +188,11 @@ function createView(t, screen, fields, attempt, actions) {
         .child(button(t, 'save-work-item', 'Save work item', actions.save, 'primary', !screen.roleId, 'check'))
         .child(button(t, 'refresh-work-item-roles', 'Refresh roles', actions.refresh)));
   }
-  return card.child(h_flex().child(button(t, 'back-work-items', 'Back to work items', actions.back, 'normal', false, 'back')));
+  return card.child(h_flex().child(button(t, 'back-work-items', 'Back to work items', actions.back, 'normal', false, 'back')
+    .track_focus(backFocus)));
 }
 
-function resultView(t, item, actions) {
+function resultView(t, item) {
   const result = item.result;
   const provenance = result.source === 'direct_artifact' ? 'Direct artifact' : 'Terminal screen capture';
   return panel(t).child(cardHeading(t, 'Saved handoff', 'file'))
@@ -191,8 +200,7 @@ function resultView(t, item, actions) {
     .child(label('Scroll to read the full handoff.', 12, t.muted))
     .child(v_flex().id(`work-item-output-${item.id}`).role('region').accessibility_label('Saved handoff output')
       .w_full().max_h(220).min_h(44).p(9).rounded(6).bg(t.background).overflow_y_scrollbar()
-      .child(label(result.output, 13, t.foreground)))
-    .child(h_flex().child(button(t, 'copy-work-item-output', 'Copy saved handoff', actions.copyOutput, 'normal', false, 'copy')));
+      .child(label(result.output, 13, t.foreground)));
 }
 
 const sourceName = source => source === 'direct_artifact' ? 'Direct artifact' : 'Terminal screen capture';
@@ -201,8 +209,17 @@ const readable = (name, value) => value === null || value === undefined ? [] : [
 function reviewView(t, review, ui, actions, archived = false) {
   const { capture, formal, definition } = review;
   const expanded = ui.screen.expandedReview === review.id;
-  const card = panel(t).child(cardHeading(t, archived ? 'Archived review' : 'Frozen review', 'reviews'))
+  const card = panel(t).child(h_flex().gap(8).flex_wrap().items_center()
+    .child(cardHeading(t, archived ? 'Archived review' : 'Frozen review', 'reviews').flex_1())
+    .when(Boolean(formal), row => row.child(statusPill(t, formalLabels[formal.state],
+      formal.state === 'approved' ? t.done : formal.state === 'pending' ? t.working : t.blocked, t.foreground))))
     .child(label(definition.title, 15, t.foreground).font_semibold())
+    .when(Boolean(capture.output), section => section.child(h_flex().gap(6).flex_wrap()
+      .child(button(t, 'frozen-output-toggle', expanded ? 'Hide frozen output' : 'Show frozen output', actions.toggleOutput)
+        .track_focus(ui.focus.output))
+      .child(button(t, 'frozen-output-copy', 'Copy frozen output', actions.copyFrozen))))
+    .when(expanded && Boolean(capture.output), section => section.child(label(capture.output, 13, t.foreground)
+      .p(9).rounded(6).bg(t.background).role('paragraph').accessibility_label(capture.output)))
     .child(facts(t, [['Review ID', review.id], ['Cycle', review.cycle], ['Work revision', review.workRevision],
       ['Review owner', review.reviewOwnerRoleId], ['Responsible role', definition.roleId],
       ['Policy', review.policy === 'operator' ? 'Operator acceptance' : 'Formal Council review']]))
@@ -216,14 +233,7 @@ function reviewView(t, review, ui, actions, archived = false) {
   if (!capture.verified || !review.evidenceToken) {
     card.child(label('Frozen evidence could not be verified. Refresh the review to check its saved evidence.', 13, t.blocked).role('status'));
   }
-  if (capture.output) {
-    card.child(h_flex().gap(6).flex_wrap()
-      .child(button(t, 'frozen-output-toggle', expanded ? 'Hide frozen output' : 'Show frozen output', actions.toggleOutput)
-        .track_focus(ui.focus.output))
-      .child(button(t, 'frozen-output-copy', 'Copy frozen output', actions.copyFrozen)));
-    if (expanded) card.child(label(capture.output, 13, t.foreground).p(9).rounded(6).bg(t.background)
-      .role('paragraph').accessibility_label(capture.output));
-  } else card.child(label('The frozen output is unavailable.', 13, t.blocked).role('status'));
+  if (!capture.output) card.child(label('The frozen output is unavailable.', 13, t.blocked).role('status'));
   if (archived && capture.verified && ui.archiveExecution) {
     card.child(h_flex().child(button(t, 'archived-execution', 'Open archived delegation', actions.archiveExecution, 'normal', false, 'right')));
   }
@@ -289,6 +299,8 @@ function mutationView(t, screen, ui, actions) {
   const fields = ui.formFields;
   const labelConfirm = operationLabels[operation][1];
   const body = panel(t).child(cardHeading(t, operationLabels[operation][0], 'plan'))
+    .when(Boolean(screen.error && !form.stale), card => card.child(label(screen.error, 12, t.blocked)
+      .role('status').accessibility_label(screen.error)))
     .child(facts(t, [['Project', screen.scope.project], ['Expected revision', item.lifecycle.revision]]));
   if (form.stale) return body.child(label('This draft refers to older item or review evidence. Review the latest detail and start a new confirmation.',
     13, t.blocked).role('status'))
@@ -324,14 +336,7 @@ function mutationView(t, screen, ui, actions) {
   body.child(editField(t, fields, 'actor', ui));
   if (fields.title) {
     body.child(editField(t, fields, 'title', ui))
-      .child(v_flex().gap(4).key_context('CouncilLifecycleCriteria')
-        .on_action('council-lifecycle-next-field', (_e, cx) => { window.focus_next(); cx.stop_propagation(); })
-        .on_action('council-lifecycle-previous-field', (_e, cx) => { window.focus_prev(); cx.stop_propagation(); })
-        .child(label('Acceptance criteria', 12, t.foreground))
-        .child(label('Enter one criterion per line, in review order.', 12, t.muted))
-        .child(Textarea.new(fields.criteria).w_full().min_w_0().h(100).px(8).py(6).text_size(13)
-          .rounded(6).border_1().border_color(ui.activeField === 'criteria' ? t.accent : t.input).bg(t.background)
-          .text_color(t.foreground).accessibility_label('Acceptance criteria, one criterion per line')));
+      .child(criteriaEditor(t, fields.criteria, ui.activeField === 'criteria'));
   }
   if (form.pending) body.child(label('Loading project choices…', 12, t.muted).role('status'));
   if (form.optionsError) body.child(label(form.optionsError, 12, t.blocked).role('status'))
@@ -356,7 +361,13 @@ function mutationView(t, screen, ui, actions) {
   }
   if (operation === 'note') body.child(choices(t, 'Note type', ['finding', 'dissent'].map(id => option(id, capitalize(id), form.noteKind)),
     (cx, id) => actions.formOption(cx, 'noteKind', id)));
-  body.children(['text', 'formalSessionId', 'round', 'reason', 'nextAction'].filter(key => fields[key]).map(key => editField(t, fields, key, ui)));
+  const details = ['text', 'formalSessionId', 'round', 'reason', 'nextAction']
+    .filter(key => fields[key]).map(key => editField(t, fields, key, ui));
+  if (ui.wide && details.length === 2) {
+    body.child(h_flex().gap(10).children(details.map(element => element.min_w_0().flex_1())));
+  } else {
+    body.children(details);
+  }
   return body.child(h_flex().gap(7).flex_wrap()
     .child(button(t, 'confirm-lifecycle-action', labelConfirm, actions.confirm, 'primary',
       screen.pending || form.pending || (roleNeeded && !form.roleId), 'check').track_focus(ui.focus.confirm))
@@ -410,17 +421,22 @@ function detailView(t, screen, ui, actions) {
   const item = screen.item;
   const mutation = ui.mutation;
   const busy = ['writing', 'checking'].includes(mutation?.phase);
+  const inspecting = !screen.form || screen.form.stale;
   const controls = [
     button(t, 'back-work-items', 'Back to work items', actions.back, 'normal', false, 'back').track_focus(ui.focus.back),
-    button(t, 'refresh-work-item', 'Refresh', actions.refresh, 'normal', screen.pending || busy)
+    button(t, 'refresh-work-item', 'Refresh', actions.refresh, 'normal', screen.pending || busy).track_focus(ui.focus.refresh)
   ];
+  if (inspecting && item?.result && !screen.archived) controls.push(button(t, 'copy-work-item-output', 'Copy saved handoff', actions.copyOutput,
+    'normal', false, 'copy').track_focus(ui.focus.copyOutput));
+  if (inspecting && item?.job?.linked && !screen.archived) controls.push(button(t, 'open-work-item-delegation', 'Open delegation',
+    actions.delegation, 'normal', false, 'right').track_focus(ui.focus.openDelegation));
   if (item?.lifecycle) {
     controls.unshift(lifecycleBadge(t, item.lifecycle));
-    controls.push(button(t, 'work-item-open-history', screen.history ? 'Refresh history' : 'View history', actions.history,
+    if (inspecting) controls.push(button(t, 'work-item-open-history', screen.history ? 'Refresh history' : 'View history', actions.history,
       'normal', screen.history?.pending).track_focus(ui.focus.history));
   } else if (item) controls.unshift(badge(t, item));
   const body = v_flex().w_full().gap(9).child(toolbar(t, item?.title ?? 'Work item', controls));
-  if (screen.error) body.child(notice(t, 'Work item request failed', `${screen.scope.project} · ${screen.error}`));
+  if (screen.error && (inspecting || mutation)) body.child(notice(t, 'Work item request failed', `${screen.scope.project} · ${screen.error}`));
   if (screen.pending) body.child(label(item ? 'Refreshing work item…' : 'Loading work item…', 12, t.muted).role('status'));
   if (screen.archived) {
     body.child(h_flex().gap(6).flex_wrap()
@@ -433,9 +449,9 @@ function detailView(t, screen, ui, actions) {
     return body;
   }
   if (mutation) body.child(mutationRecovery(t, mutation, actions));
-  if (screen.receipt) body.child(label(
+  if (inspecting && screen.receipt) body.child(label(
     `Saved request ${screen.receipt.requestId} · revision ${screen.receipt.revision}`, 12, t.foreground).role('status'));
-  if (screen.history) body.child(historyView(t, screen.history, actions));
+  if (inspecting && screen.history) body.child(historyView(t, screen.history, actions));
   if (!item) return body;
   const lifecycle = item.lifecycle;
   if (!lifecycle) body.child(notice(t, 'Update Council on the project machine',
@@ -449,8 +465,10 @@ function detailView(t, screen, ui, actions) {
     const available = Object.keys(operationLabels).filter(operation => workItemActionEnabled(item, operation));
     if (available.length) body.child(h_flex().gap(7).flex_wrap().children(available.map(operation => button(t,
       `work-item-${operation}`, operationLabels[operation][0], (_e, cx) => actions.mutate(cx, operation),
-      ['start', 'close'].includes(operation) ? 'primary' : 'normal', screen.pending))));
+      ['start', 'close'].includes(operation) ? 'primary' : 'normal', screen.pending)
+      .when(operation === 'delegate', control => control.track_focus(ui.focus.delegate)))));
   }
+  if (lifecycle?.review) body.child(reviewView(t, lifecycle.review, ui, actions));
   body.child(panel(t).child(facts(t, [['Work item ID', item.id], ['Responsible role', item.roleId]]))
     .child(metadata(t, 'Project', screen.scope.project))
     .when(Boolean(lifecycle), card => card.child(facts(t, [['Revision', lifecycle.revision], ['Work revision', lifecycle.workRevision],
@@ -467,9 +485,8 @@ function detailView(t, screen, ui, actions) {
       .child(metadata(t, link.title ?? link.id, lifecycleLabels[link.state]))
       .when(link.state !== 'unavailable', row => row.child(button(t, `open-blocker-${link.id}`, 'Open blocker',
         (_e, cx) => actions.open(cx, link.id), 'normal', false, 'right').accessibility_label(`Open blocker ${link.title ?? link.id}`))))));
-  if (lifecycle?.review) body.child(reviewView(t, lifecycle.review, ui, actions));
   if (lifecycle?.decision) body.child(decisionView(t, lifecycle.decision, lifecycle.decision.cycle === lifecycle.cycle, actions));
-  if (item.result) body.child(resultView(t, item, actions));
+  if (item.result) body.child(resultView(t, item));
   if (item.job) {
     const job = item.job;
     const fields = [['Session ID', job.sessionId], ['Outcome', job.outcome]];
@@ -477,8 +494,7 @@ function detailView(t, screen, ui, actions) {
     if (job.deadlineAt) fields.push(['Deadline', job.deadlineAt]);
     if (job.address && job.linked) fields.push(['Terminal', job.address]);
     body.child(panel(t).child(cardHeading(t, job.linked ? 'Linked delegation' : 'Reserved delegation', 'delegations'))
-      .child(facts(t, fields)).when(job.linked, card =>
-        card.child(h_flex().child(button(t, 'open-work-item-delegation', 'Open delegation', actions.delegation, 'normal', false, 'right')))));
+      .child(facts(t, fields)));
   }
   return body;
 }
@@ -487,7 +503,7 @@ export function workItemView(t, screen, ui, actions) {
   if (!screen) {
     return panel(t).role('status').child(cardHeading(t, 'Loading work items…', 'plan'));
   }
-  if (screen.kind === 'create') return createView(t, screen, ui.fields, ui.attempt, actions);
+  if (screen.kind === 'create') return createView(t, screen, ui.fields, ui.attempt, actions, ui.focus.back);
   if (screen.kind === 'detail') return detailView(t, screen, ui, actions);
   return listView(t, screen, actions, ui.focus);
 }

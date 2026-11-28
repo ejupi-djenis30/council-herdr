@@ -286,7 +286,8 @@ export function workspaceView(t, data, ui, actions) {
     .child(h_flex().gap(6).flex_wrap().role('tab_list').accessibility_label('Workspace views')
       .children(tabs.map(([id, title, icon], position) => button(t, `workspace-${id}`, title,
         (_e, cx) => actions.view(cx, id), ui.view === id ? 'active' : 'normal', false, icon)
-        .role('tab').set_position(position + 1, tabs.length).focus(style => style.border_color(t.foreground)))))
+        .role('tab').set_position(position + 1, tabs.length).focus(style => style.border_color(t.foreground))
+        .when(id === 'work-items', tab => tab.track_focus(ui.workItemsTab)))))
     .when(data.errors.length > 0, row => row.child(button(t, 'workspace-diagnostics',
       countLabel(data.errors.length, 'read issue'), (_e, cx) => actions.diagnostics(cx),
       ui.diagnostics ? 'active' : 'normal', false, 'warning')));
@@ -294,6 +295,7 @@ export function workspaceView(t, data, ui, actions) {
     : ui.view === 'changes' ? changesView(t, data.git, ui, actions)
       : ui.view === 'work-items' ? workItemView(t, ui.workItems?.screen, ui.workItems, ui.workItems?.actions)
         : runsView(t, data, ui, actions);
+  if (ui.view === 'work-items' && ui.workItems?.screen?.form && !ui.workItems.screen.form.stale) return view;
   return v_flex().w_full().min_w_0().gap(10).child(header).child(nav)
     .when(ui.diagnostics && data.errors.length > 0, body => body.child(panel(t).child(cardHeading(t, 'Read issues', 'warning'))
       .children(data.errors.map(issue => v_flex().gap(3).child(label(issue.source, 12, t.foreground).font_semibold())
