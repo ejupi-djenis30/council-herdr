@@ -27,6 +27,10 @@ export class WorkItemStore {
     return event;
   }
   publish(id, revision, event) { return appendEvent(this.directory(id, true), revision, event); }
+  hasPublishedEvents(id) {
+    const dir = this.directory(id);
+    return dir ? readdirSync(dir).some(name => /^\d{8}\.json$/.test(name)) : false;
+  }
   ids() {
     if (!isDirectory(this.base) || !isDirectory(this.dir)) return [];
     return readdirSync(this.dir, { withFileTypes: true }).filter(e => itemIdPattern.test(e.name)).map(e => e.name);
