@@ -1,0 +1,4 @@
+/src/preflight.mjs text eol=lf
+/package/preflight.mjs text eol=lf
+/package/manifest.json text eol=lf
+/package/manifest.sha256 text eol=lf

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import { inspectPackage } from '../../native/secret-handoff/windows/src/preflight.mjs';
 
 const source = resolve('native/secret-handoff/windows/package');
@@ -95,6 +96,63 @@ test('inaccessible package is unverifiable and does not disclose the error', t =
   assert.equal(result.prerequisites.find(p => p.id === 'package_consistency').status, 'unverified');
   assert.ok(!JSON.stringify(result).includes('private detail'));
   assert.equal(result.availability.available, false);
+});
+
+test('a file that grows after fstat is rejected with bounded reads', t => {
+  const folder = fixture(t);
+  const path = join(folder, 'manifest.json');
+  let grown = false;
+  let requested = 0;
+  let read = 0;
+  const io = {
+    ...fs,
+    fstatSync(fd) {
+      const stat = fs.fstatSync(fd);
+      if (!grown) { grown = true; fs.appendFileSync(path, Buffer.alloc(1024 * 1024)); }
+      return stat;
+    },
+    readSync(fd, buffer, offset, length, position) {
+      requested += length;
+      const count = fs.readSync(fd, buffer, offset, length, position);
+      read += count;
+      return count;
+    },
+  };
+  const result = inspect(folder, supported, io);
+  assert.equal(result.package.code, 'manifest_invalid');
+  assert.ok(read <= 16385);
+  assert.ok(requested <= 16385);
+  assert.equal(result.availability.available, false);
+});
+
+test('truncated ARM64 PE is rejected by preflight and packager despite coherent digest', t => {
+  const folder = fixture(t);
+  const binary = Buffer.alloc(274);
+  binary.writeUInt16LE(0x5a4d, 0); binary.writeUInt32LE(0x80, 0x3c);
+  binary.writeUInt32LE(0x4550, 0x80); binary.writeUInt16LE(0xaa64, 0x84);
+  binary.writeUInt16LE(0x0002, 0x96); binary.writeUInt16LE(0x20b, 0x98);
+  const path = join(folder, 'council-handoff-probe.exe');
+  writeFileSync(path, binary);
+  manifest(folder, m => { m.artifacts[0].size = binary.length; m.artifacts[0].sha256 = digest(binary); });
+  assert.equal(inspect(folder).package.code, 'artifact_mismatch');
+  const build = join(folder, 'build-info.json');
+  writeFileSync(build, JSON.stringify({ schema: 'council.synthetic-build/v1', compiler: 'msvc', compilerVersion: '19.44.35228.0', windowsSdkVersion: '10.0.26100.0', target: 'windows-arm64' }));
+  const result = spawnSync(process.execPath, [resolve('native/secret-handoff/windows/tools/package.mjs'), path, build, join(folder, 'output')], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Invalid ARM64 PE/);
+});
+
+test('truncated optional header and section table are rejected', async () => {
+  const { isArm64Pe } = await import('../../native/secret-handoff/windows/src/preflight.mjs');
+  const original = readFileSync(join(source, 'council-handoff-probe.exe'));
+  const p = original.readUInt32LE(0x3c);
+  const optional = p + 24;
+  const size = original.readUInt16LE(p + 20);
+  assert.equal(isArm64Pe(original.subarray(0, optional + size - 1)), false);
+  assert.equal(isArm64Pe(original.subarray(0, optional + size + 39)), false);
+  const missingSections = Buffer.from(original);
+  missingSections.writeUInt16LE(0, p + 6);
+  assert.equal(isArm64Pe(missingSections), false);
 });
 
 test('checked-in package contains the matching preflight source and real ARM64 PE', () => {

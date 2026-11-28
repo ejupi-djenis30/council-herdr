@@ -1,4 +1,4 @@
-import { readFileSync, lstatSync } from 'node:fs';
+import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,18 +13,49 @@ const requirements = ['protected_installation', 'dedicated_identities', 'managed
 export function isArm64Pe(bytes) {
   if (bytes.length < 256 || bytes.readUInt16LE(0) !== 0x5a4d) return false;
   const p = bytes.readUInt32LE(0x3c);
-  return p >= 64 && p <= bytes.length - 26 && bytes.readUInt32LE(p) === 0x4550 &&
-    bytes.readUInt16LE(p + 4) === 0xaa64 && (bytes.readUInt16LE(p + 22) & 0x2002) === 0x0002 &&
-    bytes.readUInt16LE(p + 24) === 0x20b;
+  if (p < 64 || p > bytes.length - 24 || bytes.readUInt32LE(p) !== 0x4550 ||
+      bytes.readUInt16LE(p + 4) !== 0xaa64 || (bytes.readUInt16LE(p + 22) & 0x2002) !== 0x0002) return false;
+  const sections = bytes.readUInt16LE(p + 6);
+  const optionalSize = bytes.readUInt16LE(p + 20);
+  const optional = p + 24;
+  if (sections < 1 || sections > 96 || optionalSize < 112 || optionalSize > bytes.length - optional ||
+      bytes.readUInt16LE(optional) !== 0x20b || bytes.readUInt32LE(optional + 108) > Math.floor((optionalSize - 112) / 8)) return false;
+  const table = optional + optionalSize;
+  const tableEnd = table + sections * 40;
+  const headerSize = bytes.readUInt32LE(optional + 60);
+  if (tableEnd > bytes.length || headerSize < tableEnd || headerSize > bytes.length) return false;
+  for (let i = 0; i < sections; i++) {
+    const entry = table + i * 40;
+    const size = bytes.readUInt32LE(entry + 16);
+    const offset = bytes.readUInt32LE(entry + 20);
+    if (size && (offset < headerSize || offset > bytes.length || size > bytes.length - offset)) return false;
+  }
+  return true;
 }
 
 function readBounded(folder, name, max, io) {
   const path = join(folder, name);
-  const stat = io.lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > max || stat.size < 1) throw new Error('invalid');
-  const bytes = io.readFileSync(path);
-  if (bytes.length !== stat.size || bytes.length > max) throw new Error('invalid');
-  return bytes;
+  const before = io.lstatSync(path);
+  if (!before.isFile() || before.isSymbolicLink()) throw new Error('invalid');
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const fd = io.openSync(path, flags);
+  try {
+    const stat = io.fstatSync(fd);
+    if (!stat.isFile() || stat.size > max || stat.size < 1 ||
+        (before.ino && stat.ino && (before.ino !== stat.ino || before.dev !== stat.dev))) throw new Error('invalid');
+    const bytes = Buffer.allocUnsafe(max + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const count = io.readSync(fd, bytes, length, bytes.length - length, null);
+      if (!count) break;
+      length += count;
+    }
+    const after = io.fstatSync(fd);
+    if (length !== stat.size || length > max || after.size !== stat.size) throw new Error('invalid');
+    return bytes.subarray(0, length);
+  } finally {
+    io.closeSync(fd);
+  }
 }
 
 function manifestValid(m) {
@@ -41,7 +72,7 @@ function manifestValid(m) {
 }
 
 export function inspectPackage(folder, options = {}) {
-  const io = options.io ?? { lstatSync, readFileSync };
+  const io = options.io ?? fs;
   const host = options.host ?? (() => ({ platform: process.platform, arch: process.arch, machine: os.machine() }));
   let platform = 'unverifiable';
   try {
