@@ -1,0 +1,416 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { executeEngine } from '../herdr/mods/council/machine-engine.js';
+import { WorkItems, workItemActionEnabled, workItemScreenVisible } from '../herdr/mods/council/work-item-actions.js';
+
+// Use the committed e43ae3d wire examples. The child process below implements a
+// deterministic fixture protocol, with its own files in an isolated workspace.
+const examples = JSON.parse(readFileSync(new URL('../specs/002-work-item-review/contracts/examples.json', import.meta.url)));
+const id = examples.legacy.item.id;
+const role = { id: 'verifier', role: 'Fixture verifier' };
+const actor = { actor: 'Release lead' };
+const makeScope = (project, machine = null, space = 'fixture-space', cli = '/mock/installed/bin/council.js') => ({
+  project, anchor: project, space, engine: { machine, node: process.execPath, cli }
+});
+const local = makeScope(examples.legacy.project);
+const peer = makeScope('D:\\Shared workspace\\Other project', 'fixture-peer', 'peer-space');
+const wire = (record, project) => ({ code: record.success ? 0 : 1, stdout: JSON.stringify({ ...record, project }), stderr: '' });
+const summarize = ({ result, criteria, lifecycle, ...item }) => {
+  const { review, decision, integrity, actions, ...summary } = lifecycle;
+  return { ...item, lifecycle: summary };
+};
+const queue = (...items) => ({ success: true, items: items.map(summarize), errors: [] });
+const receipt = (requestId, revision, event = 'triaged', replay = false) => ({ requestId, event, revision, replay });
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+};
+
+function harness(answer, team = async project => ({ members: [project === peer.project ? { ...role, role: 'Peer-only verifier' } : role] })) {
+  const calls = [];
+  let active;
+  const focus = scope => { active = { space: { id: scope.space, machine: scope.engine.machine }, workspaceActive: true, target: scope.anchor }; };
+  focus(local);
+  const work = new WorkItems({
+    lifecycle: true,
+    visible: screen => workItemScreenVisible(screen, active),
+    runCli: (cwd, args, engine) => executeEngine(async (program, argv, options) => {
+      const call = { program, argv, ...options };
+      calls.push(call);
+      return answer(argv.slice(1), call);
+    }, engine, 'cli', args, cwd, 30_000),
+    readTeam: (cwd, engine) => {
+      calls.push({ cwd, on: engine.machine, team: true });
+      return team(cwd, engine);
+    }
+  });
+  return { work, focus, calls };
+}
+
+const verb = argv => argv?.slice(1, 3).filter(value => !value.startsWith('--')).join(' ');
+const submitted = argv => JSON.parse(argv[argv.indexOf('--input-json') + 1]);
+const lookup = (argv, value) => argv[argv.indexOf(value) + 1];
+
+test('queue filters stay on the selected machine and a late read cannot replace a newer selection', async () => {
+  const first = deferred();
+  const { work, focus, calls } = harness((args, call) => args.includes('--needs-attention')
+    ? first.promise : wire(examples.list, call.cwd));
+  await work.showList(local);
+  const previous = work.current;
+  const filter = work.filter(previous, { roleId: 'verifier', state: 'in_review', attention: true });
+  const obsolete = work.current;
+  focus(peer);
+  await work.showList(peer);
+  const current = work.current;
+  first.resolve(wire(queue(examples.formalRejected.item), local.project));
+  await filter;
+  assert.equal(work.current, current);
+  assert.equal(obsolete.items, undefined);
+  assert.equal(current.roles[0].role, 'Peer-only verifier');
+  assert.deepEqual(calls.find(call => call.argv?.includes('--needs-attention')), {
+    program: process.execPath,
+    argv: [local.engine.cli, 'work-item', 'list', '--sort', 'priority', '--role', 'verifier', '--state', 'in_review', '--needs-attention'],
+    cwd: local.project, on: null, timeout: 30_000
+  });
+  assert.equal(calls.find(call => call.on === 'fixture-peer' && call.argv).cwd, peer.project);
+  focus(local);
+  await work.showList(local);
+  assert.deepEqual(work.current.filters, { roleId: 'verifier', state: 'in_review', attention: true });
+  await work.filter(work.current, {});
+  assert.deepEqual(work.current.filters, {});
+});
+
+test('a compatible v1 engine remains readable and must never receive a legacy delegation from Workspace', async () => {
+  const legacy = structuredClone(examples.legacy);
+  delete legacy.item.lifecycle;
+  const { work, calls } = harness((args, call) => {
+    if (args.includes('--sort')) return wire({ success: false, error: { code: 'invalid_input', message: 'Unknown list option.' } }, call.cwd);
+    return wire(verb(args) === 'list' ? { success: true, items: [legacy.item], errors: [] } : legacy, call.cwd);
+  });
+  await work.showList();
+  await work.showList(local);
+  assert.equal(work.current.legacy, true);
+  await work.open(work.current, id);
+  await work.startMutation(work.current, 'delegate');
+  await work.confirmMutation(work.current, actor);
+  await work.delegate(work.current);
+  assert.equal(work.current.form, undefined);
+  assert.deepEqual(calls.filter(call => call.argv).map(call => call.argv[2]), ['list', 'list', 'show']);
+});
+
+test('a lost reply recovers the saved receipt and a current item through read-only requests on its original machine', async () => {
+  const response = deferred();
+  let payload;
+  const { work, calls, focus } = harness((args, call) => {
+    if (verb(args) === 'list') return wire(examples.list, call.cwd);
+    if (verb(args) === 'triage') { payload = submitted(args); return response.promise; }
+    if (verb(args) === 'history') return wire({ success: true, id, receipt: receipt(payload.requestId, 2) }, call.cwd);
+    return wire(payload ? examples.triaged : examples.legacy, call.cwd);
+  });
+  focus(peer);
+  await work.restore(peer, id);
+  const screen = work.current;
+  await work.startMutation(screen, 'triage');
+  assert.equal(screen.form.roles[0].role, 'Peer-only verifier');
+  work.selectMutation(screen, 'priority', 'high');
+  const saving = work.confirmMutation(screen, { ...actor, title: screen.item.title, criteria: screen.item.criteria.join('\n'), nextAction: '' });
+  focus(local);
+  await work.showList(local);
+  const newQueue = work.current;
+  response.reject(new Error('transport acknowledgement lost'));
+  await saving;
+  assert.equal(work.current, newQueue);
+  assert.equal(screen.item.lifecycle.revision, 1);
+  const originalRead = calls.filter(call => call.argv && ['history', 'show'].includes(call.argv[2])).at(-2);
+  assert.deepEqual(originalRead.argv, [peer.engine.cli, 'work-item', 'history', '--id', id, '--request-id', payload.requestId]);
+  assert.equal(originalRead.cwd, peer.project);
+  assert.equal(originalRead.on, peer.engine.machine);
+  focus(peer);
+  await work.restore(peer, id);
+  assert.equal(work.current.item.lifecycle.revision, 2);
+  assert.equal(work.current.receipt.requestId, payload.requestId);
+  assert.equal(calls.filter(call => call.argv?.[2] === 'triage').length, 1);
+});
+
+test('an absent receipt permits only explicitly replaying the same v2 delegation argv', async () => {
+  const sends = [];
+  const { work } = harness((args, call) => {
+    if (verb(args) === 'delegate') {
+      sends.push(args);
+      throw new Error('process reply lost');
+    }
+    if (verb(args) === 'history') return wire({ success: true, id, receipt: null }, call.cwd);
+    return wire(examples.triaged, call.cwd);
+  });
+  await work.restore(local, id);
+  const screen = work.current;
+  await work.startMutation(screen, 'delegate');
+  await work.confirmMutation(screen, actor);
+  const attempt = work.mutation(screen);
+  assert.equal(attempt.phase, 'missing');
+  await work.refresh(screen);
+  await work.confirmMutation(screen, { actor: 'Different lead' });
+  assert.deepEqual(sends, [['work-item', 'delegate', '--id', id, '--if-revision', '2', '--request-id',
+    attempt.input.requestId, '--actor', actor.actor]]);
+  await work.replayMutation(screen);
+  assert.deepEqual(sends, [sends[0], sends[0]]);
+});
+
+test('new evidence at the same revision invalidates a submitted close and requires a new confirmation and request ID', async () => {
+  let current = structuredClone(examples.inReview);
+  const confirmations = [];
+  const { work } = harness((args, call) => {
+    if (verb(args) === 'close') {
+      confirmations.push(submitted(args));
+      if (confirmations.length === 1) {
+        current.item.lifecycle.review.evidenceToken = 'c'.repeat(64);
+        throw new Error('response lost while evidence changed');
+      }
+      return wire({ ...examples.closed, receipt: receipt(confirmations[1].requestId, 5, 'closed') }, call.cwd);
+    }
+    if (verb(args) === 'history') return wire({ success: true, id, receipt: null }, call.cwd);
+    return wire(current, call.cwd);
+  });
+  await work.restore(local, id);
+  const screen = work.current;
+  await work.startMutation(screen, 'close');
+  const fields = { ...actor, reason: examples.closeInput.reason, nextAction: examples.closeInput.nextAction };
+  await work.confirmMutation(screen, fields);
+  assert.equal(screen.form.stale, true);
+  assert.equal(work.mutation(screen), undefined);
+  await work.replayMutation(screen);
+  await work.confirmMutation(screen, fields);
+  assert.equal(confirmations.length, 1);
+  await work.startMutation(screen, 'close');
+  await work.confirmMutation(screen, fields);
+  assert.equal(confirmations.length, 2);
+  assert.notEqual(confirmations[0].requestId, confirmations[1].requestId);
+  assert.equal(confirmations[1].evidenceToken, 'c'.repeat(64));
+  assert.equal(screen.item.lifecycle.state, 'closed');
+});
+
+test('formal rejection or provisional evidence cannot accept, and a verified formal and archived link stays scoped', async () => {
+  const original = structuredClone(examples.formalProvisional);
+  original.item.lifecycle.actions.close = true; // A contradictory permission flag is insufficient.
+  const { work, focus, calls } = harness((args, call) => {
+    if (args.includes('--review-id')) return wire(examples.archivedReview, call.cwd);
+    return wire(args.at(-1) === id ? examples.reopened : original, call.cwd);
+  });
+  focus(peer);
+  await work.restore(peer, original.item.id);
+  await work.startMutation(work.current, 'close');
+  assert.equal(work.current.form, undefined);
+  assert.equal(workItemActionEnabled(examples.formalRejected.item, 'close'), false);
+  assert.equal(workItemActionEnabled(examples.inReview.item, 'close'), true);
+  assert.deepEqual(work.formalLink(work.current), {
+    tab: 'reviews', id: 'review-release-notes', project: peer.project, machine: peer.engine.machine
+  });
+  const obsolete = work.current;
+  await work.restore(peer, id, examples.archivedReview.archivedReview.id);
+  assert.equal(work.formalLink(obsolete), null);
+  assert.equal(work.current.archived.review.capture.output, examples.inReview.item.result.output);
+  assert.deepEqual(calls.at(-1).argv.slice(1), ['work-item', 'show', '--id', id, '--review-id', 'review-4']);
+  assert.equal(calls.at(-1).cwd, peer.project);
+  assert.equal(work.sessionLink(work.current, 'reviews', '../another-project'), null);
+});
+
+const engineScript = String.raw`
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const [noun, action, ...args] = process.argv.slice(2);
+assert.equal(noun, 'work-item');
+const project = process.cwd();
+const file = 'fixture.json';
+const state = JSON.parse(fs.readFileSync(file));
+const get = option => args.includes(option) ? args[args.indexOf(option) + 1] : null;
+const result = body => console.log(JSON.stringify({ success: true, project, ...body }));
+const summary = ({ result, criteria, lifecycle, ...item }) => {
+  const { actions, review, integrity, decision, ...rest } = lifecycle;
+  return { ...item, lifecycle: rest };
+};
+const priorities = ['none', 'low', 'medium', 'high', 'urgent'];
+fs.appendFileSync('calls.jsonl', JSON.stringify({ action, args }) + '\n');
+if (action === 'list') {
+  assert.equal(get('--sort'), 'priority');
+  const items = [state.item, ...state.other].filter(item =>
+    (!get('--role') || item.roleId === get('--role')) &&
+    (!get('--state') || item.lifecycle.state === get('--state')) &&
+    (!args.includes('--needs-attention') || item.lifecycle.needsAttention));
+  items.sort((a, b) => priorities.indexOf(b.lifecycle.priority) - priorities.indexOf(a.lifecycle.priority) ||
+    b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+  const malformed = { ...summary(state.other[0]), id: 'wi-malformed', lifecycle: { revision: -1 } };
+  result({ items: [...items.map(summary), malformed], errors: [{ id: 'wi-unreadable', code: 'integrity_error', message: 'Missing row.' }] });
+} else if (action === 'show') {
+  const item = [state.item, ...state.other].find(item => item.id === get('--id'));
+  assert.ok(item);
+  result({ item, ...(get('--review-id') ? { archivedReview: state.archived } : {}) });
+} else if (action === 'history') {
+  assert.equal(get('--id'), state.item.id);
+  if (get('--request-id')) result({ id: state.item.id, receipt: state.receipts[get('--request-id')] ?? null });
+  else {
+    const events = state.events.filter(event => !get('--before') || event.revision < Number(get('--before')));
+    result({ id: state.item.id, events: events.slice(0, 2),
+      nextBeforeRevision: events.length > 2 ? events[1].revision : null, integrity: null });
+  }
+} else {
+  const op = action === 'review' ? args[0] : action;
+  const input = action === 'delegate' ? { id: get('--id'), ifRevision: Number(get('--if-revision')),
+    actor: get('--actor'), requestId: get('--request-id') } : JSON.parse(get('--input-json'));
+  assert.equal(input.id, state.item.id);
+  assert.equal(input.ifRevision, state.item.lifecycle.revision);
+  assert.equal(input.actor, 'Release lead');
+  assert.match(input.requestId, /^[a-z0-9][a-z0-9-]{0,63}$/);
+  const revision = input.ifRevision + 1;
+  const item = state.item;
+  const lifecycle = item.lifecycle;
+  if (op === 'triage') {
+    if (input.patch.priority) lifecycle.priority = input.patch.priority;
+    if (input.patch.nextAction) lifecycle.nextAction = input.patch.nextAction;
+    if (input.patch.blockedBy) lifecycle.blockedBy = input.patch.blockedBy.map(id => {
+        const target = state.other.find(item => item.id === id);
+        return { id, title: target.title, state: target.lifecycle.state };
+    });
+  } else if (op === 'delegate') {
+    assert.equal(item.roleId, 'verifier');
+    Object.assign(item, { state: 'result_ready', result: state.candidate.result, canDelegate: false, job: state.candidate.job });
+    Object.assign(lifecycle.actions, { editDefinition: false, delegate: false, startReview: true });
+  } else if (op === 'start') {
+    assert.equal(input.reviewOwnerRoleId, 'verifier');
+    assert.equal(input.policy, 'operator');
+    Object.assign(lifecycle, { state: 'in_review', reviewState: 'operator', review: state.candidate.lifecycle.review,
+      actions: state.candidate.lifecycle.actions });
+  } else if (op === 'note') {
+    assert.equal(input.reviewId, lifecycle.review.id);
+    assert.equal(input.kind, 'dissent');
+    lifecycle.review.notes.push({ kind: input.kind, actor: input.actor, text: input.text,
+      at: '2026-11-28T09:06:00.000Z', revision });
+  } else if (op === 'close') {
+    assert.equal(input.reviewId, lifecycle.review.id);
+    assert.equal(input.evidenceToken, lifecycle.review.evidenceToken);
+    assert.equal(input.decision, 'accept');
+    Object.assign(lifecycle, { state: 'closed', nextAction: input.nextAction, actions: state.closed.actions,
+      decision: { ...state.closed.decision, id: 'decision-' + revision, actor: input.actor, reason: input.reason,
+        nextAction: input.nextAction } });
+  } else if (op === 'reopen') {
+    assert.equal(input.decisionId, lifecycle.decision.id);
+    assert.equal(input.snapshotSha256, lifecycle.decision.snapshotSha256);
+    assert.equal(input.roleId, 'verifier');
+    state.archived = lifecycle.review;
+    Object.assign(item, { state: 'draft', result: null, job: null });
+    Object.assign(lifecycle, { state: 'open', review: null, reviewState: null, cycle: 2, workRevision: 2,
+      nextAction: input.nextAction, actions: state.reopened.actions });
+  } else assert.fail('Unexpected fixture operation ' + op);
+  lifecycle.revision = revision;
+  const receipt = { requestId: input.requestId, event: op, revision, replay: false };
+  const references = [lifecycle.review?.id ?? lifecycle.decision?.reviewId, lifecycle.decision?.id, item.job?.sessionId];
+  state.events.unshift({ revision, actor: input.actor, type: op, at: '2026-11-28T09:06:00.000Z',
+    requestId: input.requestId, cycle: lifecycle.cycle, workRevision: lifecycle.workRevision,
+    references: Object.fromEntries(['reviewId', 'decisionId', 'sessionId'].map((key, index) => [key, references[index]])
+      .filter(([, value]) => value)) });
+  state.receipts[input.requestId] = receipt;
+  fs.writeFileSync(file, JSON.stringify(state));
+  result({ item, receipt });
+}
+`;
+
+test('ten-item Workspace fixture uses real Node processes, pages frozen evidence and reopens without launching another attempt', async t => {
+  const qa = mkdtempSync(join(tmpdir(), 'cou-workspace-lifecycle-'));
+  t.after(() => rmSync(qa, { recursive: true, force: true }));
+  const cli = join(qa, 'fixture-cli.cjs');
+  writeFileSync(cli, engineScript);
+  const project = join(qa, 'Nested project é');
+  const sibling = join(qa, 'Adjacent project');
+  mkdirSync(project);
+  mkdirSync(sibling);
+  const initial = {
+    item: examples.legacy.item,
+    other: Array.from({ length: 9 }, (_, index) => ({
+      ...examples.closed.item, id: 'wi-neighbor-' + index, title: 'Fixture work item ' + index,
+      roleId: index % 2 === 0 ? 'verifier' : 'other',
+      lifecycle: { ...examples.closed.item.lifecycle, priority: index === 0 ? 'urgent' : 'low', needsAttention: index === 0 }
+    })),
+    candidate: examples.inReview.item, closed: examples.closed.item.lifecycle, reopened: examples.reopened.item.lifecycle,
+    events: [], receipts: {}
+  };
+  for (const root of [project, sibling]) writeFileSync(join(root, 'fixture.json'), JSON.stringify(initial));
+  const scope = makeScope(project, null, 'isolated-space', cli);
+  let reads = 0;
+  const work = new WorkItems({ lifecycle: true, runCli: (cwd, args, engine) => {
+    assert.equal(engine, scope.engine);
+    assert.equal(cwd, project);
+    return { code: 0, stdout: execFileSync(engine.node, [engine.cli, ...args], { cwd, encoding: 'utf8', windowsHide: true }) };
+  }, readTeam: async cwd => {
+    assert.equal(cwd, project);
+    reads++;
+    return { members: [role] };
+  } });
+
+  await work.showList(scope);
+  assert.equal(work.current.items.length, 10);
+  assert.equal(work.current.items[0].id, 'wi-neighbor-0');
+  assert.deepEqual(work.current.errors.map(error => error.id), ['wi-unreadable', 'wi-malformed']);
+  await work.filter(work.current, { roleId: 'verifier', state: 'closed', attention: true });
+  assert.deepEqual(work.current.items.map(item => item.id), ['wi-neighbor-0']);
+  await work.filter(work.current, {});
+  await work.open(work.current, id);
+  const screen = work.current;
+
+  await work.startMutation(screen, 'triage');
+  work.selectMutation(screen, 'priority', 'high');
+  work.selectMutation(screen, 'blockedBy', 'wi-neighbor-0');
+  await work.confirmMutation(screen, { ...actor, title: screen.item.title, criteria: screen.item.criteria.join('\n'),
+    nextAction: 'Check the refreshed release notes.' });
+  assert.equal(screen.item.lifecycle.blockedBy[0].state, 'closed');
+  assert.equal(screen.item.lifecycle.priority, 'high');
+
+  await work.startMutation(screen, 'delegate');
+  await work.confirmMutation(screen, actor);
+  assert.equal(screen.item.result.source, 'terminal_screen');
+  assert.equal(workItemActionEnabled(screen.item, 'close'), false);
+  await work.startMutation(screen, 'triage');
+  work.selectMutation(screen, 'priority', 'urgent');
+  await work.confirmMutation(screen, { ...actor, title: 'Do not alter the reserved definition', criteria: 'Changed',
+    nextAction: screen.item.lifecycle.nextAction });
+  assert.equal(screen.item.title, examples.legacy.item.title);
+
+  await work.startMutation(screen, 'start');
+  work.selectMutation(screen, 'roleId', 'verifier');
+  await work.confirmMutation(screen, actor);
+  assert.equal(screen.item.lifecycle.review.capture.output, examples.inReview.item.result.output);
+  await work.startMutation(screen, 'note');
+  work.selectMutation(screen, 'noteKind', 'dissent');
+  await work.confirmMutation(screen, { ...actor, text: 'The step requires another example.' });
+  assert.equal(screen.item.lifecycle.review.notes[0].kind, 'dissent');
+  await work.startMutation(screen, 'close');
+  await work.confirmMutation(screen, { ...actor, reason: 'The saved criteria pass.', nextAction: 'Publish the notes.' });
+  assert.equal(screen.item.lifecycle.state, 'closed');
+
+  work.leave();
+  await work.restore(scope, id);
+  const restored = work.current;
+  await work.loadHistory(restored);
+  assert.equal(restored.history.events.length, 2);
+  const cursor = restored.history.nextBeforeRevision;
+  await work.loadHistory(restored, true);
+  assert.equal(restored.history.events.length, 4);
+  assert.ok(restored.history.events[2].revision < cursor);
+  await work.startMutation(restored, 'reopen');
+  work.selectMutation(restored, 'roleId', 'verifier');
+  await work.confirmMutation(restored, { ...actor, reason: 'Release text changed.', nextAction: 'Read the new paragraph.' });
+  assert.equal(restored.item.lifecycle.cycle, 2);
+  assert.equal(restored.item.lifecycle.workRevision, 2);
+  assert.equal(restored.item.job, null);
+  await work.openArchived(restored, restored.item.lifecycle.decision.reviewId);
+  assert.equal(restored.archived.review.capture.output, examples.inReview.item.result.output);
+  assert.equal(restored.archived.review.notes[0].kind, 'dissent');
+  assert.ok(reads >= 4);
+  const commands = readFileSync(join(project, 'calls.jsonl'), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line));
+  assert.equal(commands.filter(command => command.action === 'delegate').length, 1);
+  assert.equal(JSON.parse(readFileSync(join(sibling, 'fixture.json'))).item.lifecycle.revision, 1);
+});

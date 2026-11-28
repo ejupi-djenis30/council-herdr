@@ -14,7 +14,7 @@ import { hostId, desktopId, focusedProject, participantTerminal, executeEngine, 
 import { taskEditor, teamEditor, teamView } from './team-view.js';
 import { workspaceView } from './workspace-view.js';
 import { folderKey, WorkItems, workItemScopeKey, workItemScreenVisible } from './work-item-actions.js';
-import { makeWorkItemFields } from './work-item-view.js';
+import { makeLifecycleFields, makeWorkItemFields } from './work-item-view.js';
 
 const modes = [
   ['choice', 'Options'],
@@ -175,8 +175,15 @@ export default class Council extends View {
     this.workItems = new WorkItems({
       runCli: (project, args, engine) => this.runCli(project, args, engine),
       readTeam: (project, engine) => this.request(project, 'team', {}, engine),
-      visible: screen => this.workItemVisible(screen)
+      visible: screen => this.workItemVisible(screen),
+      lifecycle: true
     });
+    this.lifecycleFocus = {
+      queue: cx.focus_handle(), back: cx.focus_handle(), clearFilters: cx.focus_handle(), formBack: cx.focus_handle(),
+      confirm: cx.focus_handle(), history: cx.focus_handle(), archive: cx.focus_handle(), output: cx.focus_handle()
+    };
+    this.lifecycleFields = null;
+    this.pendingWorkItemReturn = null;
     this.workItemForm = null;
     this.activityTarget = null;
     this.discoveredProjects = [];
@@ -187,6 +194,11 @@ export default class Council extends View {
     this.listProject = null;
 
     if (checking()) return;
+    // The native multiline Input context otherwise uses Tab for indentation.
+    cx.bind_keys([
+      { keystroke: 'tab', action: 'council-lifecycle-next-field', context: 'CouncilLifecycleCriteria > Input' },
+      { keystroke: 'shift-tab', action: 'council-lifecycle-previous-field', context: 'CouncilLifecycleCriteria > Input' }
+    ]);
     this.panelFocus.focus();
     this.search = InputState.new({ placeholder: 'Search by title, project or ID' });
     this.search.on('change', (_e, cx) => cx.notify());
@@ -273,6 +285,7 @@ export default class Council extends View {
     const returningToList = this.tab === tab && this.selected && !selection;
     if (tab !== this.tab) this.clearFilters();
     this.leaveWorkItems();
+    if (tab !== 'activity') this.pendingWorkItemReturn = null;
     this.pollSection = 'results';
     this.epoch++;
     this.loading = false;
@@ -310,6 +323,25 @@ export default class Council extends View {
   }
 
   syncWorkItemFields() {
+    const form = this.workItems.current?.form;
+    if (this.lifecycleFields?.form !== form) {
+      if (this.lifecycleFields) for (const state of Object.values(this.lifecycleFields.fields)) state.release();
+      this.lifecycleFields = null;
+      if (form) {
+        const entry = { form, fields: makeLifecycleFields(form), activeField: null };
+        this.lifecycleFields = entry;
+        for (const [key, state] of Object.entries(entry.fields)) {
+          state.on('focus', (_e, cx) => {
+            entry.activeField = key;
+            cx.notify();
+          });
+          state.on('blur', (_e, cx) => {
+            if (entry.activeField === key) entry.activeField = null;
+            cx.notify();
+          });
+        }
+      }
+    }
     const screen = this.workItems.current;
     if (this.workItemForm?.screen === screen) return;
     if (this.workItemForm) {
@@ -325,10 +357,11 @@ export default class Council extends View {
     this.syncWorkItemFields();
   }
 
-  runWorkItemAction(cx, action) {
+  runWorkItemAction(cx, action, onStart) {
     cx.spawn(async cx => {
       const task = action();
       this.syncWorkItemFields();
+      onStart?.();
       cx.notify();
       await task;
       this.syncWorkItemFields();
@@ -346,6 +379,13 @@ export default class Council extends View {
     this.runWorkItemAction(cx, () => {
       if (!this.workItemVisible({ kind: 'list', scope }) ||
           (workItems.current && workItemScopeKey(workItems.current.scope) === workItemScopeKey(scope))) return;
+      const restore = this.pendingWorkItemReturn;
+      this.pendingWorkItemReturn = null;
+      if (restore?.space === scope.space && restore.machine === scope.engine.machine &&
+          folderKey(restore.project) === folderKey(scope.project)) {
+        this.lifecycleFocus.back.focus();
+        return workItems.restore(scope, restore.id, restore.archive);
+      }
       return workItems.showList(scope);
     });
   }
@@ -353,7 +393,8 @@ export default class Council extends View {
   backToWorkItems(cx, screen) {
     if (!this.workItems.isCurrent(screen)) return;
     if (folderKey(this.workItemTarget(localSpace())) === folderKey(screen.scope.anchor)) {
-      this.runWorkItemAction(cx, () => this.workItems.isCurrent(screen) && this.workItems.showList(screen.scope));
+      this.runWorkItemAction(cx, () => this.workItems.isCurrent(screen) && this.workItems.showList(screen.scope),
+        () => this.lifecycleFocus.queue.focus());
       return;
     }
     this.leaveWorkItems();
@@ -367,6 +408,9 @@ export default class Council extends View {
     if (!this.workItems.isCurrent(screen)) return;
     const { project } = screen.scope;
     const bookmark = { ...this.workspaceBookmark(), target: project };
+    if (screen.kind === 'detail') Object.assign(bookmark, {
+      workItem: { id: screen.id, archive: screen.archived?.id, project, space: screen.scope.space, machine: screen.scope.engine.machine }
+    });
     this.navigate(cx, tab, selection, { returnTo: bookmark, listProject: selection ? null : project });
   }
 
@@ -375,15 +419,42 @@ export default class Council extends View {
     const screen = workItems.current;
     const fields = this.workItemForm?.screen === screen ? this.workItemForm?.fields : null;
     if (!screen || !this.workItemVisible(screen)) return { screen: null };
-    const perform = (cx, action) => this.runWorkItemAction(cx, () => workItems.isCurrent(screen) && action());
+    const focus = this.lifecycleFocus;
+    const perform = (cx, action, onStart) => {
+      let started = false;
+      this.runWorkItemAction(cx, () => {
+        if (!workItems.isCurrent(screen)) return;
+        started = true;
+        return action();
+      }, onStart && (() => { if (started && workItems.current && this.workItemVisible(workItems.current)) onStart(); }));
+    };
+    const lifecycle = this.lifecycleFields?.form === screen.form ? this.lifecycleFields : null;
+    const mutation = screen.kind === 'detail' ? workItems.mutation(screen) : null;
+    const review = screen.archived ? screen.archived.review : screen.item?.lifecycle?.review;
+    const formalLink = workItems.formalLink(screen);
+    const archiveExecution = screen.archived?.review?.capture.verified
+      ? workItems.sessionLink(screen, 'delegations', screen.archived.review.capture.sessionId) : null;
+    const openLink = (cx, link) => {
+      if (link) this.openWorkItemSection(cx, screen, link.tab, { id: link.id, project: link.project });
+    };
+    const closeArchive = cx => {
+      if (!workItems.isCurrent(screen)) return;
+      screen.archived = null;
+      (screen.history ? focus.history : focus.back).focus();
+      cx.notify();
+    };
     return {
-      screen, fields,
+      screen, fields, focus, mutation, formalLink, archiveExecution,
+      formFields: lifecycle?.fields, activeField: lifecycle?.activeField,
       attempt: screen.kind === 'create' ? workItems.createAttempt(screen) : null,
-      delegation: screen.kind === 'detail' ? workItems.delegationPending(screen) : null,
       actions: {
-        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen)),
+        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen), () => {
+          if (screen.kind === 'detail' && (screen.pending || workItems.mutation(screen))) focus.back.focus();
+          if (screen.kind === 'list' && screen.pending) focus.queue.focus();
+        }),
         create: (_e, cx) => perform(cx, () => workItems.startCreate(screen)),
-        open: (cx, id) => perform(cx, () => workItems.open(screen, id)),
+        open: (cx, id) => perform(cx, () => workItems.open(screen, id), () => focus.back.focus()),
+        filter: (cx, filters) => perform(cx, () => workItems.filter(screen, filters), () => focus.queue.focus()),
         role: (cx, id) => {
           if (!workItems.isCurrent(screen) || workItems.createAttempt(screen)) return;
           screen.roleId = id;
@@ -394,10 +465,39 @@ export default class Council extends View {
         discard: (_e, cx) => perform(cx, () => workItems.discardCreate(screen)),
         back: (_e, cx) => this.backToWorkItems(cx, screen),
         team: (_e, cx) => this.openWorkItemSection(cx, screen, 'team'),
-        delegate: (_e, cx) => perform(cx, () => workItems.delegate(screen)),
-        delegation: (_e, cx) => {
-          const link = workItems.delegationLink(screen);
-          if (link) this.openWorkItemSection(cx, screen, link.tab, { id: link.id, project: link.project });
+        delegation: (_e, cx) => openLink(cx, workItems.delegationLink(screen)),
+        mutate: (cx, operation) => perform(cx, () => workItems.startMutation(screen, operation), () => {
+          if (this.lifecycleFields?.form === screen.form) this.lifecycleFields?.fields.actor.focus();
+        }),
+        confirm: (_e, cx) => perform(cx, () => lifecycle && workItems.confirmMutation(screen,
+          Object.fromEntries(Object.entries(lifecycle.fields).map(([key, state]) => [key, state.value()]))), () => {
+          if (workItems.mutation(screen)) focus.back.focus();
+        }),
+        cancelForm: (_e, cx) => perform(cx, () => workItems.cancelMutation(screen), () => focus.back.focus()),
+        formOption: (cx, key, value) => {
+          workItems.selectMutation(screen, key, value);
+          cx.notify();
+        },
+        refreshOptions: (_e, cx) => perform(cx, () => workItems.loadMutationOptions(screen, screen.form), () => focus.formBack.focus()),
+        replay: (_e, cx) => perform(cx, () => workItems.replayMutation(screen), () => focus.back.focus()),
+        history: (_e, cx) => perform(cx, () => workItems.loadHistory(screen), () => focus.back.focus()),
+        moreHistory: (_e, cx) => perform(cx, () => workItems.loadHistory(screen, true), () => focus.history.focus()),
+        archive: (cx, id) => perform(cx, () => workItems.openArchived(screen, id), () => focus.archive.focus()),
+        closeArchive: (_e, cx) => closeArchive(cx),
+        archiveExecution: (_e, cx) => openLink(cx, archiveExecution),
+        formal: (_e, cx) => openLink(cx, formalLink),
+        toggleOutput: (_e, cx) => {
+          if (!workItems.isCurrent(screen) || !review) return;
+          screen.expandedReview = screen.expandedReview === review.id ? null : review.id;
+          cx.notify();
+        },
+        copyBinding: (_e, cx) => {
+          if (workItems.isCurrent(screen) && review?.policy === 'formal') {
+            this.copy(cx, `Council-Work-Item-Review: sha256:${review.snapshotSha256}`, 'Formal binding line copied.');
+          }
+        },
+        copyFrozen: (_e, cx) => {
+          if (workItems.isCurrent(screen) && review?.capture.output) this.copy(cx, review.capture.output, 'Frozen output copied.');
         },
         copyOutput: (_e, cx) => {
           if (workItems.isCurrent(screen) && screen.item?.result) this.copy(cx, screen.item.result.output, 'Saved handoff copied.');
@@ -429,8 +529,9 @@ export default class Council extends View {
   }
 
   backToWorkspace(cx) {
-    const { target, search, ...bookmark } = this.workspaceReturn;
+    const { target, search, workItem, ...bookmark } = this.workspaceReturn;
     const focus = focused();
+    this.pendingWorkItemReturn = workItem ?? null;
     Object.assign(this.workspace, bookmark, {
       pinned: bookmark.pinned || (focus?.cwd && focus.cwd !== target ? target : null)
     });
@@ -460,6 +561,7 @@ export default class Council extends View {
       this.workspace.pinned = null;
       this.discoveredProjects = [];
       this.lastFocusedProject = null;
+      this.pendingWorkItemReturn = null;
       this.clearFilters();
       this.navigate(cx, this.tab);
       return;
@@ -1375,7 +1477,10 @@ export default class Council extends View {
         if (event.key !== 'escape' || this.saving) return;
         if (this.form) this.cancelForm(cx);
         else if (this.workItems.current && this.workItems.current.kind !== 'list' && this.workItemVisible(this.workItems.current)) {
-          this.backToWorkItems(cx, this.workItems.current);
+          const ui = this.workItemViewProps();
+          if (ui.screen?.archived) ui.actions.closeArchive(null, cx);
+          else if (ui.screen?.form && !ui.mutation) ui.actions.cancelForm(null, cx);
+          else this.backToWorkItems(cx, this.workItems.current);
         } else if (this.trail.length || this.workspaceReturn || this.selected) this.goBack(cx);
         else return;
         cx.stop_propagation();
