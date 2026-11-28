@@ -216,15 +216,17 @@ test('both same-path installation replacement and a different machine discard la
     })));
 });
 
-test('a late bound receipt stays with its original UUID, machine and operation', async () => {
+test('an unsuperseded off-view receipt is recoverable only after original-scope reattestation', async () => {
   const late = delayed();
   const neighbor = { ...scope, engine: { ...scope.engine, machine: 'neighbor' } };
   let inspect = false;
   let reconnect = false;
+  let attested = false;
   const h = harness(({ project, engine }) => {
     if (engine === neighbor.engine) return wire(replies.showB, project);
     if (inspect) return late.result;
-    if (reconnect) return wire({ ...replies.showA, plane: { ...replies.showA.plane, freshness: 'cached', operation: null } }, project);
+    if (reconnect) return wire(attested ? { ...replies.showA, plane: { ...replies.showA.plane, freshness: 'cached', operation: null } } :
+      replies.showNull, project);
     return wire(uncertain, project);
   });
   const first = await h.select();
@@ -241,29 +243,81 @@ test('a late bound receipt stays with its original UUID, machine and operation',
   reconnect = true;
   const original = await h.select();
   await original.refresh();
+  assert.equal(original.installationId, null);
+  assert.deepEqual(original.receipts, []);
+  attested = true;
+  await original.refresh();
+  assert.equal(original.installationId, replies.showA.installationId);
   assert.equal(original.freshness, 'cached');
   assert.equal(original.action, null);
   assert.equal(original.receipts[0].receipt.commentId, fixture.positiveComment.id);
-  assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['show'], ['show']]);
+  assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['show'], ['show'], ['show']]);
 });
 
-test('review regression: a superseded Show cannot resolve the current selection’s uncertainty', async () => {
-  const late = delayed();
-  let shows = 0;
-  const h = harness(({ project }) => ++shows === 2 ? late.result : wire(uncertain, project));
+test('a receipt accepted before reselection stays recoverable for its original installation', async () => {
+  let reply = replies.showA;
+  const h = harness(({ project }) => wire(reply, project));
   const first = await h.select();
   await first.refresh();
-  const old = first.refresh();
-  const current = await h.select();
-  await current.refresh();
-  assert.equal(current.installationId, first.installationId);
-  assert.equal(current.action, 'check');
-  late.resolve(wire(replies.showA, scope.project));
-  await old;
-  assert.deepEqual({
-    state: current.operation.state, action: current.action, receipts: current.receipts.length
-  }, { state: 'delivery_uncertain', action: 'check', receipts: 0 });
-  assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['show']]);
+  assert.equal(first.receipts[0].receipt.commentId, fixture.positiveComment.id);
+
+  reply = replies.showB;
+  const replacement = await h.select();
+  await replacement.refresh();
+  assert.equal(replacement.installationId, replies.showB.installationId);
+  assert.deepEqual(replacement.receipts, []);
+
+  reply = uncertain;
+  const original = await h.select();
+  assert.deepEqual(original.receipts, []);
+  await original.refresh();
+  assert.equal(original.installationId, replies.showA.installationId);
+  assert.equal(original.operation.state, 'published');
+  assert.equal(original.receipts[0].receipt.commentId, fixture.positiveComment.id);
+  assert.deepEqual(h.verbs(), [['show'], ['show'], ['show']]);
+});
+
+test('review regression: a superseded Show cannot resolve the current selection’s uncertainty', async t => {
+  for (const oldFirst of [true, false]) {
+    await t.test(oldFirst ? 'old positive during new Show before attestation' : 'old positive after new uncertain', async () => {
+      const older = { started: delayed(), reply: delayed() };
+      const newer = { started: delayed(), reply: delayed() };
+      let shows = 0;
+      const h = harness(({ project }) => {
+        const call = [null, older, newer][shows++];
+        if (!call) return wire(uncertain, project);
+        call.started.resolve();
+        return call.reply.result;
+      });
+      const first = await h.select();
+      await first.refresh();
+      const old = first.refresh();
+      await older.started.result;
+      const current = await h.select();
+      const fresh = current.refresh();
+      await newer.started.result;
+      assert.equal(current.installationId, null);
+      assert.equal(current.action, null);
+      assert.deepEqual(current.receipts, []);
+
+      const sendOld = async () => {
+        older.reply.resolve(wire(replies.showA, scope.project));
+        await old;
+      };
+      if (oldFirst) await sendOld();
+      newer.reply.resolve(wire(uncertain, scope.project));
+      await fresh;
+      if (!oldFirst) await sendOld();
+
+      assert.equal(current.installationId, first.installationId);
+      assert.deepEqual({
+        state: current.operation.state, action: current.action, receipts: current.receipts.length
+      }, { state: 'delivery_uncertain', action: 'check', receipts: 0 });
+      assert.equal(first.receipts.length, 0);
+      assert.equal(current.handoff, null);
+      assert.deepEqual(h.verbs(), [['show'], ['show', '--operation-id', scoped], ['show']]);
+    });
+  }
 });
 
 test('the same UUID and item on another canonical project cannot see the original receipt', async () => {

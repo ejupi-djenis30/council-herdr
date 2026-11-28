@@ -493,9 +493,16 @@ class WorkItemPlane {
   async read(operationId, replacement = null) {
     const { options, screen } = this;
     const expectedInstallation = this.installationId;
-    const sequence = options.nextRequest();
-    if (this.cache) this.cache.latestRead = sequence;
-    const { installationId, plane } = await planeCommand(options.runCli, screen.scope, screen.id, 'show', operationId);
+    const finish = options.beginRead();
+    let record;
+    try {
+      record = await planeCommand(options.runCli, screen.scope, screen.id, 'show', operationId);
+    } catch (error) {
+      if (finish()) throw error;
+      return;
+    }
+    if (!finish()) return;
+    const { installationId, plane } = record;
     if (!options.active() && expectedInstallation !== installationId) return;
     if (replacement && replacement !== installationId) throw problem('scope_conflict');
     if (expectedInstallation && expectedInstallation !== installationId) {
@@ -517,9 +524,6 @@ class WorkItemPlane {
       throw problem('unavailable');
     }
     const cache = options.cacheFor(installationId);
-    // A newer request for this attested key supersedes receipts as well as the projection.
-    if (sequence < cache.latestRead) return;
-    cache.latestRead = sequence;
     if (options.active()) {
       this.installationId = installationId;
       this.cache = cache;
@@ -579,8 +583,9 @@ class WorkItemPlane {
       ? operation.operationId : null;
     return this.check(async () => {
       if (intent === 'check') {
-        await this.read(operationId);
-        if (!this.options.active() || expectedInstallation !== this.installationId || this.operation?.operationId !== operationId ||
+        const inspected = await this.read(operationId);
+        if (!inspected || !this.options.active() || expectedInstallation !== this.installationId ||
+            this.operation?.operationId !== operationId ||
             this.operation.state !== 'delivery_uncertain' ||
             this.availability !== 'operator_available' || this.freshness !== 'current') return;
       }
@@ -619,6 +624,7 @@ export class WorkItems {
     this.mutations = new Map();
     this.queues = new Map();
     this.planeCache = new Map();
+    this.planeReads = new Map();
     this.planeViews = 0;
     this.planeRequests = 0;
   }
@@ -680,13 +686,15 @@ export class WorkItems {
   selectDetail(scope, id, item) {
     const screen = { kind: 'detail', scope, id, item };
     if (this.lifecycle) {
+      const target = JSON.stringify([recoveryScope(scope), id]);
       screen.plane = new WorkItemPlane(screen, ++this.planeViews, {
         runCli: this.runCli, active: () => this.isCurrent(screen) && !screen.archived,
         nextRequest: () => ++this.planeRequests,
+        beginRead: () => this.beginPlaneRead(target),
         cacheFor: installationId => {
-          const key = JSON.stringify([recoveryScope(scope), id, installationId]);
+          const key = JSON.stringify([target, installationId]);
           if (!this.planeCache.has(key)) {
-            this.planeCache.set(key, { link: null, operation: null, receipts: new Map(), latestRead: 0 });
+            this.planeCache.set(key, { link: null, operation: null, receipts: new Map() });
           }
           return this.planeCache.get(key);
         }
@@ -694,6 +702,17 @@ export class WorkItems {
     }
     this.current = screen;
     return screen;
+  }
+
+  beginPlaneRead(target) {
+    // A new view supersedes older reads for the target before its installation is known.
+    const request = Symbol();
+    this.planeReads.set(target, request);
+    return () => {
+      if (this.planeReads.get(target) !== request) return false;
+      this.planeReads.delete(target);
+      return true;
+    };
   }
 
   async filter(screen, filters) {
