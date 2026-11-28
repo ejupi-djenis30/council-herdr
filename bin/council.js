@@ -172,29 +172,71 @@ async function main() {
     return;
   }
   if (command === 'work-item') {
-    const args=rawArgs.slice(1), action=args.shift() ?? 'help';
+    const args = rawArgs.slice(1);
+    const action = args.shift() ?? 'help';
     if (action === 'help' && args.length === 0) {
-      console.log('council work-item create --input-json <JSON> | --input-file <path> [--project <absolute-folder>]\ncouncil work-item list [--project <absolute-folder>]\ncouncil work-item show --id <id> [--project <absolute-folder>]\ncouncil work-item delegate --id <id> [--timeout <seconds>] [--project <absolute-folder>]'); return;
+      console.log(`council work-item create|triage|close|reopen --input-json <JSON> | --input-file <path>
+council work-item review <start|note|attach|return> --input-json <JSON> | --input-file <path>
+council work-item list [--role <id>] [--state <state>] [--needs-attention] [--sort created|priority]
+council work-item show --id <id> [--review-id <id>]
+council work-item delegate --id <id> [--timeout <seconds>] [--if-revision <rev> --request-id <id> --actor <name>]
+council work-item history --id <id> [--before <rev> --limit <n> | --request-id <id>]
+All commands accept --project <absolute-folder>.`);
+      return;
     }
     let result;
     try {
-      const allowed={create:['input-json','input-file','project'],list:['project'],show:['id','project'],delegate:['id','timeout','project']}[action];
+      const reviewAction = action === 'review' ? args.shift() : null;
+      if (action === 'review' && !['start', 'note', 'attach', 'return'].includes(reviewAction)) throw Error('Choose a review operation.');
+      const inputFlags = ['input-json', 'input-file', 'project'];
+      const allowed = {
+        create: inputFlags, triage: inputFlags, close: inputFlags, reopen: inputFlags, review: inputFlags,
+        list: ['project', 'role', 'state', 'needs-attention', 'sort'],
+        show: ['id', 'project', 'review-id'],
+        delegate: ['id', 'timeout', 'project', 'if-revision', 'request-id', 'actor'],
+        history: ['id', 'project', 'before', 'limit', 'request-id']
+      }[action];
       if (!allowed) throw Error('Unknown work-item operation.');
-      const opts={};
-      while(args.length) { const flag=args.shift(); if (!flag.startsWith('--') || !allowed.includes(flag.slice(2)) || Object.hasOwn(opts,flag.slice(2)) || !args.length || args[0].startsWith('--')) throw Error('Invalid, duplicate or missing option.'); opts[flag.slice(2)]=args.shift(); }
-      if (opts.project !== undefined && !isAbsolute(opts.project)) throw Error('Use an absolute project path.');
-      let input={};
-      if (action === 'create') {
-        if ((opts['input-json'] === undefined) === (opts['input-file'] === undefined)) throw Error('Provide exactly one input source.');
-        const raw=opts['input-json'] ?? new TextDecoder('utf-8',{fatal:true}).decode(readFileSync(opts['input-file']));
-        input=JSON.parse(raw);
-      } else if (action !== 'list') {
-        input={id:opts.id};
-        if (opts.timeout !== undefined) input.timeoutSec=/^\d+$/.test(opts.timeout)?Number(opts.timeout):NaN;
+      const opts = {};
+      while (args.length) {
+        const flag = args.shift();
+        const key = flag.startsWith('--') ? flag.slice(2) : '';
+        if (!allowed.includes(key) || Object.hasOwn(opts, key)) throw Error('Invalid or duplicate option.');
+        if (key === 'needs-attention') { opts[key] = true; continue; }
+        if (!args.length || args[0].startsWith('--')) throw Error('Missing option value.');
+        opts[key] = args.shift();
       }
-      result=await workItemOperation(action,input,{project:opts.project ?? process.cwd()});
-    } catch(e) { result={success:false,project:null,error:{code:'invalid_input',message:e.message}}; }
-    console.log(JSON.stringify(result)); if (!result.success) process.exitCode=1; return;
+      if (opts.project !== undefined && !isAbsolute(opts.project)) throw Error('Use an absolute project path.');
+      const integer = value => /^\d+$/.test(value) ? Number(value) : NaN;
+      let input = {};
+      if (['create', 'triage', 'close', 'reopen', 'review'].includes(action)) {
+        if ((opts['input-json'] === undefined) === (opts['input-file'] === undefined)) throw Error('Provide exactly one input source.');
+        const raw = opts['input-json'] ?? new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(opts['input-file']));
+        input = JSON.parse(raw);
+        if (action === 'review') {
+          if (!input || typeof input !== 'object' || Array.isArray(input) || Object.hasOwn(input, 'action')) throw Error('Invalid review input.');
+          input = { ...input, action: reviewAction };
+        }
+      } else if (action === 'list') {
+        if (opts.role !== undefined) input.roleId = opts.role;
+        if (opts.state !== undefined) input.lifecycleState = opts.state;
+        if (opts['needs-attention']) input.needsAttention = true;
+        if (opts.sort !== undefined) input.sort = opts.sort;
+      } else {
+        input.id = opts.id;
+        if (opts['review-id'] !== undefined) input.reviewId = opts['review-id'];
+        if (opts.timeout !== undefined) input.timeoutSec = integer(opts.timeout);
+        if (opts['if-revision'] !== undefined) input.ifRevision = integer(opts['if-revision']);
+        if (opts['request-id'] !== undefined) input.requestId = opts['request-id'];
+        if (opts.actor !== undefined) input.actor = opts.actor;
+        if (opts.before !== undefined) input.beforeRevision = integer(opts.before);
+        if (opts.limit !== undefined) input.limit = integer(opts.limit);
+      }
+      result = await workItemOperation(action, input, { project: opts.project ?? process.cwd() });
+    } catch (error) { result = { success: false, project: null, error: { code: 'invalid_input', message: error.message } }; }
+    console.log(JSON.stringify(result));
+    if (!result.success) process.exitCode = 1;
+    return;
   }
   const flags = parseArgs(rawArgs.slice(1));
 
