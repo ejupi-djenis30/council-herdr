@@ -12,7 +12,7 @@ import { TeamStore } from '../herdr/mods/council/runtime/team.mjs';
 const hostKey = 'councilDesktopTeamTest';
 const hostExports = {
   'gpui-kit': 'View, div, svg',
-  'gpui-base': 'Button, h_flex, v_flex, Input, InputState, Textarea, TextareaState',
+  'gpui-base': 'Button, Editor, EditorState, h_flex, v_flex, Input, InputState, Textarea, TextareaState',
   herdr: 'agents, appHome, checking, closeOverlay, exec, focused, hc, notify, openOverlay, panes, props, readTextFile, run, spaces, terminals, theme'
 };
 const hostModules = Object.fromEntries(Object.entries(hostExports).map(([name, exports]) => [
@@ -34,6 +34,7 @@ function element(name = '') {
     child: child => { node.nodes.push(child); return builder; },
     children: children => { node.nodes.push(...children); return builder; },
     id: id => { node.name = id; return builder; },
+    accessibility_label: name => { node.accessibleName = name; return builder; },
     on_click: click => { node.click = click; return builder; },
     when: (condition, branch) => condition ? branch(builder) : builder
   };
@@ -88,18 +89,27 @@ async function desktop(t, nestedTeam) {
   let focusedFolder = nested;
   const state = (initial = '') => {
     let value = initial;
-    return { value: () => value, set_value: next => { value = next; }, focus() {}, release() {} };
+    return {
+      value: () => value, set_value: next => { value = next; }, on() {},
+      focus() { context.focus = this; }, release() { this.released = true; }
+    };
   };
-  const context = { focus_handle: () => state(), notify() {}, spawn: callback => pending.push(callback(context)) };
+  const clipboard = [];
+  const context = {
+    focus_handle: () => state(), notify() {}, spawn: callback => pending.push(callback(context)),
+    write_to_clipboard: value => clipboard.push(value)
+  };
   const pending = [];
   const settle = async () => {
     while (pending.length) await Promise.all(pending.splice(0));
   };
   Object.assign(globalThis[hostKey] ??= {}, {
     View: class {}, div: element, svg: element, h_flex: element, v_flex: element,
-    Button: { new: element }, Input: { new: () => element() }, Textarea: { new: () => element() },
+    Button: { new: element }, Editor: { new: () => element('fixture-editor') },
+    EditorState: { new: options => Object.assign(state(options.value), { options }) },
+    Input: { new: () => element() }, Textarea: { new: () => element() },
     InputState: { new: options => state(options?.value) }, TextareaState: { new: () => state() },
-    checking: () => true, props: () => ({}), theme: () => ({}), spaces: () => [active],
+    checking: () => true, props: () => ({}), theme: () => ({}), notify: () => {}, spaces: () => [active],
     focused: () => ({ space: active.id, terminal: `${active.machine}/t1`, cwd: focusedFolder }),
     agents: () => [], panes: () => [], terminals: () => [],
     readTextFile: async (path, { on }) => {
@@ -123,8 +133,9 @@ async function desktop(t, nestedTeam) {
     activitySearch: state(), search: state()
   });
   view.peerEngines.set(space.machine, Promise.resolve(engine));
+  const control = id => buttonIn(view.renderContent({}, active), id);
   const action = id => {
-    const button = buttonIn(view.renderContent({}, active), id);
+    const button = control(id);
     assert.ok(button, `Missing button ${id}`);
     return () => button.click(null, context);
   };
@@ -141,7 +152,7 @@ async function desktop(t, nestedTeam) {
   await settle();
 
   return {
-    view, space, engine, root, nested, requests, context, action, click, settle,
+    view, space, engine, root, nested, requests, context, action, click, settle, control, clipboard,
     moveFocus: path => { focusedFolder = path; },
     selectMachine: () => { active = { ...space, id: 'other-space', machine: 'other-peer' }; },
     launches: () => existsSync(dispatchLog) ? readFileSync(dispatchLog, 'utf8').trim().split('\n').map(JSON.parse) : [],
@@ -221,4 +232,52 @@ test('a stale nested roster button cannot open a call from the normal Team view'
   callNested();
   assert.equal(host.view.form, null);
   assert.deepEqual(host.launches(), []);
+});
+
+test('Work items reader controls preserve the exact saved and archived output and original scope', async t => {
+  const host = await desktop(t, true);
+  const { view, space, engine, nested, context, clipboard, requests } = host;
+  const examples = JSON.parse(readFileSync(new URL('../specs/002-work-item-review/contracts/examples.json', import.meta.url)));
+  const item = examples.inReview.item;
+  const screen = { kind: 'detail', id: item.id, item, scope: { project: nested, anchor: nested, engine, space: space.id } };
+  view.tab = 'activity';
+  view.workspace.view = 'work-items';
+  view.data = { project: nested, folder: nested, git: {}, errors: [] };
+  view.workItems.current = screen;
+  const requestCount = requests.length;
+
+  const output = '\ufeffRead this\r\nUnicode: \u{1F43B}\nLast line.';
+  item.result.output = output;
+  host.click('read-work-item-output');
+  const editor = view.handoffReader.editor;
+  assert.equal(editor.value(), output);
+  assert.equal(editor.options.readonly, true);
+  assert.equal(context.focus, view.lifecycleFocus.readerCopy);
+  assert.match(host.control('copy-reader-handoff').accessibleName, /Copy saved handoff.*Terminal screen capture.*Review the handoff/);
+  host.click('copy-reader-handoff');
+  host.click('back-from-handoff');
+  assert.deepEqual(clipboard, [output]);
+  assert.equal(editor.released, true);
+  assert.equal(context.focus, view.lifecycleFocus.readOutput);
+
+  screen.archived = { review: examples.archivedReview.archivedReview };
+  item.lifecycle.nextAction = 'A next action from the current cycle.';
+  assert.equal(host.control('read-work-item-output'), null);
+  host.click('frozen-output-toggle');
+  assert.equal(view.handoffReader.editor.value(), screen.archived.review.capture.output);
+  assert.doesNotMatch(host.control('copy-reader-handoff').accessibleName, /current cycle/);
+  const staleCopy = host.action('copy-reader-handoff');
+  host.click('back-from-handoff');
+  assert.equal(context.focus, view.lifecycleFocus.output);
+  staleCopy();
+  screen.archived.review.capture.output += 'altered';
+  assert.equal(host.control('frozen-output-toggle'), null);
+
+  screen.archived = null;
+  const staleReader = host.action('read-work-item-output');
+  host.selectMachine();
+  staleReader();
+  assert.equal(view.handoffReader, null);
+  assert.deepEqual(clipboard, [output]);
+  assert.equal(requests.length, requestCount);
 });

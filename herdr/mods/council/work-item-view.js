@@ -1,4 +1,4 @@
-import { h_flex, v_flex, InputState, Textarea, TextareaState } from 'gpui-base';
+import { Editor, h_flex, v_flex, InputState, Textarea, TextareaState } from 'gpui-base';
 import { button, cardHeading, field, input, label, panel, statusPill } from './components.js';
 import { frozenCaptureMatches, lifecycleStates, workItemActionEnabled, workItemPriorities } from './work-item-actions.js';
 
@@ -64,9 +64,11 @@ function criteriaList(t, criteria) {
       .role('list_item').set_position(position + 1, criteria.length)));
 }
 
-function toolbar(t, title, controls) {
-  return h_flex().gap(8).flex_wrap().items_center()
-    .child(label(title, 19, t.foreground).font_semibold().flex_1()).children(controls);
+function toolbar(t, title, controls, stacked = false) {
+  const heading = label(title, 19, t.foreground).font_semibold();
+  const actions = h_flex().gap(8).flex_wrap().items_center();
+  if (stacked) return v_flex().gap(7).child(heading).child(actions.children(controls));
+  return actions.child(heading.flex_1()).children(controls);
 }
 
 function lifecycleBadge(t, lifecycle) {
@@ -192,35 +194,56 @@ function createView(t, screen, fields, attempt, actions, backFocus) {
     .track_focus(backFocus)));
 }
 
-function resultView(t, item) {
-  const result = item.result;
-  const provenance = result.source === 'direct_artifact' ? 'Direct artifact' : 'Terminal screen capture';
-  return panel(t).child(cardHeading(t, 'Saved handoff', 'file'))
-    .child(label(provenance, 12, t.foreground).font_semibold())
-    .child(label('Scroll to read the full handoff.', 12, t.muted))
-    .child(v_flex().id(`work-item-output-${item.id}`).role('region').accessibility_label('Saved handoff output')
-      .w_full().max_h(220).min_h(44).p(9).rounded(6).bg(t.background).overflow_y_scrollbar()
-      .child(label(result.output, 13, t.foreground)));
-}
-
 const sourceName = source => source === 'direct_artifact' ? 'Direct artifact' : 'Terminal screen capture';
 const readable = (name, value) => value === null || value === undefined ? [] : [[name, value]];
+
+export function workItemHandoff(screen, kind) {
+  const { item, archived } = screen;
+  const lifecycle = item?.lifecycle;
+  if (kind === 'saved' && item?.result && !archived) {
+    return { output: item.result.output, source: sourceName(item.result.source),
+      nextAction: lifecycle?.nextAction ?? item.nextAction };
+  }
+  const review = archived ? archived.review : lifecycle?.review;
+  if (kind !== 'frozen' || !frozenCaptureMatches(review?.capture)) return null;
+  const decision = lifecycle?.decision;
+  return { output: review.capture.output, source: sourceName(review.capture.source),
+    nextAction: archived ? (decision?.reviewId === review.id ? decision.nextAction : null) :
+      lifecycle?.nextAction ?? item.nextAction };
+}
+
+function handoffReader(t, reader, ui, actions) {
+  const { kind, handoff, editor, focused } = reader;
+  const { source, nextAction } = handoff;
+  const title = kind === 'saved' ? 'Saved handoff' : 'Frozen output';
+  const copyTitle = kind === 'saved' ? 'Copy saved handoff' : 'Copy frozen output';
+  return panel(t)
+    .child(toolbar(t, title, [
+      button(t, 'back-from-handoff', 'Back to work item', actions.closeReader, 'normal', false, 'back'),
+      button(t, 'copy-reader-handoff', copyTitle, actions.copyReader, 'normal', false, 'copy')
+        .accessibility_label([copyTitle, `Source: ${source}`, nextAction && `Next action: ${nextAction}`].filter(Boolean).join('. '))
+        .track_focus(ui.focus.readerCopy)
+    ]))
+    .child(metadata(t, 'Source', source))
+    .when(Boolean(nextAction), card => card.child(metadata(t, 'Next action', nextAction)))
+    .child(label('Tab to the output. Use Page Up or Page Down to scroll.', 12, t.muted))
+    .child(v_flex().w_full().min_w_0()
+      .child(Editor.new(editor).w_full().min_w_0().h(280).p(8).rounded(6).border_1().bg(t.background)
+        .border_color(focused ? t.accent : t.input).text_color(t.foreground).accessibility_label(title)));
+}
 
 function reviewView(t, review, ui, actions, archived = false) {
   const { capture, formal, definition } = review;
   const captureVerified = frozenCaptureMatches(capture);
-  const expanded = ui.screen.expandedReview === review.id;
   const card = panel(t).child(h_flex().gap(8).flex_wrap().items_center()
     .child(cardHeading(t, archived ? 'Archived review' : 'Frozen review', 'reviews').flex_1())
     .when(Boolean(formal), row => row.child(statusPill(t, formalLabels[formal.state],
       formal.state === 'approved' ? t.done : formal.state === 'pending' ? t.working : t.blocked, t.foreground))))
     .child(label(definition.title, 15, t.foreground).font_semibold())
     .when(captureVerified, section => section.child(h_flex().gap(6).flex_wrap()
-      .child(button(t, 'frozen-output-toggle', expanded ? 'Hide frozen output' : 'Show frozen output', actions.toggleOutput)
-        .track_focus(ui.focus.output))
+      .when(archived, row => row.child(button(t, 'frozen-output-toggle', 'Show frozen output', actions.readFrozen, 'normal', ui.screen.pending)
+        .track_focus(ui.focus.output)))
       .child(button(t, 'frozen-output-copy', 'Copy frozen output', actions.copyFrozen))))
-    .when(expanded && captureVerified, section => section.child(label(capture.output, 13, t.foreground)
-      .p(9).rounded(6).bg(t.background).role('paragraph').accessibility_label(capture.output)))
     .child(facts(t, [['Review ID', review.id], ['Cycle', review.cycle], ['Work revision', review.workRevision],
       ['Review owner', review.reviewOwnerRoleId], ['Responsible role', definition.roleId],
       ['Policy', review.policy === 'operator' ? 'Operator acceptance' : 'Formal Council review']]))
@@ -426,12 +449,19 @@ function detailView(t, screen, ui, actions) {
   const mutation = ui.mutation;
   const busy = ['writing', 'checking'].includes(mutation?.phase);
   const inspecting = !screen.form || screen.form.stale;
+  const saved = inspecting && !screen.archived && Boolean(item?.result);
+  const frozen = inspecting && !screen.archived && frozenCaptureMatches(item?.lifecycle?.review?.capture);
   const controls = [
     button(t, 'back-work-items', 'Back to work items', actions.back, 'normal', false, 'back').track_focus(ui.focus.back),
     button(t, 'refresh-work-item', 'Refresh', actions.refresh, 'normal', screen.pending || busy).track_focus(ui.focus.refresh)
   ];
-  if (inspecting && item?.result && !screen.archived) controls.push(button(t, 'copy-work-item-output', 'Copy saved handoff', actions.copyOutput,
-    'normal', false, 'copy').track_focus(ui.focus.copyOutput));
+  if (saved) controls.push(
+    button(t, 'read-work-item-output', 'Read saved handoff', actions.readOutput, 'normal', screen.pending, 'file')
+      .track_focus(ui.focus.readOutput),
+    button(t, 'copy-work-item-output', 'Copy saved handoff', actions.copyOutput,
+      'normal', false, 'copy').track_focus(ui.focus.copyOutput));
+  if (frozen) controls.push(button(t, 'frozen-output-toggle', 'Show frozen output', actions.readFrozen, 'normal', screen.pending)
+    .track_focus(ui.focus.output));
   if (inspecting && item?.job?.linked && !screen.archived) controls.push(button(t, 'open-work-item-delegation', 'Open delegation',
     actions.delegation, 'normal', false, 'right').track_focus(ui.focus.openDelegation));
   if (item?.lifecycle) {
@@ -439,7 +469,7 @@ function detailView(t, screen, ui, actions) {
     if (inspecting) controls.push(button(t, 'work-item-open-history', screen.history ? 'Refresh history' : 'View history', actions.history,
       'normal', screen.history?.pending).track_focus(ui.focus.history));
   } else if (item) controls.unshift(badge(t, item));
-  const body = v_flex().w_full().gap(9).child(toolbar(t, item?.title ?? 'Work item', controls));
+  const body = v_flex().w_full().gap(9).child(toolbar(t, item?.title ?? 'Work item', controls, saved || frozen));
   if (screen.error && (inspecting || mutation)) body.child(notice(t, 'Work item request failed', `${screen.scope.project} · ${screen.error}`));
   if (screen.pending) body.child(label(item ? 'Refreshing work item…' : 'Loading work item…', 12, t.muted).role('status'));
   if (screen.archived) {
@@ -490,7 +520,6 @@ function detailView(t, screen, ui, actions) {
       .when(link.state !== 'unavailable', row => row.child(button(t, `open-blocker-${link.id}`, 'Open blocker',
         (_e, cx) => actions.open(cx, link.id), 'normal', false, 'right').accessibility_label(`Open blocker ${link.title ?? link.id}`))))));
   if (lifecycle?.decision) body.child(decisionView(t, lifecycle.decision, lifecycle.decision.cycle === lifecycle.cycle, actions));
-  if (item.result) body.child(resultView(t, item));
   if (item.job) {
     const job = item.job;
     const fields = [['Session ID', job.sessionId], ['Outcome', job.outcome]];
@@ -508,6 +537,7 @@ export function workItemView(t, screen, ui, actions) {
     return panel(t).role('status').child(cardHeading(t, 'Loading work items…', 'plan'));
   }
   if (screen.kind === 'create') return createView(t, screen, ui.fields, ui.attempt, actions, ui.focus.back);
+  if (ui.reader) return handoffReader(t, ui.reader, ui, actions);
   if (screen.kind === 'detail') return detailView(t, screen, ui, actions);
   return listView(t, screen, actions, ui.focus);
 }
