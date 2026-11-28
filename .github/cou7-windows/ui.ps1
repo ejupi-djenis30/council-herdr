@@ -116,6 +116,22 @@ function PrimaryState($element) {
     return [Cou7PixelCheck]::Primary($a.R,$a.G,$a.B,$b.R,$b.G,$b.B)
   } finally { $graphics.Dispose(); $bmp.Dispose() }
 }
+function SelectRole($element) {
+  CheckWindow
+  $selection=$null; $invocation=$null
+  $hasSelection=$element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selection)
+  $hasInvoke=$element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invocation)
+  $method=[Cou7PixelCheck]::RoleMethod($hasSelection,$hasInvoke)
+  Record 'ui_role_activation' @{ method=$method; gestures=1 }
+  if ($method -eq 'selection') { $selection.Select() }
+  elseif ($method -eq 'invoke') { $invocation.Invoke() }
+  else {
+    $element.SetFocus()
+    $focused=[System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused.Current.ProcessId -ne $pidExpected -or $focused.Current.Name -ne 'Windows fixture · verifier') { throw 'role_keyboard_focus_not_observed' }
+    [Windows.Forms.SendKeys]::SendWait(' ')
+  }
+}
 function Shot([string]$name) {
   try {
     CheckWindow
@@ -160,9 +176,11 @@ function Diagnostic {
       try {
         $name=$element.Current.Name; $type=$element.Current.ControlType.ProgrammaticName
         if ($name -in $allow -or $type -eq 'ControlType.Edit') {
-          $r=$element.Current.BoundingRectangle; $pattern=$null
+          $r=$element.Current.BoundingRectangle; $pattern=$null; $invoke=$null; $selection=$null
           @{ name=if($name -in $allow){$name}else{'<edit>'}; type=$type; enabled=$element.Current.IsEnabled; offscreen=$element.Current.IsOffscreen;
              valuePattern=$element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern);
+             invokePattern=$element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke);
+             selectionPattern=$element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selection);
              x=[int]$r.Left; y=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height }
         }
       } catch { }
@@ -182,7 +200,7 @@ try {
     SetEdit $edits[0] $title
     SetEdit $edits[1] ($criteria -join "`n")
     $save=One 'Save work item'; if ((PrimaryState $save) -ne 'disabled_or_light') { throw 'save_enabled_before_role' }
-    $role=One 'Windows fixture · verifier'; Click $role
+    $role=One 'Windows fixture · verifier'; SelectRole $role
     FrameBarrier
     $save=One 'Save work item'; if ((PrimaryState $save) -ne 'enabled') { throw 'save_not_visually_enabled_after_role' }
     # Read the controls again immediately before the sole save gesture.

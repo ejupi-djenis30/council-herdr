@@ -7,6 +7,7 @@ New-Item -ItemType Directory -Force -Path $root, $evidence | Out-Null
 $facts = Join-Path $evidence 'facts.jsonl'
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/form-replay.json') (Join-Path $evidence 'offline-form-replay.json')
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/process-replay.json') (Join-Path $evidence 'offline-process-replay.json')
+Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/role-replay.json') (Join-Path $evidence 'offline-role-replay.json')
 $env:COU7_ROOT = $root
 $env:COU7_EVIDENCE = $evidence
 $env:APPDATA = Join-Path $root 'appdata'
@@ -38,6 +39,16 @@ function Run([string]$name, [string]$exe, [string[]]$arguments) {
     $code = $LASTEXITCODE
   }
   Fact $name @{ exit = $code }
+  if ($code -ne 0 -and (Test-Path -LiteralPath $err)) {
+    $errorText=Get-Content -Raw -LiteralPath $err
+    $category = if ($errorText -match '(?i)unknown argument|invalid argument|usage:') { 'arguments' }
+      elseif ($errorText -match '(?i)connection|socket|refused') { 'connection' }
+      elseif ($errorText -match '(?i)permission|access denied') { 'permission' }
+      elseif ($errorText -match '(?i)renderer|vulkan|gpu|adapter|d3d|dxgi') { 'renderer' }
+      elseif ($errorText -match '(?i)timed? ?out') { 'timeout' } else { 'other' }
+    $hexCode=if($errorText -match '(?i)\b0x[0-9a-f]{8}\b'){$Matches[0]}else{$null}
+    Fact "${name}_error" @{ category=$category; hexCode=$hexCode; stderrPresent=(-not [string]::IsNullOrWhiteSpace($errorText)) }
+  }
   return $code
 }
 function Must([bool]$condition, [string]$message) { if (-not $condition) { throw $message } }
