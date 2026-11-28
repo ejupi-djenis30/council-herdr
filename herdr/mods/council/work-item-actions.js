@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import { createHash } from 'crypto';
 
 const states = new Set(['draft', 'in_progress', 'needs_attention', 'result_ready']);
@@ -195,13 +196,27 @@ const requiresFormal = lifecycle => lifecycle.formalRequired === true ||
   lifecycle.review?.policy === 'formal' || Boolean(lifecycle.decision?.formal);
 const allowsOperatorStart = lifecycle => lifecycle.formalRequired === false && !requiresFormal(lifecycle);
 const hashTuple = tuple => createHash('sha256').update(JSON.stringify(tuple)).digest('hex');
+const captureChecks = new WeakMap();
+
+export function frozenCaptureMatches(capture) {
+  if (capture?.verified !== true || typeof capture.output !== 'string') return false;
+  const { output, sha256, byteCount } = capture;
+  const previous = captureChecks.get(capture);
+  if (previous?.output === output && previous.sha256 === sha256 && previous.byteCount === byteCount) return previous.matches;
+  // GPUI's hash bridge accepts the original UTF-8 string. Passing a Buffer
+  // to update crashes Herdr Desktop 0.1.16 on Windows ARM64.
+  const matches = Buffer.from(output, 'utf8').length === byteCount &&
+    createHash('sha256').update(output).digest('hex') === sha256;
+  captureChecks.set(capture, { output, sha256, byteCount, matches });
+  return matches;
+}
 
 function canClose(item) {
   const { lifecycle, job } = item;
   const { review } = lifecycle;
-  if (lifecycle.state !== 'in_review' || !review?.capture?.verified || !text(review.capture.output) ||
+  if (lifecycle.state !== 'in_review' || !frozenCaptureMatches(review?.capture) ||
       !digest.test(review.evidenceToken) || review.cycle !== lifecycle.cycle || review.workRevision !== lifecycle.workRevision ||
-      item.state !== 'result_ready' || !job?.linked || review.capture.sessionId !== job.sessionId) return false;
+      (job && job.sessionId !== review.capture.sessionId)) return false;
   if (review.policy === 'operator') return lifecycle.reviewState === 'operator' && !requiresFormal(lifecycle) && review.formal === null;
 
   const { formal, definition, capture } = review;
@@ -267,10 +282,26 @@ function evidenceReferences(operation, item) {
   return {};
 }
 
-function matchingEvidence(operation, input, item) {
+function closeEvidenceKey(scope, item) {
+  const { revision, review } = item.lifecycle;
+  return JSON.stringify([recoveryScope(scope), item.id, revision, review.id, review.snapshotSha256, review.evidenceToken]);
+}
+
+function matchingEvidence(screen, operation, input, closeEvidence, item = screen.item) {
   return workItemActionEnabled(item, operation) && item.lifecycle.revision === input.ifRevision &&
     !(operation === 'start' && input.policy === 'operator' && !allowsOperatorStart(item.lifecycle)) &&
+    (operation !== 'close' || (closeEvidence?.key === closeEvidenceKey(screen.scope, item) &&
+      closeEvidence.output === item.lifecycle.review.capture.output)) &&
     Object.entries(evidenceReferences(operation, item)).every(([key, current]) => Boolean(current) && current === input[key]);
+}
+
+function formEvidence(form) {
+  return { ifRevision: form.item.lifecycle.revision, policy: form.policy, ...evidenceReferences(form.operation, form.item) };
+}
+
+function invalidateConfirmation(screen) {
+  screen.form.stale = true;
+  screen.error = 'The item or its evidence changed. Review the latest detail before making a new confirmation.';
 }
 
 function mutationInput(form, fields, key) {
@@ -454,8 +485,7 @@ export class WorkItems {
       await this.read(screen, () => this.request(screen.scope, 'show', screen.id), item => {
         screen.item = item;
         screen.staleRead = false;
-        if (screen.form && !matchingEvidence(screen.form.operation, { ifRevision: screen.form.item.lifecycle.revision, policy: screen.form.policy,
-          ...evidenceReferences(screen.form.operation, screen.form.item) }, item)) {
+        if (screen.form && !matchingEvidence(screen, screen.form.operation, formEvidence(screen.form), screen.form.closeEvidence)) {
           screen.form.stale = true;
         } else if (screen.form?.operation === 'start') {
           screen.form.formalRequired = !allowsOperatorStart(item.lifecycle);
@@ -624,6 +654,9 @@ export class WorkItems {
       policy: formalRequired ? 'formal' : 'operator', noteKind: 'finding', priority: item.lifecycle.priority,
       blockedBy: item.lifecycle.blockedBy.map(link => link.id).sort()
     };
+    if (operation === 'close') form.closeEvidence = Object.freeze({
+      key: closeEvidenceKey(screen.scope, item), output: lifecycle.review.capture.output
+    });
     screen.error = '';
     screen.form = form;
     await this.loadMutationOptions(screen, form);
@@ -674,7 +707,10 @@ export class WorkItems {
   async confirmMutation(screen, fields) {
     const form = screen.form;
     if (!this.isCurrent(screen) || screen.pending || screen.staleRead || !form || form.pending || form.stale ||
-        this.mutation(screen) || !workItemActionEnabled(screen.item, form.operation)) return;
+        this.mutation(screen)) return;
+    if (form.operation === 'close' && !matchingEvidence(screen, 'close', formEvidence(form), form.closeEvidence)) {
+      return invalidateConfirmation(screen);
+    }
     let input;
     try {
       input = mutationInput(form, fields, newWorkItemId());
@@ -682,12 +718,8 @@ export class WorkItems {
       screen.error = error.message;
       return;
     }
-    if (!matchingEvidence(form.operation, input, screen.item)) {
-      form.stale = true;
-      screen.error = 'The item or its evidence changed. Review the latest detail before making a new confirmation.';
-      return;
-    }
-    await this.sendMutation(screen, { input, operation: form.operation, scope: screen.scope });
+    if (form.operation !== 'close' && !matchingEvidence(screen, form.operation, input)) return invalidateConfirmation(screen);
+    await this.sendMutation(screen, { input, operation: form.operation, scope: screen.scope, closeEvidence: form.closeEvidence });
   }
 
   async sendMutation(screen, attempt) {
@@ -748,7 +780,7 @@ export class WorkItems {
       return;
     }
     if (attempt.rejected || (lookup?.id === input.id && lookup.receipt === null && current?.lifecycle &&
-        !matchingEvidence(operation, input, current))) {
+        !matchingEvidence(screen, operation, input, attempt.closeEvidence, current))) {
       if (this.isCurrent(screen)) {
         if (screen.form) screen.form.stale = true;
         screen.staleRead = !current?.lifecycle;
@@ -757,7 +789,8 @@ export class WorkItems {
       this.mutations.delete(key);
       return;
     }
-    const absent = lookup?.id === input.id && lookup.receipt === null && matchingEvidence(operation, input, current);
+    const absent = lookup?.id === input.id && lookup.receipt === null &&
+      matchingEvidence(screen, operation, input, attempt.closeEvidence, current);
     attempt.phase = absent ? 'missing' : 'unresolved';
     attempt.message = absent ? 'No receipt was found. Refresh again or explicitly resend the same request.'
       : 'Council could not verify the receipt and item. Refresh on the original project machine before resending.';
@@ -766,7 +799,7 @@ export class WorkItems {
   async replayMutation(screen) {
     const attempt = this.mutation(screen);
     if (!this.isCurrent(screen) || attempt?.phase !== 'missing' ||
-        !matchingEvidence(attempt.operation, attempt.input, screen.item)) return;
+        !matchingEvidence(screen, attempt.operation, attempt.input, attempt.closeEvidence)) return;
     await this.sendMutation(screen, attempt);
   }
 

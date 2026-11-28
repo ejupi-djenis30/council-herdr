@@ -1,6 +1,6 @@
 import { h_flex, v_flex, InputState, Textarea, TextareaState } from 'gpui-base';
 import { button, cardHeading, field, input, label, panel, statusPill } from './components.js';
-import { lifecycleStates, workItemActionEnabled, workItemPriorities } from './work-item-actions.js';
+import { frozenCaptureMatches, lifecycleStates, workItemActionEnabled, workItemPriorities } from './work-item-actions.js';
 
 const stateLabels = {
   draft: ['Draft', 'muted'], in_progress: ['In progress', 'working'],
@@ -208,17 +208,18 @@ const readable = (name, value) => value === null || value === undefined ? [] : [
 
 function reviewView(t, review, ui, actions, archived = false) {
   const { capture, formal, definition } = review;
+  const captureVerified = frozenCaptureMatches(capture);
   const expanded = ui.screen.expandedReview === review.id;
   const card = panel(t).child(h_flex().gap(8).flex_wrap().items_center()
     .child(cardHeading(t, archived ? 'Archived review' : 'Frozen review', 'reviews').flex_1())
     .when(Boolean(formal), row => row.child(statusPill(t, formalLabels[formal.state],
       formal.state === 'approved' ? t.done : formal.state === 'pending' ? t.working : t.blocked, t.foreground))))
     .child(label(definition.title, 15, t.foreground).font_semibold())
-    .when(Boolean(capture.output), section => section.child(h_flex().gap(6).flex_wrap()
+    .when(captureVerified, section => section.child(h_flex().gap(6).flex_wrap()
       .child(button(t, 'frozen-output-toggle', expanded ? 'Hide frozen output' : 'Show frozen output', actions.toggleOutput)
         .track_focus(ui.focus.output))
       .child(button(t, 'frozen-output-copy', 'Copy frozen output', actions.copyFrozen))))
-    .when(expanded && Boolean(capture.output), section => section.child(label(capture.output, 13, t.foreground)
+    .when(expanded && captureVerified, section => section.child(label(capture.output, 13, t.foreground)
       .p(9).rounded(6).bg(t.background).role('paragraph').accessibility_label(capture.output)))
     .child(facts(t, [['Review ID', review.id], ['Cycle', review.cycle], ['Work revision', review.workRevision],
       ['Review owner', review.reviewOwnerRoleId], ['Responsible role', definition.roleId],
@@ -227,13 +228,12 @@ function reviewView(t, review, ui, actions, archived = false) {
     .child(label('Frozen acceptance criteria', 13, t.foreground).font_semibold())
     .child(criteriaList(t, definition.criteria))
     .child(facts(t, [['Attempt session', capture.sessionId], ['Capture source', sourceName(capture.source)],
-      ['Capture verification', capture.verified ? 'Verified' : 'Unverified'], ...readable('Capture scope', capture.captureScope),
+      ['Capture verification', captureVerified ? 'Verified' : 'Unverified'], ...readable('Capture scope', capture.captureScope),
       ...readable('Turn', capture.turn), ...readable('Completed', capture.completedAt), ['Bytes', capture.byteCount]]))
     .child(metadata(t, 'Capture SHA-256', capture.sha256));
-  if (!capture.verified || !review.evidenceToken) {
-    card.child(label('Frozen evidence could not be verified. Refresh the review to check its saved evidence.', 13, t.blocked).role('status'));
-  }
-  if (!capture.output) card.child(label('The frozen output is unavailable.', 13, t.blocked).role('status'));
+  if (!captureVerified || !review.evidenceToken) card.child(label(
+    capture.output === null ? 'The frozen output is unavailable.' :
+      'Frozen evidence could not be verified. Refresh the review to check its saved evidence.', 13, t.blocked).role('status'));
   if (archived && capture.verified && ui.archiveExecution) {
     card.child(h_flex().child(button(t, 'archived-execution', 'Open archived delegation', actions.archiveExecution, 'normal', false, 'right')));
   }

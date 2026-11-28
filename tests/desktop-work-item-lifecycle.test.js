@@ -8,12 +8,9 @@ import test from 'node:test';
 import { executeEngine } from '../herdr/mods/council/machine-engine.js';
 import { WorkItems, workItemActionEnabled, workItemScreenVisible } from '../herdr/mods/council/work-item-actions.js';
 
-// Use the committed e43ae3d wire examples. The child process below implements a
-// deterministic fixture protocol, with its own files in an isolated workspace.
+// Use the committed wire examples, including the formal policy amendment.
+// The child fixture process uses its own files in an isolated workspace.
 const examples = JSON.parse(readFileSync(new URL('../specs/002-work-item-review/contracts/examples.json', import.meta.url)));
-// Exact policy vectors from the shared implementation amendment. The spec PR
-// owns integration of that amendment into the published contract.
-const policyFixtures = JSON.parse(readFileSync(new URL('./fixtures/work-item-review-policy.json', import.meta.url)));
 const id = examples.legacy.item.id;
 const role = { id: 'verifier', role: 'Fixture verifier' };
 const actor = { actor: 'Release lead' };
@@ -297,6 +294,123 @@ function approvedFormal() {
   return record;
 }
 
+const utf8Output = '\ufeffCafé 🐻\r\nA\u0301\n' + 'Frozen line\r\n'.repeat(400) + 'Tail: 日\r';
+const changedTail = utf8Output.replace('日', '月');
+
+function withFrozenOutput(record, output, byteCount = Buffer.byteLength(output, 'utf8')) {
+  const { lifecycle, id } = record.item;
+  const { review } = lifecycle;
+  const { capture, definition } = review;
+  Object.assign(capture, { output, byteCount, sha256: createHash('sha256').update(output, 'utf8').digest('hex') });
+  review.snapshotSha256 = hashTuple(['council.work-item-review-snapshot/v2', id, review.cycle, review.workRevision,
+    review.id, review.reviewOwnerRoleId, review.policy, hashTuple([definition.title, definition.roleId, definition.criteria]),
+    capture.sessionId, capture.sha256, capture.byteCount, capture.source, capture.captureScope, capture.turn, capture.completedAt]);
+  review.evidenceToken = hashTuple([review.snapshotSha256, lifecycle.reviewState, review.formal?.manifestSha256 ?? null]);
+  return record;
+}
+
+test('Close verifies all frozen UTF-8 bytes, including BOM, Unicode and original line endings', async t => {
+  const original = withFrozenOutput(approvedFormal(), utf8Output);
+  assert.equal(workItemActionEnabled(original.item, 'close'), true);
+  assert.equal(Buffer.byteLength(utf8Output), Buffer.byteLength(changedTail));
+  const variations = [
+    ['same byte length with a different tail', changedTail],
+    ['leading BOM removed', utf8Output.slice(1)],
+    ['line endings normalized', utf8Output.replaceAll('\r\n', '\n')]
+  ];
+  for (const [name, changed] of variations) await t.test(name, async () => {
+    let response = original;
+    const { work, calls } = harness((_args, call) => wire(response, call.cwd));
+    await work.restore(local, original.item.id);
+    const screen = work.current;
+    await work.startMutation(screen, 'close');
+    assert.equal(screen.form?.operation, 'close');
+    response = structuredClone(original);
+    response.item.lifecycle.review.capture.output = changed;
+    await work.refresh(screen);
+    assert.equal(screen.form?.stale, true);
+    await work.confirmMutation(screen, { ...actor, reason: 'Reviewed.', nextAction: 'Publish.' });
+    await work.restore(local, original.item.id);
+    assert.equal(workItemActionEnabled(work.current.item, 'close'), false);
+    await work.startMutation(work.current, 'close');
+    assert.equal(work.current.form, undefined);
+    assert.ok(calls.every(call => call.argv?.[2] === 'show'));
+  });
+  // The declared digest still matches. The wrong UTF-8 length has its own guard.
+  const wrongLength = withFrozenOutput(approvedFormal(), utf8Output, utf8Output.length);
+  assert.notEqual(utf8Output.length, Buffer.byteLength(utf8Output));
+  assert.equal(workItemActionEnabled(wrongLength.item, 'close'), false);
+});
+
+test('submission rechecks the active capture and never transfers a confirmation across scopes', async t => {
+  await t.test('content changed on the active detail after opening the form', async () => {
+    const source = withFrozenOutput(approvedFormal(), utf8Output);
+    const { work, calls } = harness((_args, call) => wire(source, call.cwd));
+    await work.restore(local, source.item.id);
+    const screen = work.current;
+    await work.startMutation(screen, 'close');
+    screen.item.lifecycle.review.capture.output = changedTail;
+    await work.confirmMutation(screen, { ...actor, reason: 'Reviewed.', nextAction: 'Publish.' });
+    assert.equal(screen.form?.stale, true);
+    assert.ok(calls.every(call => call.argv?.[2] === 'show'));
+  });
+  await t.test('the same ID and frozen bytes on a different machine require a new confirmation', async () => {
+    const source = withFrozenOutput(approvedFormal(), utf8Output);
+    const { work, focus, calls } = harness((_args, call) => wire(source, call.cwd));
+    await work.restore(local, source.item.id);
+    await work.startMutation(work.current, 'close');
+    const form = work.current.form;
+    assert.equal(form?.operation, 'close');
+    focus(peer);
+    await work.restore(peer, source.item.id);
+    assert.equal(workItemActionEnabled(work.current.item, 'close'), true);
+    work.current.form = form;
+    await work.confirmMutation(work.current, { ...actor, reason: 'Reviewed.', nextAction: 'Publish.' });
+    assert.equal(work.current.form.stale, true);
+    assert.ok(calls.every(call => call.argv?.[2] === 'show'));
+  });
+});
+
+function unavailableJobReview() {
+  const record = withFrozenOutput(approvedFormal(), utf8Output);
+  Object.assign(record.item, { state: 'needs_attention', result: null,
+    attention: { code: 'unconfirmed_start', message: 'The original job is unavailable.' } });
+  Object.assign(record.item.job, { linked: false, outcome: 'unconfirmed_start', deliveryState: null, deadlineAt: null, address: null });
+  return record;
+}
+
+test('retained verified output can close even when the original job is unavailable', async t => {
+  for (const keepReference of [true, false]) await t.test(keepReference ? 'unlinked matching reference' : 'no job reference', async () => {
+    const source = unavailableJobReview();
+    if (!keepReference) source.item.job = null;
+    const { work, calls } = harness((args, call) => {
+      if (verb(args) !== 'close') return wire(source, call.cwd);
+      const input = submitted(args);
+      const closed = structuredClone(source);
+      Object.assign(closed.item.lifecycle, { state: 'closed', revision: 6 });
+      return wire({ ...closed, receipt: receipt(input.requestId, 6, 'closed') }, call.cwd);
+    });
+    await work.restore(local, source.item.id);
+    assert.equal(workItemActionEnabled(work.current.item, 'close'), true);
+    await work.startMutation(work.current, 'close');
+    await work.confirmMutation(work.current, { ...actor, reason: 'Reviewed retained evidence.', nextAction: 'Publish.' });
+    assert.equal(work.current.item.lifecycle.state, 'closed');
+    assert.equal(calls.filter(call => call.argv?.[2] === 'close').length, 1);
+  });
+});
+
+test('an explicitly different attempt prevents Close even when the source job is unavailable', async () => {
+  const source = unavailableJobReview();
+  source.item.job.sessionId = 'different-reserved-attempt';
+  const { work, calls } = harness((_args, call) => wire(source, call.cwd));
+  await work.restore(local, source.item.id);
+  assert.equal(workItemActionEnabled(work.current.item, 'close'), false);
+  await work.startMutation(work.current, 'close');
+  await work.confirmMutation(work.current, { ...actor, reason: 'Reviewed.', nextAction: 'Publish.' });
+  assert.equal(work.current.form, undefined);
+  assert.ok(calls.every(call => call.argv?.[2] === 'show'));
+});
+
 test('only current formal approval with a verified, coherent binding may enable or submit Close', async t => {
   const invalidReferences = {
     'all references absent': (_, review) => Object.assign(review.formal, {
@@ -358,14 +472,14 @@ test('only current formal approval with a verified, coherent binding may enable 
 });
 
 function policyCase({ base, lifecycleOverride, omitLifecycleFields }) {
-  const projection = structuredClone(policyFixtures[base] ?? examples[base]);
+  const projection = structuredClone(examples[base]);
   Object.assign(projection.item.lifecycle, lifecycleOverride);
   for (const field of omitLifecycleFields) delete projection.item.lifecycle[field];
   return projection;
 }
 
 test('the shared policy fixtures resolve Start review using an explicit true, false or absent flag', async t => {
-  for (const fixture of policyFixtures.reviewPolicyCases) await t.test(fixture.name, async () => {
+  for (const fixture of examples.reviewPolicyCases) await t.test(fixture.name, async () => {
     const projection = policyCase(fixture);
     const { lifecycle } = projection.item;
     const writes = [];
@@ -408,7 +522,7 @@ test('the shared policy fixtures resolve Start review using an explicit true, fa
 
 test('an operator confirmation becomes stale if the current detail requires formal review or omits the requirement', async t => {
   for (const value of [true, undefined]) await t.test(String(value), async () => {
-    let projection = policyCase(policyFixtures.reviewPolicyCases.find(fixture => fixture.name === 'explicitly-optional'));
+    let projection = policyCase(examples.reviewPolicyCases.find(fixture => fixture.name === 'explicitly-optional'));
     const { work, calls } = harness((_args, call) => wire(projection, call.cwd));
     await work.restore(local, id);
     const screen = work.current;
