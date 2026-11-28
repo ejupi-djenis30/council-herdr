@@ -210,6 +210,13 @@ test('expiry and clock rollback during provider reads never publish a link', asy
     await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
     assert.deepEqual(readdirSync(privateRoot), []);
     assert.equal(transport.posts, 0);
+    if (afterGet >= 301000) {
+      verifying = false; clock = 300999;
+      const reads = transport.calls.length;
+      await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+      assert.equal(transport.calls.length, reads);
+      assert.deepEqual(readdirSync(privateRoot), []);
+    }
   }
   const { make, privateRoot } = await setup(t);
   let clock = 1000;
@@ -219,15 +226,50 @@ test('expiry and clock rollback during provider reads never publish a link', asy
   await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
   assert.deepEqual(readdirSync(privateRoot), []);
   clock = 300999;
-  assert.equal((await operator.confirm('wi-shared', candidate.candidateId, candidate.localRef)).itemId, issueIds[0]);
+  await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  assert.deepEqual(readdirSync(privateRoot), []);
+  const fresh = await operator.resolve('wi-shared', 'COU-12');
+  assert.notEqual(fresh.candidateId, candidate.candidateId);
+  clock = 600998;
+  assert.equal((await operator.confirm('wi-shared', fresh.candidateId, fresh.localRef)).itemId, issueIds[0]);
 });
 
 test('expiry after staging removes the temporary file without publishing', async t => {
   const { make, privateRoot } = await setup(t);
   const times = [1000, 2000, 2000, 2000, 301000];
-  const operator = make(undefined, { now: () => times.shift() });
+  const operator = make(undefined, { now: () => times.shift() ?? 300999 });
   const candidate = await operator.resolve('wi-shared', 'COU-12');
   await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  assert.deepEqual(readdirSync(privateRoot), []);
+  await assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  assert.deepEqual(readdirSync(privateRoot), []);
+});
+
+test('expiry observed by one concurrent confirm retires the shared candidate', async t => {
+  const { make, privateRoot } = await setup(t);
+  let clock = 1000;
+  let block = false;
+  let signalReady;
+  const ready = new Promise(resolve => { signalReady = resolve; });
+  const releases = [];
+  const base = fixtureTransport();
+  const transport = { ...base, async get(route) {
+    const response = await base.get(route);
+    if (block && route.endsWith(`/work-items/${issueIds[0]}/`)) {
+      await new Promise(resolve => { releases.push(resolve); if (releases.length === 2) signalReady(); });
+    }
+    return response;
+  } };
+  const operator = make(undefined, { transport, now: () => clock });
+  const candidate = await operator.resolve('wi-shared', 'COU-12');
+  block = true; clock = 2000;
+  const first = assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  const second = assert.rejects(operator.confirm('wi-shared', candidate.candidateId, candidate.localRef), {code:'scope_conflict'});
+  await ready;
+  clock = 301000; releases[0]();
+  await Promise.race([first, second]);
+  clock = 300999; releases[1]();
+  await Promise.all([first, second]);
   assert.deepEqual(readdirSync(privateRoot), []);
 });
 

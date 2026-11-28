@@ -52,11 +52,16 @@ async function get(transport, route) {
   return response.body;
 }
 
-async function verify(profile, ref, transport) {
+async function verify(profile, ref, transport, guard = () => {}) {
+  const guardedGet = async route => {
+    guard();
+    try { return await get(transport, route); }
+    finally { guard(); }
+  };
   const base = `/api/v1/workspaces/${profile.workspaceSlug}`;
-  const user = await get(transport, '/api/v1/users/me/');
+  const user = await guardedGet('/api/v1/users/me/');
   if (user.id !== profile.principalId) throw error('authorization_denied');
-  const project = await get(transport, `${base}/projects/${profile.projectId}/`);
+  const project = await guardedGet(`${base}/projects/${profile.projectId}/`);
   if (project.id !== profile.projectId || project.workspace !== profile.workspaceId || project.identifier !== profile.projectKey ||
       project.archived_at !== null || project.deleted_at !== null || project.is_member !== true || !profile.allowedRoles.includes(project.member_role)) throw error('scope_conflict');
   let id = ref, sequence;
@@ -65,11 +70,11 @@ async function verify(profile, ref, transport) {
     const match = typeof ref === 'string' && pattern.exec(ref);
     if (!match || !Number.isSafeInteger(Number(match[1]))) throw error('invalid_input');
     sequence = Number(match[1]);
-    const human = await get(transport, `${base}/work-items/${ref}/`);
+    const human = await guardedGet(`${base}/work-items/${ref}/`);
     if (!uuid(human.id) || human.workspace !== profile.workspaceId || human.project !== profile.projectId || human.sequence_id !== sequence) throw error('scope_conflict');
     id = human.id;
   }
-  const issue = await get(transport, `${base}/projects/${profile.projectId}/work-items/${id}/`);
+  const issue = await guardedGet(`${base}/projects/${profile.projectId}/work-items/${id}/`);
   if (issue.id !== id || issue.workspace !== profile.workspaceId || issue.project !== profile.projectId ||
       !Number.isSafeInteger(issue.sequence_id) || issue.sequence_id < 1 || (sequence !== undefined && issue.sequence_id !== sequence) ||
       issue.archived_at !== null || issue.deleted_at !== null || issue.is_draft !== false) throw error('scope_conflict');
@@ -129,23 +134,27 @@ export function createFixtureOperator({ privateRoot, project, installationId, pr
       requireItem(id);
       const createdAt = now();
       if (!Number.isSafeInteger(createdAt) || createdAt < 0) throw error('scope_conflict');
-      const candidate = { id: randomUUID(), item: id, scope, link, ref, createdAt };
+      const candidate = { id: randomUUID(), item: id, scope, link, ref, createdAt, retired: false };
       candidates.set(candidate.id, candidate);
       return { candidateId: candidate.id, localRef: refFor(id), link: structuredClone(link), baseLinkRevision: 0 };
     },
     async confirm(id, candidateId, localRef) {
       requireItem(id);
       const c = candidates.get(candidateId);
-      const confirmedAt = now();
-      if (!c || !Number.isSafeInteger(confirmedAt) || c.item !== id || c.scope !== scope || localRef !== refFor(id) || confirmedAt < c.createdAt || confirmedAt - c.createdAt >= 300000) throw error('scope_conflict');
+      if (!c || c.item !== id || c.scope !== scope || localRef !== refFor(id)) throw error('scope_conflict');
       const checkedTime = previous => {
+        if (c.retired) throw error('scope_conflict');
         const value = now();
-        if (!Number.isSafeInteger(value) || value < previous || value - c.createdAt >= 300000) throw error('scope_conflict');
+        if (Number.isSafeInteger(value) && value - c.createdAt >= 300000) c.retired = true;
+        if (c.retired || !Number.isSafeInteger(value) || value < previous) throw error('scope_conflict');
         return value;
       };
-      const current = await verify(pins, c.ref, transport);
-      requireItem(id);
+      const confirmedAt = checkedTime(c.createdAt);
+      let current;
+      try { current = await verify(pins, c.ref, transport, () => { if (c.retired) throw error('scope_conflict'); }); }
+      catch (error) { checkedTime(confirmedAt); throw error; }
       const verifiedAt = checkedTime(confirmedAt);
+      requireItem(id);
       if (JSON.stringify(current) !== JSON.stringify(c.link)) throw error('scope_conflict');
       const prior = read(id);
       const readAt = checkedTime(verifiedAt);
