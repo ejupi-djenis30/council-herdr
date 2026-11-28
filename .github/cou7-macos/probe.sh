@@ -10,6 +10,9 @@ export XDG_DATA_HOME="$root/home/data" XDG_CACHE_HOME="$root/home/cache"
 export HERDR_APP_HOME="$root/home/config/herdr-app" HC_SESSION="cou7-macos-${GITHUB_RUN_ID}"
 export DO_NOT_TRACK=1 HERDR_TELEMETRY=0 PATH="$root/bin:$PATH"
 unset HC_SOCKET HC_TERMINAL_ID NODE_OPTIONS
+socket_dir=$(mktemp -d /tmp/c7.XXXXXXXX) || exit 1
+chmod 700 "$socket_dir"
+export HC_SOCKET="$socket_dir/c.sock"
 facts="$evidence/facts.txt"
 input='not_run'; ui='not_run'; core='not_run'; cli='not_run'; package='not_run'; first='none'; app_pid=''
 say() { printf '%s\n' "$*" | tee -a "$facts"; }
@@ -18,6 +21,7 @@ run() {
   python3 "$harness/.github/cou7-macos/bounded.py" "$limit" "$root/$label.out" "$root/$label.err" "$@"
   code=$?; say "$label.exit=$code"; return "$code"
 }
+diagnostic() { python3 "$harness/.github/cou7-macos/sanitize.py" "$1" "$2" >> "$facts"; }
 fatal() { first="$1"; say "first_failure=$first"; exit 1; }
 summary() {
   say "verdict.session_input=$input"
@@ -34,6 +38,7 @@ summary() {
   fi
 }
 trap summary EXIT
+cp "$harness/.github/cou7-macos/session-replay.json" "$evidence/offline-session-replay.json"
 say "harness_sha=$GITHUB_SHA"
 say "council_sha=$(git -C "$council" rev-parse HEAD)"
 say "council_tree=$(git -C "$council" rev-parse 'HEAD^{tree}')"
@@ -41,6 +46,7 @@ say "runner_image=${ImageOS:-unknown} image_version=${ImageVersion:-unknown} os=
 say "node_version=$(node --version) node_arch=$(node -p 'process.arch')"
 say "hardware_arm64=$(sysctl -n hw.optional.arm64 2>/dev/null || printf unavailable)"
 say "launcher_translation=$(sysctl -n sysctl.proc_translated 2>/dev/null || printf unavailable)"
+say 'core_socket=isolated_private_short_path'
 [ "$(git -C "$council" rev-parse HEAD)" = e8974841558641faaa9aecab7386fa7001928137 ] || fatal council_revision_mismatch
 [ "$(git -C "$council" rev-parse 'HEAD^{tree}')" = d4bc8cc3a97555686c4c16f07e9a07486216b942 ] || fatal council_tree_mismatch
 [ "$(uname -m)" = arm64 ] && [ "$(node -p 'process.arch')" = arm64 ] || fatal runner_architecture_mismatch
@@ -86,7 +92,9 @@ else
   input="native_probe_compile_failed"
   grep -i 'error:' "$root/compile_native_probe.err" | head -8 | sed -E 's@/[^ :]+@<path>@g' >> "$facts" || true
 fi
-if ! run compile_arch_probe 30 clang -Wall -Wextra -o "$root/arch-probe" "$harness/.github/cou7-macos/arch-probe.c"; then say 'process_architecture_probe=unavailable'; fi
+if ! run compile_arch_probe 30 clang -Wall -Wextra -o "$root/arch-probe" "$harness/.github/cou7-macos/arch-probe.c"; then
+  say 'process_architecture_probe=unavailable'; diagnostic arch_compile_error "$root/compile_arch_probe.err"
+fi
 
 (cd "$council" && npm pack --pack-destination "$root" >"$root/pack-name.txt" 2>"$root/pack-error.txt") || fatal npm_pack_failed
 tarball="$root/$(tail -1 "$root/pack-name.txt")"
@@ -119,7 +127,12 @@ NODE
       then core=pass_controlled_transport; run core_remove_finished 20 "$hc" rm "$address" || true; else core=transport_incomplete; fi
     else core=wait_or_read_failed; fi
   else core=launch_failed; fi
-else core=start_or_status_failed; fi
+else
+  core=start_or_status_failed
+  diagnostic core_start_error "$root/core_start.err"
+  diagnostic core_start_output "$root/core_start.out"
+  [ ! -f "$root/core_status.err" ] || diagnostic core_status_error "$root/core_status.err"
+fi
 
 if [ -x "$root/arch-probe" ]; then
   found=0

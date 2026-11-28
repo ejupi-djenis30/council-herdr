@@ -17,8 +17,8 @@ let post = CGPreflightPostEventAccess()
 let listen = CGPreflightListenEventAccess()
 let screen = CGPreflightScreenCaptureAccess()
 let session = (CGSessionCopyCurrentDictionary() as? [String: Any]) ?? [:]
-let onConsole = session["kCGSessionOnConsoleKey"] as? Bool
-let loggedIn = session["kCGSessionLoginDoneKey"] as? Bool
+let onConsole = session[kCGSessionOnConsoleKey] as? Bool
+let loggedIn = session[kCGSessionLoginDoneKey] as? Bool
 let locked = session["CGSSessionScreenIsLocked"] as? Bool
 var displays: UInt32 = 0
 let displayStatus = CGGetOnlineDisplayList(0, nil, &displays)
@@ -44,6 +44,7 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "inspect",
     let app = NSRunningApplication(processIdentifier: pid_t(target))
     emit(["stage":"desktop_owned_window", "pidExists":app != nil,
           "ownedOnScreenWindows":positive.count, "active":app?.isActive ?? false,
+          "executingCpuType":app?.executableArchitecture as Any? ?? NSNull(),
           "screenCaptureClaimed":false])
     exit(0)
 }
