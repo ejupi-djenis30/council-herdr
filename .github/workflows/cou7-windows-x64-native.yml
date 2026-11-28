@@ -1,0 +1,35 @@
+name: COU-7 isolated Windows x64 native probe
+on:
+  push:
+    branches: [codex/cou-7-windows-x64-probe]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: e8974841558641faaa9aecab7386fa7001928137
+          path: council
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          architecture: x64
+      - name: Probe isolated package, Core and native input
+        shell: pwsh
+        run: '& "$env:GITHUB_WORKSPACE/harness/.github/cou7-windows/probe.ps1"'
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cou7-windows-x64-native
+          path: ${{ runner.temp }}/cou7-win-evidence
+          retention-days: 3
+          if-no-files-found: warn
