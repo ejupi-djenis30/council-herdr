@@ -178,6 +178,10 @@ export default class Council extends View {
       visible: screen => this.workItemVisible(screen)
     });
     this.workItemForm = null;
+    this.workItemFocus = {
+      back: cx.focus_handle(), create: cx.focus_handle(), refresh: cx.focus_handle(),
+      delegate: cx.focus_handle(), copyOutput: cx.focus_handle(), openDelegation: cx.focus_handle()
+    };
     this.activityTarget = null;
     this.discoveredProjects = [];
     this.activityFollows = null;
@@ -187,6 +191,11 @@ export default class Council extends View {
     this.listProject = null;
 
     if (checking()) return;
+    // The native Input context binds Tab and Shift+Tab to indentation.
+    cx.bind_keys([
+      { keystroke: 'tab', action: 'council-work-item-next-field', context: 'CouncilWorkItemCriteria > Input' },
+      { keystroke: 'shift-tab', action: 'council-work-item-previous-field', context: 'CouncilWorkItemCriteria > Input' }
+    ]);
     this.panelFocus.focus();
     this.search = InputState.new({ placeholder: 'Search by title, project or ID' });
     this.search.on('change', (_e, cx) => cx.notify());
@@ -325,13 +334,29 @@ export default class Council extends View {
     this.syncWorkItemFields();
   }
 
-  runWorkItemAction(cx, action) {
+  runWorkItemAction(cx, action, preserveFocus = false) {
     cx.spawn(async cx => {
+      const previous = this.workItems.current;
+      const hadRoles = Boolean(previous?.roles?.length);
       const task = action();
+      const screen = this.workItems.current;
       this.syncWorkItemFields();
+      const savePhase = screen?.kind === 'create' ? this.workItems.createAttempt(screen)?.phase : null;
+      const redirect = preserveFocus && screen && this.workItemVisible(screen) && (screen !== previous || screen.pending ||
+        ['writing', 'checking'].includes(savePhase) ||
+        (screen.kind === 'detail' && this.workItems.delegationPending(screen) === 'writing'));
+      if (redirect) {
+        const target = screen.kind === 'list' ? this.workItemFocus.create : this.workItemFocus.back;
+        target.focus();
+      }
       cx.notify();
       await task;
       this.syncWorkItemFields();
+      if (redirect && screen.kind === 'create' && (screen !== previous || !hadRoles) &&
+          this.workItems.isCurrent(screen) && screen.roles?.length &&
+          !this.workItems.createAttempt(screen) && this.workItemFocus.back.is_focused()) {
+        this.workItemForm?.fields.title.focus();
+      }
       cx.notify();
     });
   }
@@ -353,7 +378,7 @@ export default class Council extends View {
   backToWorkItems(cx, screen) {
     if (!this.workItems.isCurrent(screen)) return;
     if (folderKey(this.workItemTarget(localSpace())) === folderKey(screen.scope.anchor)) {
-      this.runWorkItemAction(cx, () => this.workItems.isCurrent(screen) && this.workItems.showList(screen.scope));
+      this.runWorkItemAction(cx, () => this.workItems.isCurrent(screen) && this.workItems.showList(screen.scope), true);
       return;
     }
     this.leaveWorkItems();
@@ -375,26 +400,27 @@ export default class Council extends View {
     const screen = workItems.current;
     const fields = this.workItemForm?.screen === screen ? this.workItemForm?.fields : null;
     if (!screen || !this.workItemVisible(screen)) return { screen: null };
-    const perform = (cx, action) => this.runWorkItemAction(cx, () => workItems.isCurrent(screen) && action());
+    const perform = (cx, action, preserveFocus) => this.runWorkItemAction(cx, () => workItems.isCurrent(screen) && action(), preserveFocus);
     return {
       screen, fields,
+      focus: this.workItemFocus,
       attempt: screen.kind === 'create' ? workItems.createAttempt(screen) : null,
       delegation: screen.kind === 'detail' ? workItems.delegationPending(screen) : null,
       actions: {
-        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen)),
-        create: (_e, cx) => perform(cx, () => workItems.startCreate(screen)),
-        open: (cx, id) => perform(cx, () => workItems.open(screen, id)),
+        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen), true),
+        create: (_e, cx) => perform(cx, () => workItems.startCreate(screen), true),
+        open: (cx, id) => perform(cx, () => workItems.open(screen, id), true),
         role: (cx, id) => {
           if (!workItems.isCurrent(screen) || workItems.createAttempt(screen)) return;
           screen.roleId = id;
           cx.notify();
         },
         save: (_e, cx) => perform(cx, () => workItems.save(screen,
-          fields && { title: fields.title.value(), criteria: fields.criteria.value() })),
-        discard: (_e, cx) => perform(cx, () => workItems.discardCreate(screen)),
+          fields && { title: fields.title.value(), criteria: fields.criteria.value() }), true),
+        discard: (_e, cx) => perform(cx, () => workItems.discardCreate(screen), true),
         back: (_e, cx) => this.backToWorkItems(cx, screen),
         team: (_e, cx) => this.openWorkItemSection(cx, screen, 'team'),
-        delegate: (_e, cx) => perform(cx, () => workItems.delegate(screen)),
+        delegate: (_e, cx) => perform(cx, () => workItems.delegate(screen), true),
         delegation: (_e, cx) => {
           const link = workItems.delegationLink(screen);
           if (link) this.openWorkItemSection(cx, screen, link.tab, { id: link.id, project: link.project });
