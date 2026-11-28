@@ -3,8 +3,8 @@ $PSNativeCommandUseErrorActionPreference = $false
 $root=$env:COU7_ROOT; $hc=$env:COU7_HC; $cli=$env:COU7_CLI; $node=$env:COU7_NODE
 $ready=Join-Path $root 'fixture-ready.json'
 function Fact([string]$stage,$value) { @{stage=$stage;value=$value} | ConvertTo-Json -Depth 12 -Compress }
-function Hc([string[]]$arguments) { $out=& $hc @arguments 2>$null; if($LASTEXITCODE -ne 0){return $null}; return ($out | Out-String | ConvertFrom-Json) }
-function Cli([string[]]$arguments) { Push-Location $env:COU7_UI_PROJECT; try { $out=& $node $cli @arguments 2>$null; if($LASTEXITCODE -ne 0){return $null};return ($out | Out-String | ConvertFrom-Json) } finally { Pop-Location } }
+function Invoke-Cou7Hc([string[]]$arguments) { $out=& $hc @arguments 2>$null; if($LASTEXITCODE -ne 0){return $null}; return ($out | Out-String | ConvertFrom-Json) }
+function Invoke-Cou7Cli([string[]]$arguments) { Push-Location $env:COU7_UI_PROJECT; try { $out=& $node $cli @arguments 2>$null; if($LASTEXITCODE -ne 0){return $null};return ($out | Out-String | ConvertFrom-Json) } finally { Pop-Location } }
 try {
   if (-not (Test-Path -LiteralPath $ready)) {
     $watcher=[IO.FileSystemWatcher]::new($root,'fixture-ready.json')
@@ -21,8 +21,8 @@ try {
   if (-not (Test-Path -LiteralPath $ready)) { throw 'fixture_ready_not_observed' }
   $fixture=Get-Content -Raw $ready | ConvertFrom-Json
   if ($fixture.address -notmatch '^t[0-9a-z]+$' -or $fixture.pid -le 0) { throw 'fixture_ready_invalid' }
-  $participant=Hc @('get','--json',$fixture.address)
-  $terminals=Hc @('ls','--all','--json')
+  $participant=Invoke-Cou7Hc @('get','--json',$fixture.address)
+  $terminals=Invoke-Cou7Hc @('ls','--all','--json')
   $workers=@($terminals.terminals | Where-Object { $_.name -like 'c-job-*' })
   if ($workers.Count -ne 1) { throw 'owned_worker_not_unique' }
   $worker=$workers[0]
@@ -37,9 +37,9 @@ try {
   $p=Get-Content -Raw $pOut | ConvertFrom-Json; $w=Get-Content -Raw $wOut | ConvertFrom-Json
   $participantAlive=$null -ne (Get-Process -Id $fixture.pid -ErrorAction SilentlyContinue)
   $created=Get-Content -Raw (Join-Path $root 'ui-created.json') | ConvertFrom-Json
-  $item=(Cli @('work-item','show','--id',$created.id)).item
+  $item=(Invoke-Cou7Cli @('work-item','show','--id',$created.id)).item
   $session=$item.job.sessionId
-  $status=Cli @('status','--session',$session); $result=Cli @('result','--session',$session)
+  $status=Invoke-Cou7Cli @('status','--session',$session); $result=Invoke-Cou7Cli @('result','--session',$session)
   $events=@(Get-Content (Join-Path $root 'fixture-events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
   $launches=@(Get-Content (Join-Path $root 'fixture-launches.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
   $output=[string]$item.result.output

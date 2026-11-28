@@ -145,7 +145,7 @@ function Shot([string]$name) {
     Record 'ui_screenshot' @{ stage=$name; interface='native_screen_crop' }
   } catch { Record 'ui_screenshot_unavailable' @{ stage=$name } }
 }
-function Cli([string[]]$arguments) {
+function Read-Cou7WorkItem([string[]]$arguments) {
   Push-Location $env:COU7_UI_PROJECT
   try { $output=& $env:COU7_NODE $env:COU7_CLI 'work-item' @arguments 2>$null; if ($LASTEXITCODE -ne 0) { throw 'installed_cli_readback_failed' }; return ($output | Out-String | ConvertFrom-Json) }
   finally { Pop-Location }
@@ -212,9 +212,9 @@ try {
     Shot 'form'; Mark 'form_values_and_role'
     Attempt 'save'; Click $save
     Await 'Delegate'; Shot 'created'
-    $list=Cli @('list'); $items=@($list.items | Where-Object title -eq $title)
+    $list=Read-Cou7WorkItem @('list'); $items=@($list.items | Where-Object title -eq $title)
     if ($items.Count -ne 1) { throw 'created_item_readback_not_unique' }
-    $item=(Cli @('show','--id',$items[0].id)).item
+    $item=(Read-Cou7WorkItem @('show','--id',$items[0].id)).item
     if ($item.title -ne $title -or $item.roleId -ne 'verifier' -or ($item.criteria -join "`n") -ne ($criteria -join "`n")) { throw 'created_item_readback_mismatch' }
     @{ id=$item.id; title=$title; criteria=$criteria; roleId=$item.roleId; revision=$item.lifecycle.revision } | ConvertTo-Json -Compress | Set-Content -Encoding utf8 (Join-Path $env:COU7_ROOT 'ui-created.json')
     Record 'ui_created_readback' @{ id=$item.id; roleId=$item.roleId; revision=$item.lifecycle.revision; interface='installed_CLI_readonly' }
@@ -226,16 +226,16 @@ try {
     Shot 'delegate-form'; Mark 'delegate_form'
     Attempt 'delegate'; Click $confirm
     Await 'Open delegation'; Shot 'delegated'; Mark 'delegated'
-    $current=(Cli @('show','--id',$item.id)).item
+    $current=(Read-Cou7WorkItem @('show','--id',$item.id)).item
     if (-not $current.job.sessionId) { throw 'delegation_job_readback_missing' }
     @{ id=$item.id; sessionId=$current.job.sessionId } | ConvertTo-Json -Compress | Set-Content -Encoding utf8 (Join-Path $env:COU7_ROOT 'ui-job.json')
     Record 'ui_delegation_readback' @{ id=$item.id; sessionId=$current.job.sessionId; linked=$current.job.linked; interface='installed_CLI_readonly' }
   } else {
     $saved=Get-Content -Raw (Join-Path $env:COU7_ROOT 'ui-created.json') | ConvertFrom-Json
-    $item=(Cli @('show','--id',$saved.id)).item
+    $item=(Read-Cou7WorkItem @('show','--id',$saved.id)).item
     if ($item.state -ne 'result_ready' -or -not $item.job.sessionId) { throw 'reopened_item_not_result_ready' }
     Await 'Work items'; Click (One 'Work items'); Await 'Open work item'
-    $list=Cli @('list'); if (@($list.items | Where-Object title -eq $title).Count -ne 1) { throw 'reopened_item_not_unique' }
+    $list=Read-Cou7WorkItem @('list'); if (@($list.items | Where-Object title -eq $title).Count -ne 1) { throw 'reopened_item_not_unique' }
     Click (One 'Open work item'); Await 'Read saved handoff'; Await 'Open delegation'; Shot 'reopened-item'
     Click (One 'Read saved handoff'); Await 'Back to work item'; Shot 'reopened-handoff'; Mark 'reopened_handoff'
     $visibleText=HandoffText

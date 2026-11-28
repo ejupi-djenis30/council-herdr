@@ -8,6 +8,7 @@ $facts = Join-Path $evidence 'facts.jsonl'
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/form-replay.json') (Join-Path $evidence 'offline-form-replay.json')
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/process-replay.json') (Join-Path $evidence 'offline-process-replay.json')
 Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/role-replay.json') (Join-Path $evidence 'offline-role-replay.json')
+Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/cli-replay.json') (Join-Path $evidence 'offline-cli-replay.json')
 $env:COU7_ROOT = $root
 $env:COU7_EVIDENCE = $evidence
 $env:APPDATA = Join-Path $root 'appdata'

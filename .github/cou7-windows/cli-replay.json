@@ -1,0 +1,1 @@
+{"sourceRun":"https://github.com/Ejupi-Labs/council-herdr/actions/runs/46182656492","role":"verifier","noDispatch":true,"correctedReadback":"actual_CLI_list_and_show_pass","criteriaCount":2,"limitation":"Readback replay used a separate synthetic local project; it did not repeat the UI mutation.","originalNameResolvesTo":"Clear-Item_alias"}
