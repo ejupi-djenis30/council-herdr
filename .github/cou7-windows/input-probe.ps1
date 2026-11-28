@@ -45,6 +45,16 @@ else {
   if (-not $result.ownWindowVisible) { $result.firstFailure = 'owned_window_not_visible' }
   elseif (-not $result.foreground) { $result.firstFailure = 'owned_window_not_foreground' }
   elseif (-not $result.nativeInputObserved) { $result.firstFailure = 'native_key_input_postcondition_absent' }
+  if ($result.foreground -and $env:COU7_EVIDENCE) {
+    try {
+      $bitmap = [Drawing.Bitmap]::new($form.Width, $form.Height)
+      $graphics = [Drawing.Graphics]::FromImage($bitmap)
+      $graphics.CopyFromScreen($form.Left, $form.Top, 0, 0, $form.Size)
+      $bitmap.Save((Join-Path $env:COU7_EVIDENCE 'owned-input-window.png'), [Drawing.Imaging.ImageFormat]::Png)
+      $graphics.Dispose(); $bitmap.Dispose()
+      $result['ownedWindowScreenshot'] = 'captured'
+    } catch { $result['ownedWindowScreenshot'] = 'unavailable' }
+  }
   $form.Close(); $form.Dispose()
 }
 $result | ConvertTo-Json -Compress

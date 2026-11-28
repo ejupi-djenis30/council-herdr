@@ -5,6 +5,7 @@ $evidence = Join-Path $env:RUNNER_TEMP 'cou7-win-evidence'
 New-Item -ItemType Directory -Force -Path $root, $evidence | Out-Null
 $facts = Join-Path $evidence 'facts.jsonl'
 $env:COU7_ROOT = $root
+$env:COU7_EVIDENCE = $evidence
 $env:APPDATA = Join-Path $root 'appdata'
 $env:LOCALAPPDATA = Join-Path $root 'localappdata'
 $env:HOME = Join-Path $root 'home'
@@ -85,6 +86,14 @@ try {
   Must ($desktopVersion -match '0\.1\.18' -and $coreVersion -match '0\.1\.22' -and (PeMachine $app) -eq 0x8664 -and (PeMachine $hc) -eq 0x8664) 'binary_version_or_architecture_mismatch'
   Must ((Run 'hc_skill' $hc @('--skill')) -eq 0) 'hc_skill_unavailable'
   Must ((Run 'desktop_skill' $app @('--skill')) -eq 0) 'desktop_skill_unavailable'
+  $inputScript = Join-Path $harness '.github/cou7-windows/input-probe.ps1'
+  $inputCode = Run 'input_probe' (Get-Command pwsh).Source @('-NoProfile','-STA','-File',$inputScript)
+  if ($inputCode -eq 0) {
+    $inputResult = Get-Content -Raw (Join-Path $root 'input_probe.out') | ConvertFrom-Json
+    Fact 'input_desktop' $inputResult
+    if ($inputResult.nativeInputObserved -and $inputResult.firstFailure -eq $null) { $checks.desktopInput = 'input_probe_pass' }
+    else { $checks.desktopInput = 'blocked'; $firstFailure = $inputResult.firstFailure }
+  } else { $checks.desktopInput = 'blocked'; $firstFailure = 'native_input_probe_process_failed' }
   Push-Location $council
   try {
     Must ((Run 'npm_pack' 'npm.cmd' @('pack','--pack-destination',$root)) -eq 0) 'npm_pack_failed'
@@ -106,6 +115,13 @@ try {
     $testCode = Run 'npm_test' 'npm.cmd' @('test')
     $summary = Get-Content (Join-Path $root 'npm_test.out') | Where-Object { $_ -match '^\s*[ℹ#]?\s*(tests|pass|fail|skipped)\s+\d+' } | Select-Object -Last 8
     Fact 'test_summary' @{ exit = $testCode; lines = @($summary) }
+    if ($testCode -ne 0) {
+      $failedNames = Get-Content (Join-Path $root 'npm_test.out') | Where-Object { $_ -match '^✖ ' } | ForEach-Object { $_ -replace '\s*\([^)]*ms\)$','' } | Select-Object -First 12
+      $testLog = Get-Content -Raw (Join-Path $root 'npm_test.out')
+      $failureCode = if ($testLog -match "code:\s*'([A-Z][A-Z0-9_]+)'") { $Matches[1] } else { $null }
+      $failureCall = if ($testLog -match "syscall:\s*'([a-z0-9]+)'") { $Matches[1] } else { $null }
+      Fact 'test_failures' @{ names = @($failedNames); errorCode = $failureCode; syscall = $failureCall }
+    }
     $checks.tests = if ($testCode -eq 0) { 'pass' } else { 'fail' }
   } finally { Pop-Location }
   'console.log("COU7_CORE_TRANSPORT_OK")' | Set-Content -Encoding utf8 (Join-Path $root 'core-probe.cjs')
@@ -131,6 +147,7 @@ try {
   @{ id = 'wi-windows-readback'; title = 'Windows native checkpoint'; roleId = 'verifier'; criteria = @('Name the first heading.','Give a concrete next action.') } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $inputFile
   Push-Location $project
   try {
+    Must ((Run 'cli_fixture_role' $node @($cli,'team','set','verifier','--agent','junie','--role','Windows fixture','--permission','read')) -eq 0) 'cli_fixture_role_failed'
     Must ((Run 'cli_create' $node @($cli,'work-item','create','--input-file',$inputFile)) -eq 0) 'cli_create_failed'
     Must ((Run 'cli_show' $node @($cli,'work-item','show','--id','wi-windows-readback')) -eq 0) 'cli_show_failed'
     $item = (Get-Content -Raw (Join-Path $root 'cli_show.out') | ConvertFrom-Json).item
@@ -138,14 +155,6 @@ try {
     Must ($item.id -eq 'wi-windows-readback' -and $item.criteria.Count -eq 2 -and $item.roleId -eq 'verifier') 'cli_readback_mismatch'
     $checks.cli = 'pass_readback_only'
   } finally { Pop-Location }
-  $inputScript = Join-Path $harness '.github/cou7-windows/input-probe.ps1'
-  $inputCode = Run 'input_probe' (Get-Command pwsh).Source @('-NoProfile','-STA','-File',$inputScript)
-  if ($inputCode -eq 0) {
-    $inputResult = Get-Content -Raw (Join-Path $root 'input_probe.out') | ConvertFrom-Json
-    Fact 'input_desktop' $inputResult
-    if ($inputResult.nativeInputObserved -and $inputResult.firstFailure -eq $null) { $checks.desktopInput = 'input_probe_pass' }
-    else { $checks.desktopInput = 'blocked'; $firstFailure = $inputResult.firstFailure }
-  } else { $checks.desktopInput = 'blocked'; $firstFailure = 'native_input_probe_process_failed' }
   $appOut = Join-Path $root 'desktop-process.out'; $appErr = Join-Path $root 'desktop-process.err'
   $startOptions = @{ FilePath = $app; PassThru = $true; RedirectStandardOutput = $appOut; RedirectStandardError = $appErr }
   if ($checks.desktopInput -ne 'input_probe_pass') { $startOptions.WindowStyle = 'Hidden' }
