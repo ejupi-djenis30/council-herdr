@@ -32,7 +32,7 @@ function bounded(path, limit) {
 }
 
 function safeError(error) {
-  return ['invalid_input','scope_conflict','not_found','stale_preview','integrity_error','storage_error'].includes(error?.code)
+  return ['invalid_input','scope_conflict','not_found','stale_preview','integrity_error','storage_error','offline','evidence_unverified'].includes(error?.code)
     ? problem(error.code) : problem('storage_error');
 }
 export function fixtureJournal(options) {
