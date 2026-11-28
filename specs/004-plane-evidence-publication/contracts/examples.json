@@ -1,0 +1,333 @@
+{
+  "synthetic": true,
+  "source": {
+    "scopeRef": "local-41e086ea",
+    "localProjectDisplayName": "Council",
+    "remoteProjectDisplayName": "Council",
+    "installationId": "c0a965ae-f134-4ded-8a66-ab60c366695f",
+    "itemId": "wi-example-work-1",
+    "itemRevision": 4,
+    "link": {
+      "linkRevision": 1,
+      "instanceId": "9ae0150d-c566-455e-b991-fac117de3586",
+      "instanceLabel": "Planning",
+      "workspaceSlug": "example",
+      "workspaceId": "1ed988c2-4fd6-4ade-9720-43b5df90a526",
+      "projectKey": "COU",
+      "projectId": "bab52525-0551-4a70-bc63-0e1cf62773b6",
+      "itemIdentifier": "COU-12",
+      "itemId": "93518572-91eb-4f28-bfb4-54016953885a"
+    },
+    "expectedAuthor": "367d4046-9ff7-4d0f-8f05-5d49cb118628",
+    "allowedRepo": {
+      "fullName": "example/council",
+      "id": 111111,
+      "public": true
+    },
+    "evidenceUrl": "https://github.com/example/council/pull/31",
+    "operationId": "000000000000000000000000000000a1",
+    "status": "in_review"
+  },
+  "homonym": {
+    "scopeRef": "local-41e086eb",
+    "installationId": "c0a965ae-f134-4ded-8a66-ab60c366695f",
+    "itemId": "wi-example-work-1",
+    "localProjectDisplayName": "Council",
+    "remoteProjectDisplayName": "Council",
+    "link": {
+      "linkRevision": 1,
+      "instanceId": "9ae0150d-c566-455e-b991-fac117de3586",
+      "instanceLabel": "Planning",
+      "workspaceSlug": "example-other",
+      "workspaceId": "012edc6e-cfed-447e-9bc8-650a5685975f",
+      "projectKey": "COU",
+      "projectId": "00952aef-5249-4780-80d8-ebbe2e1e4890",
+      "itemIdentifier": "COU-12",
+      "itemId": "4a91b83c-5d1e-431c-be8c-79bdc35bb8fe"
+    }
+  },
+  "outbound": {
+    "method": "POST",
+    "route": "/api/v1/workspaces/example/projects/bab52525-0551-4a70-bc63-0e1cf62773b6/work-items/93518572-91eb-4f28-bfb4-54016953885a/comments/",
+    "payload": {
+      "access": "INTERNAL",
+      "comment_html": "<p>Council status: in_review</p><p>Evidence: https://github.com/example/council/pull/31</p><p>Council publication: 000000000000000000000000000000a1</p>"
+    }
+  },
+  "positiveComment": {
+    "id": "e709703f-50b5-4f0c-80a1-d5a78d62574a",
+    "workspace": "1ed988c2-4fd6-4ade-9720-43b5df90a526",
+    "project": "bab52525-0551-4a70-bc63-0e1cf62773b6",
+    "issue": "93518572-91eb-4f28-bfb4-54016953885a",
+    "actor": "367d4046-9ff7-4d0f-8f05-5d49cb118628",
+    "created_by": "367d4046-9ff7-4d0f-8f05-5d49cb118628",
+    "access": "INTERNAL",
+    "parent": null,
+    "deleted_at": null,
+    "edited_at": null,
+    "attachments": [],
+    "comment_html": "<p>Council status: in_review</p><p>Evidence: https://github.com/example/council/pull/31</p><p>Council publication: 000000000000000000000000000000a1</p>"
+  },
+  "workspacePlaneExample": {
+    "availability": "operator_available",
+    "freshness": "current",
+    "link": {
+      "linkRevision": 1,
+      "instanceId": "9ae0150d-c566-455e-b991-fac117de3586",
+      "instanceLabel": "Planning",
+      "workspaceSlug": "example",
+      "workspaceId": "1ed988c2-4fd6-4ade-9720-43b5df90a526",
+      "projectKey": "COU",
+      "projectId": "bab52525-0551-4a70-bc63-0e1cf62773b6",
+      "itemIdentifier": "COU-12",
+      "itemId": "93518572-91eb-4f28-bfb4-54016953885a"
+    },
+    "operation": {
+      "operationId": "000000000000000000000000000000a1",
+      "itemRevision": 4,
+      "linkRevision": 1,
+      "status": "in_review",
+      "evidenceUrl": "https://github.com/example/council/pull/31",
+      "visibility": "INTERNAL",
+      "state": "published",
+      "reason": null,
+      "receipt": {
+        "commentId": "e709703f-50b5-4f0c-80a1-d5a78d62574a",
+        "operationId": "000000000000000000000000000000a1",
+        "verifiedAt": "2026-11-28T12:00:00.000Z",
+        "source": "reconciliation"
+      }
+    }
+  },
+  "repetitions": [
+    {
+      "situation": "normal acknowledgement and detail readback",
+      "sequence": [
+        "link",
+        "prepare",
+        "confirm",
+        "readback",
+        "restart"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 1,
+        "state": "published",
+        "readSource": "response",
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "lost HTTP reply after Plane commits",
+      "sequence": [
+        "link",
+        "prepare",
+        "confirm",
+        "commit_drop_ack",
+        "restart",
+        "reconcile"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 1,
+        "state": "published",
+        "readSource": "reconciliation",
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "lost reply with no Plane commit",
+      "sequence": [
+        "link",
+        "prepare",
+        "confirm",
+        "drop_without_commit",
+        "restart",
+        "reconcile",
+        "confirm_replay",
+        "reconcile"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 0,
+        "state": "delivery_uncertain",
+        "readSource": null,
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "offline before Start and explicit return online",
+      "sequence": [
+        "link",
+        "prepare",
+        "offline_before_start",
+        "restart",
+        "reconcile",
+        "confirm",
+        "readback"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 1,
+        "state": "published",
+        "readSource": "response",
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "offline before Start, no fresh confirmation",
+      "sequence": [
+        "link",
+        "prepare",
+        "offline_before_start",
+        "restart",
+        "reconcile"
+      ],
+      "expected": {
+        "postAttempts": 0,
+        "comments": 0,
+        "state": "offline",
+        "readSource": null,
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "approval or acknowledgement lost before Start",
+      "sequence": [
+        "link",
+        "prepare",
+        "approve_no_start",
+        "restart",
+        "reconcile"
+      ],
+      "expected": {
+        "postAttempts": 0,
+        "comments": 0,
+        "state": "approved_unsent",
+        "readSource": null,
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "crash after durable Start before transport",
+      "sequence": [
+        "link",
+        "prepare",
+        "crash_after_start",
+        "restart",
+        "reconcile",
+        "confirm_replay"
+      ],
+      "expected": {
+        "postAttempts": 0,
+        "comments": 0,
+        "state": "delivery_uncertain",
+        "readSource": null,
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "lost local receipt response",
+      "sequence": [
+        "link",
+        "prepare",
+        "confirm",
+        "readback",
+        "drop_local_reply",
+        "restart",
+        "confirm_replay"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 1,
+        "state": "published",
+        "readSource": "response",
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "concurrent link/confirm and replay",
+      "sequence": [
+        "link",
+        "same_target_link_race",
+        "prepare",
+        "confirm_race",
+        "readback",
+        "confirm_replay"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 1,
+        "state": "published",
+        "readSource": "response",
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "stale local revision before sender claim",
+      "sequence": [
+        "link",
+        "prepare",
+        "advance_local_revision",
+        "confirm_stale",
+        "restart"
+      ],
+      "expected": {
+        "postAttempts": 0,
+        "comments": 0,
+        "state": "conflict",
+        "readSource": null,
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "lost response and wrong actor claims matching marker",
+      "sequence": [
+        "link",
+        "prepare",
+        "confirm",
+        "drop_without_commit",
+        "foreign_marker",
+        "restart",
+        "reconcile"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 0,
+        "state": "delivery_uncertain",
+        "readSource": null,
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    },
+    {
+      "situation": "uncertain response, receipt on second page",
+      "sequence": [
+        "link",
+        "prepare",
+        "confirm",
+        "commit_drop_ack",
+        "second_page",
+        "reconcile"
+      ],
+      "expected": {
+        "postAttempts": 1,
+        "comments": 1,
+        "state": "published",
+        "readSource": "reconciliation",
+        "planningFieldWrites": 0,
+        "links": 1
+      }
+    }
+  ]
+}
