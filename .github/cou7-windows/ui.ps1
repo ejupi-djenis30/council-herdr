@@ -9,6 +9,7 @@ $refs = @([System.Windows.Automation.AutomationElement].Assembly.Location, [Syst
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/uia-wait.cs') -ReferencedAssemblies $refs
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/pixel-check.cs')
 . (Join-Path $env:COU7_HARNESS '.github/cou7-windows/tab-template.ps1')
+. (Join-Path $env:COU7_HARNESS '.github/cou7-windows/confirm-readback.ps1')
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -264,11 +265,16 @@ try {
     $confirm=One 'Confirm delegation'; if ((PrimaryState $confirm) -ne 'enabled') { throw 'confirm_not_visually_enabled' }
     Shot 'delegate-form'; Mark 'delegate_form'
     Attempt 'delegate'; Click $confirm
-    Await 'Open delegation'; Shot 'delegated'; Mark 'delegated'
+    $uiObserved=$false
+    try { Await 'Open delegation'; Shot 'delegated'; Mark 'delegated'; $uiObserved=$true }
+    catch {
+      Shot 'confirmation-uia-missing'; Diagnostic
+      Record 'ui_confirmation_uia_unavailable' @{ interface='native_UIA'; noResend=$true }
+    }
     $current=(Read-Cou7WorkItem @('show','--id',$item.id)).item
-    if (-not $current.job.sessionId) { throw 'delegation_job_readback_missing' }
+    if (-not (Test-Cou7ConfirmReadback $current $item.id)) { throw 'delegation_job_readback_missing' }
     @{ id=$item.id; sessionId=$current.job.sessionId } | ConvertTo-Json -Compress | Set-Content -Encoding utf8 (Join-Path $env:COU7_ROOT 'ui-job.json')
-    Record 'ui_delegation_readback' @{ id=$item.id; sessionId=$current.job.sessionId; linked=$current.job.linked; interface='installed_CLI_readonly' }
+    Record 'ui_delegation_readback' @{ id=$item.id; sessionId=$current.job.sessionId; linked=$current.job.linked; interface='installed_CLI_readonly'; uiPostconditionObserved=$uiObserved; noResend=$true }
   } else {
     $saved=Get-Content -Raw (Join-Path $env:COU7_ROOT 'ui-created.json') | ConvertFrom-Json
     $item=(Read-Cou7WorkItem @('show','--id',$saved.id)).item
