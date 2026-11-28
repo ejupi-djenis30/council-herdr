@@ -355,6 +355,10 @@ function mutationView(t, screen, ui, actions) {
   }
   if (operation === 'start') {
     const policies = form.formalRequired ? ['formal'] : ['operator', 'formal'];
+    if (form.policyUnknown) body.child(label(
+      'Refresh the item or update Council on the project machine to check whether operator acceptance is available.',
+      12, t.foreground).role('status'));
+    else if (form.formalRequired) body.child(label('This item requires a formal Council review.', 12, t.foreground));
     body.child(choices(t, 'Review policy', policies.map(id =>
       option(id, id === 'operator' ? 'Operator acceptance' : 'Formal Council review', form.policy)),
     (cx, id) => actions.formOption(cx, 'policy', id)));
@@ -461,7 +465,7 @@ function detailView(t, screen, ui, actions) {
     body.child(mutationView(t, screen, ui, actions));
     if (!screen.form.stale) return body;
   }
-  if (lifecycle && !mutation && !screen.form) {
+  if (lifecycle && !mutation && !screen.form && !screen.staleRead) {
     const available = Object.keys(operationLabels).filter(operation => workItemActionEnabled(item, operation));
     if (available.length) body.child(h_flex().gap(7).flex_wrap().children(available.map(operation => button(t,
       `work-item-${operation}`, operationLabels[operation][0], (_e, cx) => actions.mutate(cx, operation),

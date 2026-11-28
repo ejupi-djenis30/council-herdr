@@ -1,0 +1,127 @@
+{
+  "sourceCommit": "18b40eadfbe22f17d6e46eccf32f7c0dfc5b721b",
+  "formalRequiredAfterReturn": {
+    "success": true,
+    "project": "/example/Council project",
+    "item": {
+      "id": "wi-release-check",
+      "title": "Verify the release notes",
+      "roleId": "verifier",
+      "createdAt": "2026-11-28T09:00:00.000Z",
+      "state": "result_ready",
+      "nextAction": "Review the handoff against the acceptance criteria.",
+      "canDelegate": false,
+      "job": {
+        "sessionId": "wi-job-892557e2-b33e-42de-a826-4a2b157d291e",
+        "linked": true,
+        "outcome": "completed",
+        "deliveryState": "acknowledged",
+        "deadlineAt": "2026-11-28T09:07:00.000Z",
+        "address": "t42"
+      },
+      "attention": null,
+      "criteria": [
+        "Name the first heading.",
+        "Give a concrete next action."
+      ],
+      "result": {
+        "output": "Heading: # Council release notes\nNext action: review the upgrade section.",
+        "source": "terminal_screen",
+        "captureScope": "history",
+        "artifactPath": null,
+        "turn": 1,
+        "completedAt": "2026-11-28T09:05:00.000Z"
+      },
+      "lifecycle": {
+        "revision": 6,
+        "workRevision": 2,
+        "cycle": 2,
+        "managed": true,
+        "state": "open",
+        "priority": "high",
+        "blockedBy": [],
+        "nextAction": "Check the newly added section.",
+        "guidance": "Review the handoff against the acceptance criteria.",
+        "needsAttention": false,
+        "reviewState": null,
+        "formalRequired": true,
+        "actions": {
+          "triage": true,
+          "editDefinition": false,
+          "delegate": false,
+          "startReview": true,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": false
+        },
+        "integrity": null,
+        "review": null,
+        "decision": {
+          "id": "decision-5",
+          "reviewId": "review-4",
+          "cycle": 1,
+          "workRevision": 1,
+          "disposition": "changes_requested",
+          "actor": "Lead",
+          "reason": "The new section needs an independent review.",
+          "nextAction": "Check the newly added section.",
+          "at": "2026-11-28T09:02:00.000Z",
+          "snapshotSha256": "1702282734bffd6846226b97f450bd5428006d4c46e2689b49350b3b28b9d4c1",
+          "evidenceToken": "96479ba7143c6257f35ee9f9b429e60664ba2e181b6a36be32e99f04cfc52852",
+          "formal": null
+        }
+      }
+    }
+  },
+  "reviewPolicyCases": [
+    {
+      "name": "required-after-return-before-attach",
+      "base": "formalRequiredAfterReturn",
+      "lifecycleOverride": {},
+      "omitLifecycleFields": [],
+      "allowedPolicies": [
+        "formal"
+      ]
+    },
+    {
+      "name": "explicitly-optional",
+      "base": "inReview",
+      "lifecycleOverride": {
+        "revision": 3,
+        "state": "open",
+        "reviewState": null,
+        "review": null,
+        "formalRequired": false,
+        "actions": {
+          "triage": false,
+          "editDefinition": false,
+          "delegate": false,
+          "startReview": true,
+          "addNote": false,
+          "attachFormal": false,
+          "close": false,
+          "returnForChanges": false,
+          "reopen": false
+        }
+      },
+      "omitLifecycleFields": [],
+      "allowedPolicies": [
+        "operator",
+        "formal"
+      ]
+    },
+    {
+      "name": "older-detail-policy-unknown",
+      "base": "formalRequiredAfterReturn",
+      "lifecycleOverride": {},
+      "omitLifecycleFields": [
+        "formalRequired"
+      ],
+      "allowedPolicies": [
+        "formal"
+      ]
+    }
+  ]
+}

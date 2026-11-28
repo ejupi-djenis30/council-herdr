@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 const states = new Set(['draft', 'in_progress', 'needs_attention', 'result_ready']);
 const typedErrors = new Set(['invalid_input', 'not_found', 'role_unavailable', 'conflict', 'integrity_error', 'storage_error']);
 const definiteRejections = new Set(['invalid_input', 'not_found', 'role_unavailable', 'conflict']);
@@ -22,6 +24,8 @@ const requestId = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const digest = /^[a-f0-9]{64}$/;
 // A link is a bounded session identifier within the selected project.
 const safeSession = id => typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id);
+const formalSession = id => typeof id === 'string' && id.length <= 80 &&
+  /^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:-|$))[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id);
 const lineBreak = /[\r\n\u2028\u2029]/u;
 const control = /[\u0000-\u001f\u007f-\u009f]/u;
 
@@ -86,6 +90,7 @@ function validReview(review) {
 
 function validLifecycle(value, detail) {
   if (!value || ![value.revision, value.workRevision, value.cycle].every(positive) ||
+      (value.formalRequired !== undefined && typeof value.formalRequired !== 'boolean') ||
       typeof value.managed !== 'boolean' || !lifecycleStates.includes(value.state) ||
       !workItemPriorities.includes(value.priority) || !nullableText(value.nextAction) || !text(value.guidance) ||
       typeof value.needsAttention !== 'boolean' || ![null, 'operator', ...formalStates].includes(value.reviewState) ||
@@ -163,8 +168,9 @@ function validQueue(record) {
     listOf(record.errors, error => text(error?.id) && message(error));
 }
 
-function validReceipt(receipt, key) {
-  return receipt && receipt.requestId === key && text(receipt.event) && positive(receipt.revision) && typeof receipt.replay === 'boolean';
+function validReceipt(receipt, input) {
+  return receipt && receipt.requestId === input.requestId && text(receipt.event) && positive(receipt.revision) &&
+    receipt.revision > input.ifRevision && typeof receipt.replay === 'boolean';
 }
 
 function validHistoryEvent(event) {
@@ -185,6 +191,34 @@ function queueFlags(filters) {
     ...(filters.state ? ['--state', filters.state] : []), ...(filters.attention ? ['--needs-attention'] : [])];
 }
 
+const requiresFormal = lifecycle => lifecycle.formalRequired === true ||
+  lifecycle.review?.policy === 'formal' || Boolean(lifecycle.decision?.formal);
+const allowsOperatorStart = lifecycle => lifecycle.formalRequired === false && !requiresFormal(lifecycle);
+const hashTuple = tuple => createHash('sha256').update(JSON.stringify(tuple)).digest('hex');
+
+function canClose(item) {
+  const { lifecycle, job } = item;
+  const { review } = lifecycle;
+  if (lifecycle.state !== 'in_review' || !review?.capture?.verified || !text(review.capture.output) ||
+      !digest.test(review.evidenceToken) || review.cycle !== lifecycle.cycle || review.workRevision !== lifecycle.workRevision ||
+      item.state !== 'result_ready' || !job?.linked || review.capture.sessionId !== job.sessionId) return false;
+  if (review.policy === 'operator') return lifecycle.reviewState === 'operator' && !requiresFormal(lifecycle) && review.formal === null;
+
+  const { formal, definition, capture } = review;
+  if (review.policy !== 'formal' || lifecycle.reviewState !== 'approved' || formal?.state !== 'approved' ||
+      !['validated', 'conditional'].includes(formal.verdict) ||
+      !formalSession(formal.sessionId) || !positive(formal.round) ||
+      !digest.test(formal.proposalSha256) || !digest.test(formal.manifestSha256) || !matches(item, definition)) return false;
+
+  // Workspace receives the verified digests. Only the backend has the proposal and manifest bytes.
+  const definitionSha256 = hashTuple([definition.title, definition.roleId, definition.criteria]);
+  const snapshot = ['council.work-item-review-snapshot/v2', item.id, lifecycle.cycle, lifecycle.workRevision,
+    review.id, review.reviewOwnerRoleId, review.policy, definitionSha256, capture.sessionId, capture.sha256,
+    capture.byteCount, capture.source, capture.captureScope, capture.turn, capture.completedAt];
+  return review.snapshotSha256 === hashTuple(snapshot) &&
+    review.evidenceToken === hashTuple([review.snapshotSha256, 'approved', formal.manifestSha256]);
+}
+
 export function workItemActionEnabled(item, operation) {
   const lifecycle = item?.lifecycle;
   if (!lifecycle?.actions?.[workItemMutations[operation]?.action] || lifecycle.integrity) return false;
@@ -194,8 +228,7 @@ export function workItemActionEnabled(item, operation) {
   if (operation === 'return') return Boolean(review?.evidenceToken);
   if (operation === 'note' || operation === 'attach') return Boolean(review);
   if (operation === 'reopen') return lifecycle.state === 'closed' && lifecycle.decision?.disposition === 'accepted';
-  return operation !== 'close' || Boolean(review?.capture.verified && review.evidenceToken &&
-    (review.policy === 'operator' || review.formal?.state === 'approved'));
+  return operation !== 'close' || canClose(item);
 }
 const needsRoles = operation => ['triage', 'start', 'return', 'reopen'].includes(operation);
 const trimmed = (value, title, max = 500) => {
@@ -236,6 +269,7 @@ function evidenceReferences(operation, item) {
 
 function matchingEvidence(operation, input, item) {
   return workItemActionEnabled(item, operation) && item.lifecycle.revision === input.ifRevision &&
+    !(operation === 'start' && input.policy === 'operator' && !allowsOperatorStart(item.lifecycle)) &&
     Object.entries(evidenceReferences(operation, item)).every(([key, current]) => Boolean(current) && current === input[key]);
 }
 
@@ -246,12 +280,15 @@ function mutationInput(form, fields, key) {
   const input = { id: item.id, ifRevision: item.lifecycle.revision, requestId: key,
     actor: trimmed(fields.actor, 'an actor name', 120), ...refs };
   if (operation === 'triage') input.patch = triagePatch(form, fields);
-  if (operation === 'start') Object.assign(input, { reviewOwnerRoleId: matchingRole(form, form.roleId), policy: form.policy });
+  if (operation === 'start') {
+    if (form.formalRequired && form.policy !== 'formal') throw problem('review_not_authorized', 'This item requires formal review.');
+    Object.assign(input, { reviewOwnerRoleId: matchingRole(form, form.roleId), policy: form.policy });
+  }
   if (operation === 'note') Object.assign(input, { kind: form.noteKind, text: trimmed(fields.text, 'a review note') });
   if (operation === 'attach') {
     const formalSessionId = fields.formalSessionId.trim();
     const round = Number(fields.round.trim());
-    if (!safeSession(formalSessionId) || !/^\d+$/.test(fields.round.trim()) || !positive(round)) {
+    if (!formalSession(formalSessionId) || !/^\d+$/.test(fields.round.trim()) || !positive(round)) {
       throw problem('invalid_input', 'Enter a Council review session ID and its positive round number.');
     }
     Object.assign(input, { formalSessionId, round });
@@ -317,7 +354,7 @@ export class WorkItems {
     return this.current === screen && this.visible(screen);
   }
 
-  async read(screen, load, apply) {
+  async read(screen, load, apply, onFailure) {
     if (!this.isCurrent(screen) || screen.pending) return;
     screen.pending = true;
     screen.error = '';
@@ -325,7 +362,10 @@ export class WorkItems {
       const data = await load();
       if (this.isCurrent(screen)) apply(data);
     } catch (error) {
-      if (this.isCurrent(screen)) screen.error = error.message;
+      if (this.isCurrent(screen)) {
+        screen.error = error.message;
+        onFailure?.();
+      }
     } finally {
       screen.pending = false;
     }
@@ -414,9 +454,12 @@ export class WorkItems {
       await this.read(screen, () => this.request(screen.scope, 'show', screen.id), item => {
         screen.item = item;
         screen.staleRead = false;
-        if (screen.form && !matchingEvidence(screen.form.operation, { ifRevision: screen.form.item.lifecycle.revision,
+        if (screen.form && !matchingEvidence(screen.form.operation, { ifRevision: screen.form.item.lifecycle.revision, policy: screen.form.policy,
           ...evidenceReferences(screen.form.operation, screen.form.item) }, item)) {
           screen.form.stale = true;
+        } else if (screen.form?.operation === 'start') {
+          screen.form.formalRequired = !allowsOperatorStart(item.lifecycle);
+          screen.form.policyUnknown = item.lifecycle.formalRequired === undefined;
         }
         const key = this.delegationKey(screen);
         if (this.delegates.get(key) !== 'writing') this.delegates.delete(key);
@@ -424,6 +467,9 @@ export class WorkItems {
         if (attempt?.input.id === item.id && !['writing', 'checking'].includes(attempt.phase) && matches(item, attempt.input)) {
           this.creates.delete(recoveryScope(screen.scope));
         }
+      }, () => {
+        screen.staleRead = true;
+        if (screen.form) screen.form.stale = true;
       });
     } else if (screen.kind === 'create') {
       const attempt = this.createAttempt(screen);
@@ -570,9 +616,11 @@ export class WorkItems {
     if (!this.isCurrent(screen) || screen.pending || screen.staleRead || this.mutation(screen) ||
         !workItemActionEnabled(screen.item, operation)) return;
     const item = screen.item;
-    const formalRequired = item.lifecycle.formalRequired === true || Boolean(item.lifecycle.decision?.formal);
+    const lifecycle = item.lifecycle;
+    const formalRequired = !allowsOperatorStart(lifecycle);
     const form = {
       operation, item, roleId: operation === 'triage' ? item.roleId : '', formalRequired,
+      policyUnknown: lifecycle.formalRequired === undefined,
       policy: formalRequired ? 'formal' : 'operator', noteKind: 'finding', priority: item.lifecycle.priority,
       blockedBy: item.lifecycle.blockedBy.map(link => link.id).sort()
     };
@@ -625,13 +673,18 @@ export class WorkItems {
 
   async confirmMutation(screen, fields) {
     const form = screen.form;
-    if (!this.isCurrent(screen) || screen.pending || !form || form.pending || form.stale ||
+    if (!this.isCurrent(screen) || screen.pending || screen.staleRead || !form || form.pending || form.stale ||
         this.mutation(screen) || !workItemActionEnabled(screen.item, form.operation)) return;
     let input;
     try {
       input = mutationInput(form, fields, newWorkItemId());
     } catch (error) {
       screen.error = error.message;
+      return;
+    }
+    if (!matchingEvidence(form.operation, input, screen.item)) {
+      form.stale = true;
+      screen.error = 'The item or its evidence changed. Review the latest detail before making a new confirmation.';
       return;
     }
     await this.sendMutation(screen, { input, operation: form.operation, scope: screen.scope });
@@ -648,7 +701,7 @@ export class WorkItems {
     try {
       const record = await this.command(scope, [...workItemMutations[operation].command, ...mutationFlags(operation, input)]);
       if (!validItem(record.item, true) || record.item.id !== input.id || !record.item.lifecycle ||
-          !validReceipt(record.receipt, input.requestId) || record.item.lifecycle.revision < record.receipt.revision) {
+          !validReceipt(record.receipt, input) || record.item.lifecycle.revision < record.receipt.revision) {
         throw unavailable(scope);
       }
       this.acceptMutation(screen, attempt, record.item, record.receipt);
@@ -667,6 +720,7 @@ export class WorkItems {
   }
 
   acceptMutation(screen, attempt, item, receipt) {
+    attempt.receipt = receipt;
     if (!this.isCurrent(screen)) {
       attempt.phase = 'settled';
       return;
@@ -678,20 +732,19 @@ export class WorkItems {
   async reconcileMutation(screen, attempt) {
     const { scope, input, operation } = attempt;
     const key = this.delegationKey(screen);
-    const oldReceipt = attempt.receipt;
     attempt.phase = 'checking';
     attempt.message = '';
-    const results = await Promise.allSettled([
-      this.command(scope, ['history', '--id', input.id, '--request-id', input.requestId]),
+    const [history, show] = await Promise.allSettled([
+      attempt.receipt ? null : this.command(scope, ['history', '--id', input.id, '--request-id', input.requestId]),
       this.request(scope, 'show', input.id)
     ]);
-    const lookup = results[0].status === 'fulfilled' ? results[0].value : null;
-    const current = results[1].status === 'fulfilled' ? results[1].value : null;
-    const receipt = lookup?.id === input.id && validReceipt(lookup.receipt, input.requestId) ? lookup.receipt : oldReceipt;
-    if (receipt) attempt.receipt = receipt;
+    const lookup = history.status === 'fulfilled' ? history.value : null;
+    const current = show.status === 'fulfilled' ? show.value : null;
+    const receipt = attempt.receipt ?? (lookup?.id === input.id && validReceipt(lookup.receipt, input) ? lookup.receipt : null);
     if (this.isCurrent(screen) && current?.lifecycle) Object.assign(screen, { item: current, staleRead: false });
-    if (receipt && current?.lifecycle?.revision >= receipt.revision) {
-      this.acceptMutation(screen, attempt, current, receipt);
+    if (receipt) {
+      if (current?.lifecycle?.revision >= receipt.revision) this.acceptMutation(screen, attempt, current, receipt);
+      else Object.assign(attempt, { receipt, phase: 'unresolved', message: 'Council saved this request. Refresh to load the current detail.' });
       return;
     }
     if (attempt.rejected || (lookup?.id === input.id && lookup.receipt === null && current?.lifecycle &&
@@ -706,9 +759,8 @@ export class WorkItems {
     }
     const absent = lookup?.id === input.id && lookup.receipt === null && matchingEvidence(operation, input, current);
     attempt.phase = absent ? 'missing' : 'unresolved';
-    attempt.message = receipt ? 'Council saved this request. Refresh to load the current detail.'
-      : absent ? 'No receipt was found. Refresh again or explicitly resend the same request.'
-        : 'Council could not verify the receipt and item. Refresh on the original project machine before resending.';
+    attempt.message = absent ? 'No receipt was found. Refresh again or explicitly resend the same request.'
+      : 'Council could not verify the receipt and item. Refresh on the original project machine before resending.';
   }
 
   async replayMutation(screen) {
@@ -762,6 +814,7 @@ export class WorkItems {
     const review = screen.archived ? screen.archived.review : screen.item?.lifecycle?.review;
     const formal = review?.formal;
     if (!formal || !['approved', 'rejected', 'provisional'].includes(formal.state) ||
+        !formalSession(formal.sessionId) || !positive(formal.round) ||
         !digest.test(formal.proposalSha256) || !digest.test(formal.manifestSha256)) return null;
     return this.sessionLink(screen, 'reviews', formal.sessionId);
   }

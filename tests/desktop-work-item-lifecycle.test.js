@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,9 @@ import { WorkItems, workItemActionEnabled, workItemScreenVisible } from '../herd
 // Use the committed e43ae3d wire examples. The child process below implements a
 // deterministic fixture protocol, with its own files in an isolated workspace.
 const examples = JSON.parse(readFileSync(new URL('../specs/002-work-item-review/contracts/examples.json', import.meta.url)));
+// Exact policy vectors from the shared implementation amendment. The spec PR
+// owns integration of that amendment into the published contract.
+const policyFixtures = JSON.parse(readFileSync(new URL('./fixtures/work-item-review-policy.json', import.meta.url)));
 const id = examples.legacy.item.id;
 const role = { id: 'verifier', role: 'Fixture verifier' };
 const actor = { actor: 'Release lead' };
@@ -25,6 +29,7 @@ const summarize = ({ result, criteria, lifecycle, ...item }) => {
 };
 const queue = (...items) => ({ success: true, items: items.map(summarize), errors: [] });
 const receipt = (requestId, revision, event = 'triaged', replay = false) => ({ requestId, event, revision, replay });
+const hashTuple = tuple => createHash('sha256').update(JSON.stringify(tuple)).digest('hex');
 const deferred = () => {
   let resolve;
   let reject;
@@ -137,6 +142,68 @@ test('a lost reply recovers the saved receipt and a current item through read-on
   assert.equal(calls.filter(call => call.argv?.[2] === 'triage').length, 1);
 });
 
+test('successful off-screen writes retain a scoped receipt and require only Show on return', async t => {
+  const scopes = [
+    ['another project on the same machine', makeScope('D:\\Neighbor project', peer.engine.machine, peer.space)],
+    ['the same path on another machine', makeScope(peer.project, 'other-peer', 'other-space')]
+  ];
+  for (const [name, other] of scopes) await t.test(name, async () => {
+    const reply = deferred();
+    let input;
+    let committed = false;
+    let showCaughtUp = false;
+    const writes = [];
+    const { work, calls, focus } = harness((args, call) => {
+      if (verb(args) === 'close') {
+        input = submitted(args);
+        writes.push(call);
+        return reply.promise;
+      }
+      if (verb(args) === 'history') throw new Error('History temporarily unavailable');
+      if (committed && showCaughtUp && call.cwd === peer.project && call.on === peer.engine.machine) {
+        return wire(examples.closed, call.cwd);
+      }
+      return wire(examples.inReview, call.cwd);
+    });
+    focus(peer);
+    await work.restore(peer, id);
+    const original = work.current;
+    await work.startMutation(original, 'close');
+    const closing = work.confirmMutation(original, { ...actor, reason: 'Reviewed current criteria.', nextAction: 'Publish.' });
+    focus(other);
+    await work.restore(other, id);
+    const otherScreen = work.current;
+    const known = receipt(input.requestId, 5, 'closed');
+    committed = true;
+    reply.resolve(wire({ ...examples.closed, receipt: known }, peer.project));
+    await closing;
+    assert.equal(work.current, otherScreen);
+    assert.equal(otherScreen.item.lifecycle.revision, 4);
+    assert.equal(otherScreen.receipt, undefined);
+    assert.equal(work.mutation(otherScreen), undefined);
+    assert.equal(original.item.lifecycle.revision, 4);
+    assert.deepEqual(work.mutation(original)?.receipt, known);
+
+    focus(peer);
+    const startOfRecovery = calls.length;
+    await work.restore(peer, id);
+    assert.equal(work.current.item.lifecycle.revision, 4);
+    assert.deepEqual(work.mutation(work.current)?.receipt, known);
+    assert.equal(work.mutation(work.current)?.phase, 'unresolved');
+    await work.replayMutation(work.current);
+    showCaughtUp = true;
+    await work.refresh(work.current);
+    assert.equal(work.current.item.lifecycle.state, 'closed');
+    assert.deepEqual(work.current.receipt, known);
+    assert.equal(work.mutation(work.current), undefined);
+    assert.deepEqual(calls.slice(startOfRecovery).map(call => [call.argv.slice(1), call.cwd, call.on]), [
+      [['work-item', 'show', '--id', id], peer.project, peer.engine.machine],
+      [['work-item', 'show', '--id', id], peer.project, peer.engine.machine]
+    ]);
+    assert.deepEqual(writes.map(call => [call.cwd, call.on]), [[peer.project, peer.engine.machine]]);
+  });
+});
+
 test('an absent receipt permits only explicitly replaying the same v2 delegation argv', async () => {
   const sends = [];
   const { work } = harness((args, call) => {
@@ -217,6 +284,151 @@ test('formal rejection or provisional evidence cannot accept, and a verified for
   assert.deepEqual(calls.at(-1).argv.slice(1), ['work-item', 'show', '--id', id, '--review-id', 'review-4']);
   assert.equal(calls.at(-1).cwd, peer.project);
   assert.equal(work.sessionLink(work.current, 'reviews', '../another-project'), null);
+});
+
+function approvedFormal() {
+  const record = structuredClone(examples.formalRejected);
+  const lifecycle = record.item.lifecycle;
+  lifecycle.formalRequired = true;
+  lifecycle.reviewState = 'approved';
+  lifecycle.actions.close = true;
+  Object.assign(lifecycle.review.formal, { state: 'approved', verdict: 'validated' });
+  lifecycle.review.evidenceToken = hashTuple([lifecycle.review.snapshotSha256, 'approved', lifecycle.review.formal.manifestSha256]);
+  return record;
+}
+
+test('only current formal approval with a verified, coherent binding may enable or submit Close', async t => {
+  const invalidReferences = {
+    'all references absent': (_, review) => Object.assign(review.formal, {
+      sessionId: null, round: null, proposalSha256: null, manifestSha256: null
+    }),
+    'session path is unsafe': (_, review) => { review.formal.sessionId = '../review'; },
+    'session ID is not canonical': (_, review) => { review.formal.sessionId = 'con-review'; },
+    'round is missing': (_, review) => { review.formal.round = null; },
+    'proposal digest is malformed': (_, review) => { review.formal.proposalSha256 = 'not-a-digest'; },
+    'manifest changed without a new evidence token': (_, review) => { review.formal.manifestSha256 = 'f'.repeat(64); },
+    'approved projection contradicts the verdict': (_, review) => { review.formal.verdict = 'rejected'; },
+    'lifecycle projection contradicts approval': item => { item.lifecycle.reviewState = 'provisional'; },
+    'review is from a different cycle': (_, review) => { review.cycle++; },
+    'capture is unverified': (_, review) => { review.capture.verified = false; },
+    'the current attempt is different': item => { item.job.sessionId = 'another-attempt'; },
+    'snapshot does not bind the frozen definition': (_, review) => {
+      review.snapshotSha256 = 'a'.repeat(64);
+      review.evidenceToken = hashTuple([review.snapshotSha256, 'approved', review.formal.manifestSha256]);
+    }
+  };
+  for (const [name, damage] of Object.entries(invalidReferences)) await t.test(name, async () => {
+    const damaged = approvedFormal();
+    damage(damaged.item, damaged.item.lifecycle.review);
+    let projection = approvedFormal();
+    const { work, calls } = harness((_args, call) => wire(projection, call.cwd));
+    const targetId = damaged.item.id;
+    await work.restore(local, targetId);
+    const screen = work.current;
+    await work.startMutation(screen, 'close');
+    assert.equal(screen.form?.operation, 'close');
+    projection = damaged;
+    // Obsolete confirmations must not send after a newer projection arrives.
+    await work.refresh(screen);
+    await work.confirmMutation(screen, { ...actor, reason: 'Reviewed.', nextAction: 'Publish.' });
+    await work.restore(local, targetId);
+    assert.equal(workItemActionEnabled(work.current.item, 'close'), false);
+    await work.startMutation(work.current, 'close');
+    assert.equal(work.current.form, undefined);
+    assert.ok(calls.every(call => call.argv?.[2] === 'show'));
+  });
+
+  const approved = approvedFormal();
+  const submittedClose = [];
+  const { work } = harness((args, call) => {
+    if (verb(args) !== 'close') return wire(approved, call.cwd);
+    const input = submitted(args);
+    submittedClose.push(input);
+    const closed = structuredClone(approved);
+    Object.assign(closed.item.lifecycle, { state: 'closed', revision: 6 });
+    return wire({ ...closed, receipt: receipt(input.requestId, 6, 'closed') }, call.cwd);
+  });
+  await work.restore(local, approved.item.id);
+  await work.startMutation(work.current, 'close');
+  await work.confirmMutation(work.current, { ...actor, reason: 'Reviewed.', nextAction: 'Publish.' });
+  assert.equal(work.current.item.lifecycle.state, 'closed');
+  assert.equal(submittedClose.length, 1);
+  assert.equal(submittedClose[0].reviewId, approved.item.lifecycle.review.id);
+  assert.equal(submittedClose[0].evidenceToken, approved.item.lifecycle.review.evidenceToken);
+});
+
+function policyCase({ base, lifecycleOverride, omitLifecycleFields }) {
+  const projection = structuredClone(policyFixtures[base] ?? examples[base]);
+  Object.assign(projection.item.lifecycle, lifecycleOverride);
+  for (const field of omitLifecycleFields) delete projection.item.lifecycle[field];
+  return projection;
+}
+
+test('the shared policy fixtures resolve Start review using an explicit true, false or absent flag', async t => {
+  for (const fixture of policyFixtures.reviewPolicyCases) await t.test(fixture.name, async () => {
+    const projection = policyCase(fixture);
+    const { lifecycle } = projection.item;
+    const writes = [];
+    const { work, focus, calls } = harness((args, call) => {
+      if (verb(args) !== 'review start') return wire(projection, call.cwd);
+      const input = submitted(args);
+      writes.push(input);
+      const revision = input.ifRevision + 1;
+      const started = structuredClone(projection);
+      started.item.lifecycle.revision = revision;
+      return wire({ ...started, receipt: receipt(input.requestId, revision, 'review_started') }, call.cwd);
+    });
+    if (fixture.name === 'required-after-return-before-attach') {
+      assert.equal(lifecycle.cycle, 2);
+      assert.equal(lifecycle.decision.disposition, 'changes_requested');
+      assert.equal(lifecycle.decision.formal, null);
+    }
+    focus(peer);
+    await work.restore(peer, projection.item.id);
+    const screen = work.current;
+    await work.startMutation(screen, 'start');
+    assert.equal(screen.form.policyUnknown, lifecycle.formalRequired === undefined);
+    assert.deepEqual(screen.form.formalRequired ? ['formal'] : ['operator', 'formal'], fixture.allowedPolicies);
+    work.selectMutation(screen, 'roleId', 'verifier');
+    work.selectMutation(screen, 'policy', 'operator');
+    if (fixture.allowedPolicies.length === 1) {
+      assert.equal(screen.form.policy, 'formal');
+      screen.form.policy = 'operator';
+      await work.confirmMutation(screen, actor);
+      assert.match(screen.error, /requires formal review/);
+      assert.equal(writes.length, 0);
+      work.selectMutation(screen, 'policy', 'formal');
+    }
+    await work.confirmMutation(screen, actor);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].policy, fixture.allowedPolicies[0]);
+    assert.ok(calls.every(call => call.cwd === peer.project && call.on === peer.engine.machine));
+  });
+});
+
+test('an operator confirmation becomes stale if the current detail requires formal review or omits the requirement', async t => {
+  for (const value of [true, undefined]) await t.test(String(value), async () => {
+    let projection = policyCase(policyFixtures.reviewPolicyCases.find(fixture => fixture.name === 'explicitly-optional'));
+    const { work, calls } = harness((_args, call) => wire(projection, call.cwd));
+    await work.restore(local, id);
+    const screen = work.current;
+    await work.startMutation(screen, 'start');
+    work.selectMutation(screen, 'roleId', 'verifier');
+    const original = screen.form;
+    assert.equal(original.policy, 'operator');
+
+    projection = structuredClone(projection);
+    if (value === undefined) delete projection.item.lifecycle.formalRequired;
+    else projection.item.lifecycle.formalRequired = value;
+    await work.refresh(screen);
+    assert.equal(original.stale, true);
+    await work.confirmMutation(screen, actor);
+    assert.ok(calls.every(call => call.team || call.argv[2] === 'show'));
+
+    await work.startMutation(screen, 'start');
+    assert.notEqual(screen.form, original);
+    assert.equal(screen.form.policy, 'formal');
+  });
 });
 
 test('attach and return use the frozen review, never interpret a rejected formal verdict as closure, and retain the selected project', async () => {
@@ -405,8 +617,10 @@ test('ten-item Workspace fixture uses real Node processes, pages frozen evidence
   const sibling = join(qa, 'Adjacent project');
   mkdirSync(project);
   mkdirSync(sibling);
+  const item = structuredClone(examples.legacy.item);
+  item.lifecycle.formalRequired = false;
   const initial = {
-    item: examples.legacy.item,
+    item,
     other: Array.from({ length: 9 }, (_, index) => ({
       ...examples.closed.item, id: 'wi-neighbor-' + index, title: 'Fixture work item ' + index,
       roleId: index % 2 === 0 ? 'verifier' : 'other',
