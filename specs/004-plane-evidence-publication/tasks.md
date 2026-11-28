@@ -6,7 +6,7 @@ Task identifiers are stable. G1/G2 backend implementation is fixture-only until 
 
 - [ ] T001 Pin COU-8 baseline, fixture matrix and contract digests. Record relevant v1 capability reads.
 - [ ] T002 Write Plane/GitHub fixtures with known homonyms, strict provider shapes and safe allowlisted URL grammar. Exercise A01–A04.
-- [ ] T003 Implement additive local metadata projection, CLI show/open and MCP show with exact schemas and installed runtime packaging. Maintain offline and legacy compatibility.
+- [ ] T003 Implement additive local metadata projection, CLI show/open and MCP show with exact schemas, top-level attested `installationId` and installed runtime packaging. Maintain offline and legacy compatibility.
 - [ ] T004 Implement scope/identity and active-item validation, staged link CAS and same-scope replay; use injected trusted operator context in fixture tests. Verify separate project/item/installation and actual persisted files.
 - [ ] T005 Define and demonstrate fixture-side publisher admission and capability-disabled default, including tests that ordinary tools and the installed default have no write path. Deliver G1 independently. Stop and request design review before adding a privileged installer/launcher.
 
@@ -21,7 +21,7 @@ Task identifiers are stable. G1/G2 backend implementation is fixture-only until 
 ## Frontend · Workspace
 
 - [ ] T011 Add metadata-only link and publish console handoffs using ordinary CLI. Distinguish unavailable, current and cached state; no credential or approval controls in Workspace itself.
-- [ ] T012 Render scoped linked target and receipt/uncertainty, explicit original-operation recovery, focus or machine changes and delayed/out-of-order responses. Preserve local work/prior receipts.
+- [ ] T012 Render scoped linked target and receipt/uncertainty, explicit original-operation recovery, focus or machine changes and delayed/out-of-order responses. Preserve local work/prior receipts. Gate Plane references on matching attested UUID and fresh generation after a replacement, including delayed and missing-identity replies.
 - [ ] T013 Add accessibility/keyboard and permission/offline fixture evidence. Verify fixed handoff and disabled defaults. Deliver fixture evidence separately from native acceptance.
 
 ## G3 / G4 · Combined acceptance

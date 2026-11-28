@@ -329,5 +329,228 @@
         "links": 1
       }
     }
-  ]
+  ],
+  "readerIdentityVectors": {
+    "sameLocalSelection": {
+      "machine": "fixture-host",
+      "itemId": "wi-example-work-1",
+      "project": "C:/council-fixtures/shared-project"
+    },
+    "engineEnvelopes": {
+      "showA": {
+        "success": true,
+        "installationId": "c0a965ae-f134-4ded-8a66-ab60c366695f",
+        "plane": {
+          "availability": "operator_available",
+          "freshness": "current",
+          "link": {
+            "linkRevision": 1,
+            "instanceId": "9ae0150d-c566-455e-b991-fac117de3586",
+            "instanceLabel": "Planning",
+            "workspaceSlug": "example",
+            "workspaceId": "1ed988c2-4fd6-4ade-9720-43b5df90a526",
+            "projectKey": "COU",
+            "projectId": "bab52525-0551-4a70-bc63-0e1cf62773b6",
+            "itemIdentifier": "COU-12",
+            "itemId": "93518572-91eb-4f28-bfb4-54016953885a"
+          },
+          "operation": {
+            "operationId": "000000000000000000000000000000a1",
+            "itemRevision": 4,
+            "linkRevision": 1,
+            "status": "in_review",
+            "evidenceUrl": "https://github.com/example/council/pull/31",
+            "visibility": "INTERNAL",
+            "state": "published",
+            "reason": null,
+            "receipt": {
+              "commentId": "e709703f-50b5-4f0c-80a1-d5a78d62574a",
+              "operationId": "000000000000000000000000000000a1",
+              "verifiedAt": "2026-11-28T12:00:00.000Z",
+              "source": "reconciliation"
+            }
+          }
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "openA": {
+        "success": true,
+        "installationId": "c0a965ae-f134-4ded-8a66-ab60c366695f",
+        "planeHandoff": {
+          "disposition": "manual_operator_session",
+          "localRef": "fixture-scope-item-a",
+          "operationId": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "showB": {
+        "success": true,
+        "installationId": "1b6eba33-7959-4d8b-9387-576ac77ea410",
+        "plane": {
+          "availability": "operator_available",
+          "freshness": "current",
+          "link": null,
+          "operation": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "openB": {
+        "success": true,
+        "installationId": "1b6eba33-7959-4d8b-9387-576ac77ea410",
+        "planeHandoff": {
+          "disposition": "manual_operator_session",
+          "localRef": "fixture-scope-item-b",
+          "operationId": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "showNull": {
+        "success": true,
+        "installationId": null,
+        "plane": {
+          "availability": "disabled",
+          "freshness": "unavailable",
+          "link": null,
+          "operation": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "openNull": {
+        "success": true,
+        "installationId": null,
+        "planeHandoff": {
+          "disposition": "unavailable",
+          "localRef": null,
+          "operationId": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "showLegacy": {
+        "success": true,
+        "plane": {
+          "availability": "disabled",
+          "freshness": "unavailable",
+          "link": null,
+          "operation": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "openLegacy": {
+        "success": true,
+        "planeHandoff": {
+          "disposition": "unavailable",
+          "localRef": null,
+          "operationId": null
+        },
+        "project": "C:/council-fixtures/shared-project"
+      },
+      "showMalformed": {
+        "success": true,
+        "installationId": "unattested",
+        "plane": {
+          "availability": "operator_available",
+          "freshness": "current",
+          "link": {
+            "linkRevision": 1,
+            "instanceId": "9ae0150d-c566-455e-b991-fac117de3586",
+            "instanceLabel": "Planning",
+            "workspaceSlug": "example",
+            "workspaceId": "1ed988c2-4fd6-4ade-9720-43b5df90a526",
+            "projectKey": "COU",
+            "projectId": "bab52525-0551-4a70-bc63-0e1cf62773b6",
+            "itemIdentifier": "COU-12",
+            "itemId": "93518572-91eb-4f28-bfb4-54016953885a"
+          },
+          "operation": {
+            "operationId": "000000000000000000000000000000a1",
+            "itemRevision": 4,
+            "linkRevision": 1,
+            "status": "in_review",
+            "evidenceUrl": "https://github.com/example/council/pull/31",
+            "visibility": "INTERNAL",
+            "state": "published",
+            "reason": null,
+            "receipt": {
+              "commentId": "e709703f-50b5-4f0c-80a1-d5a78d62574a",
+              "operationId": "000000000000000000000000000000a1",
+              "verifiedAt": "2026-11-28T12:00:00.000Z",
+              "source": "reconciliation"
+            }
+          }
+        },
+        "project": "C:/council-fixtures/shared-project"
+      }
+    },
+    "cases": [
+      {
+        "case": "same verified installation",
+        "replies": [
+          "showA",
+          "openA"
+        ],
+        "interactiveInstallation": "c0a965ae-f134-4ded-8a66-ab60c366695f",
+        "eligibleReceiptFrom": "c0a965ae-f134-4ded-8a66-ab60c366695f",
+        "forcedFreshShow": false
+      },
+      {
+        "case": "replacement and obsolete response at identical local selection",
+        "replies": [
+          "showA",
+          "showB",
+          "late openA",
+          "late showA",
+          "fresh showB",
+          "openB"
+        ],
+        "interactiveInstallation": "1b6eba33-7959-4d8b-9387-576ac77ea410",
+        "eligibleReceiptFrom": null,
+        "forcedFreshShow": true
+      },
+      {
+        "case": "handoff reveals replacement before a refreshed show",
+        "replies": [
+          "showA",
+          "openB",
+          "late openA",
+          "fresh showB",
+          "openB"
+        ],
+        "interactiveInstallation": "1b6eba33-7959-4d8b-9387-576ac77ea410",
+        "eligibleReceiptFrom": null,
+        "forcedFreshShow": true
+      },
+      {
+        "case": "null reader identity",
+        "replies": [
+          "showA",
+          "showNull",
+          "openNull"
+        ],
+        "interactiveInstallation": null,
+        "eligibleReceiptFrom": null,
+        "forcedFreshShow": false
+      },
+      {
+        "case": "legacy engine omits identity",
+        "replies": [
+          "showA",
+          "showLegacy",
+          "openLegacy"
+        ],
+        "interactiveInstallation": null,
+        "eligibleReceiptFrom": null,
+        "forcedFreshShow": false
+      },
+      {
+        "case": "malformed identity cannot bind otherwise valid content",
+        "replies": [
+          "showA",
+          "showMalformed"
+        ],
+        "interactiveInstallation": null,
+        "eligibleReceiptFrom": null,
+        "forcedFreshShow": false
+      }
+    ]
+  }
 }
