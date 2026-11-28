@@ -102,6 +102,33 @@ def emit_queue(frame, send):
     send(window_point(frame, point))
     return True
 
+def handoff_plan(frame):
+    lines, rgb = frame['lines'], frame['rgb']
+    if len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:
+        return None
+    if not all((in_region(lines, 'Linux native checkpoint', (60, 295, 320, 330)),
+                in_region(lines, 'Open delegation', (670, 320, 810, 370)),
+                in_region(lines, 'Work item ID', (60, 510, 200, 550)),
+                in_region(lines, 'verifier', (300, 540, 410, 575)),
+                in_region(lines, 'Result ready', (300, 635, 420, 680)))):
+        return None
+    candidates = [(a,b,c,d) for a,b,c,d in boxes(lines, 'saved')
+                  if 390 <= (a+c)//2 <= 475 and 320 <= (b+d)//2 <= 365]
+    if len(candidates) != 1:
+        return None
+    # The left button is white; the adjacent Copy button is outside this region.
+    if not all(min(pixel(rgb, x, y)) >= 250 for x,y in ((357,349),(495,349))):
+        return None
+    a,b,c,d = candidates[0]
+    return ((a+c)//2, (b+d)//2)
+
+def emit_handoff(frame, send):
+    point = handoff_plan(frame)
+    if point is None:
+        return False
+    send(window_point(frame, point))
+    return True
+
 def primary_adjacent(lines, rgb, anchor, side='left'):
     labels = boxes(lines, anchor)
     if len(labels) != 1 or len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:

@@ -53,7 +53,7 @@ def export_image(raw, name):
 def export_tokens(snapshot, name):
     allowed = set(('council workspace project work items item linux native fixture verifier no new title acceptance criteria '
                    'refresh roles save delegate confirm delegation actor name operator saved handoff back open '
-                   'next action heading checkpoint loading in progress request responsible role cancel').split())
+                   'next action heading checkpoint loading in progress request responsible role cancel read').split())
     frame = snapshot[2]
     tokens = []
     for _text, line in snapshot[1]:
@@ -68,7 +68,7 @@ def export_tokens(snapshot, name):
     with open(os.path.join(evidence, 'ui-' + name + '-ocr.json'), 'w', encoding='utf-8') as handle:
         json.dump(diagnostic, handle)
 
-def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=False):
+def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=False, handoff_guard=False):
     global stage
     stage = name
     end = time.monotonic() + seconds
@@ -80,7 +80,8 @@ def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=Fa
             if (all(text_has(lines, x) for x in required)
                 and (not alternatives or any(text_has(lines, x) for x in alternatives))
                 and not any(text_has(lines, x) for x in absent)
-                and (not queue_guard or vision.queue_plan(last[2]) is not None)):
+                and (not queue_guard or vision.queue_plan(last[2]) is not None)
+                and (not handoff_guard or vision.handoff_plan(last[2]) is not None)):
                 export_image(last[0], name)
                 mark(name)
                 return last
@@ -145,6 +146,18 @@ def click_queue(snapshot):
         click_xy(current, *point)
     if not vision.emit_queue(frame, send):
         raise RuntimeError('current frame no longer matches the calibrated queue and button geometry')
+
+def click_handoff(snapshot):
+    focus_window(snapshot)
+    current = capture(time.monotonic() + 15)
+    focus_window(current)
+    frame = current[2]
+    def send(point):
+        print('UI_HANDOFF_POINT=' + json.dumps({'origin': [frame['left'], frame['top']],
+                                              'local': list(vision.handoff_plan(frame)), 'window': list(point)}), flush=True)
+        click_xy(current, *point)
+    if not vision.emit_handoff(frame, send):
+        raise RuntimeError('current item detail does not match the calibrated handoff control')
 
 def click_primary(snapshot, anchor, required, role_before=None):
     focus_window(snapshot)
@@ -232,13 +245,13 @@ try:
             raise RuntimeError('saved item is not ready with a linked job')
         snap = initial_workspace()
         click(snap, 'Work items')
-        snap = ready('reopened-list-or-detail', [title], alternatives=['Open work item', 'Read saved handoff'])
+        snap = ready('reopened-list-or-detail', [title], alternatives=['Open work item', 'Open delegation'])
         if text_has(snap[1], 'Open work item'):
             click(snap, 'Open work item')
-            snap = ready('reopened-specific-item', [title, 'Read saved handoff', 'Open delegation'])
+            snap = ready('reopened-specific-item', [title, 'Open delegation'], handoff_guard=True)
         else:
-            snap = ready('reopened-specific-item', [title, 'Read saved handoff', 'Open delegation'])
-        click(snap, 'Read saved handoff')
+            snap = ready('reopened-specific-item', [title, 'Open delegation'], handoff_guard=True)
+        click_handoff(snap)
         snap = ready('reopened-handoff', ['Saved handoff', 'Linux Native Checkpoint', 'Next action'],
                      alternatives=['compare the heading', 'saved criteria'])
         click(snap, 'Back to work item')
