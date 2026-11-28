@@ -22,6 +22,23 @@ try {
   const create = spawnSync(process.execPath, [join(root, 'bin/council.js'), 'work-item', 'create', '--input-json', JSON.stringify(input), '--project', project], { encoding: 'utf8' });
   assert.equal(create.status, 0, create.stderr);
   assert.equal(JSON.parse(create.stdout).item.id, input.id);
+  const triageInput = { id: input.id, ifRevision: 1, requestId: 'smoke-triage', actor: 'Smoke', patch: { priority: 'high' } };
+  const triage = spawnSync(process.execPath, [join(root, 'bin/council.js'), 'work-item', 'triage', '--input-json', JSON.stringify(triageInput), '--project', project], { encoding: 'utf8' });
+  assert.equal(triage.status, 0, triage.stderr);
+  assert.equal(JSON.parse(triage.stdout).item.lifecycle.priority, 'high');
+  for (const file of ['herdr/mods/council/runtime/work-item-lifecycle-store.mjs', 'lib/work-item-lifecycle.js', 'lib/work-item-review.js', 'herdr/mods/council/work-item-view.js', 'herdr/mods/council/work-item-actions.js', 'herdr/mods/council/icons/LICENSE.ejupilabs-icons.txt']) {
+    assert.ok(existsSync(join(root, file)), `missing packaged file: ${file}`);
+  }
+  const appHome = join(temp, 'isolated app');
+  const installed = spawnSync(process.execPath, [join(root, 'herdr/install.js'), '--app-home', appHome], { encoding: 'utf8' });
+  assert.equal(installed.status, 0, installed.stderr);
+  const mod = join(appHome, 'mods/council');
+  for (const file of ['icons/LICENSE.ejupilabs-icons.txt', 'work-item-view.js', 'work-item-actions.js', 'runtime/work-item-lifecycle-store.mjs', 'runtime/work-item-store.mjs', 'engine/herdr/mods/council/runtime/work-item-lifecycle-store.mjs']) {
+    assert.ok(existsSync(join(mod, file)), `missing installed file: ${file}`);
+  }
+  const installedCli = spawnSync(process.execPath, [join(mod, 'engine/bin/council.js'), 'work-item', 'history', '--id', input.id, '--project', project], { encoding: 'utf8' });
+  assert.equal(installedCli.status, 0, installedCli.stderr);
+  assert.equal(JSON.parse(installedCli.stdout).events[0].type, 'triaged');
   const read = file => JSON.parse(readFileSync(join(root, file), 'utf8'));
   const { version } = read('package.json');
   const codex = read('.codex-plugin/plugin.json');
@@ -47,7 +64,8 @@ try {
     call(5, 'council_work_item_list', {}),
     call(6, 'council_work_item_list', { project }),
     call(7, 'council_work_item_show', { project, id: 'wi-package' }),
-    call(8, 'council_work_item_delegate', { project, id: '../invalid' })
+    call(8, 'council_work_item_delegate', { project, id: '../invalid' }),
+    call(9, 'council_work_item_history', { project, id: 'wi-package', requestId: 'smoke-triage' })
   ];
   for (const [host, command] of wrappers) {
     assert.equal(command.command, 'node', host);
@@ -71,7 +89,8 @@ try {
     for (const name of ['council_alignment', 'council_start', 'council_session_status', 'council_result',
       'council_schedules', 'council_poll_create', 'council_poll_read', 'council_poll_vote', 'council_poll_manage',
       'council_debate_create', 'council_debate_read', 'council_debate_reply', 'council_debate_close',
-      'council_work_item_create', 'council_work_item_list', 'council_work_item_show', 'council_work_item_delegate']) {
+      'council_work_item_create', 'council_work_item_list', 'council_work_item_show', 'council_work_item_delegate',
+      'council_work_item_triage', 'council_work_item_review', 'council_work_item_close', 'council_work_item_reopen', 'council_work_item_history']) {
       assert.ok(tools.has(name), `${host}: ${name} missing`);
     }
     assert.equal(responses.get(3).isError, true, host);
@@ -83,6 +102,7 @@ try {
     assert.equal(JSON.parse(responses.get(7).content[0].text).item.id, 'wi-package', host);
     assert.equal(responses.get(8).isError, true, host);
     assert.equal(JSON.parse(responses.get(8).content[0].text).error.code, 'invalid_input', host);
+    assert.equal(JSON.parse(responses.get(9).content[0].text).receipt.event, 'triaged', host);
     assert.equal(existsSync(join(root, '.agent_workspace')), false, host);
     console.log(`${host}: packaged Council ${version} handshake and project guard passed`);
   }
