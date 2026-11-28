@@ -71,7 +71,7 @@ test('a Windows batch launcher receives the complete initial notice through Herd
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   writeFileSync(join(cwd, 'record.cjs'), "require('node:fs').writeFileSync('argv.json', JSON.stringify(process.argv.slice(2)))");
   const launcher = join(cwd, 'record.cmd');
-  writeFileSync(launcher, `@echo off\r\n@"${process.execPath.replace(/%/g, '%%')}" "%~dp0record.cjs" %*\r\n`);
+  writeFileSync(launcher, `@echo off\r\n@"%SystemRoot%\\System32\\chcp.com" 65001 >nul || exit /b 1\r\n@"${process.execPath.replace(/%/g, '%%')}" "%~dp0record.cjs" %*\r\n`);
   const client = new HerdrClient({ cwd });
   const exec = client.exec.bind(client);
   let launchArgs;
