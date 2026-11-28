@@ -7,6 +7,7 @@ public static class Cou7UiaWait {
     [DllImport("kernel32.dll")] static extern bool SetEvent(IntPtr handle);
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    public static bool AcceptAfterWait(uint waitResult, bool present) { return waitResult != 0xffffffff && present; }
     static bool Has(AutomationElement root, string name, bool enabled) {
         try {
             var elements = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, name));
@@ -32,7 +33,9 @@ public static class Cou7UiaWait {
             Automation.AddStructureChangedEventHandler(root, TreeScope.Subtree, structure); s = true;
             Automation.AddAutomationPropertyChangedEventHandler(root, TreeScope.Subtree, property, AutomationElement.NameProperty, AutomationElement.IsEnabledProperty); p = true;
             if (Has(root,name,enabled)) SetEvent(signal);
-            return WaitForSingleObject(signal, timeoutMilliseconds) == 0 && Has(root,name,enabled);
+            uint waited = WaitForSingleObject(signal, timeoutMilliseconds);
+            // Some providers expose the new tree without raising UIA events.
+            return AcceptAfterWait(waited, Has(root,name,enabled));
         } finally {
             if (p) Automation.RemoveAutomationPropertyChangedEventHandler(root, property);
             if (s) Automation.RemoveStructureChangedEventHandler(root, structure);

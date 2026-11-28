@@ -91,7 +91,15 @@ try {
   Expand-Archive -LiteralPath $coreZip -DestinationPath $bin
   $hc = Join-Path $bin 'hc.exe'
   Copy-Item -LiteralPath (Join-Path $bin 'herdr-core.exe') -Destination $hc
+  # Windows refreshes PATH for child terminals. Keep the same verified Core
+  # executable in the synthetic working directory for native command lookup.
+  Copy-Item -LiteralPath $hc -Destination (Join-Path $uiProject 'hc.exe')
+  $clientHash = (Get-FileHash -Algorithm SHA256 $hc).Hash.ToLowerInvariant()
+  $projectClientHash = (Get-FileHash -Algorithm SHA256 (Join-Path $uiProject 'hc.exe')).Hash.ToLowerInvariant()
+  Must ($clientHash -eq $projectClientHash) 'fixture_core_client_mismatch'
+  Fact 'fixture_core_resolution' @{ method='project_local_hc_executable'; binarySha256=$clientHash; copiesMatch=$true; registryChanged=$false }
   $app = Join-Path $root 'herdr-app/herdr-app.exe'
+  $env:COU7_APP = $app
   $desktopVersion = (& $app --version | Out-String).Trim(); $coreVersion = (& $hc --version | Out-String).Trim()
   Fact 'versions' @{ desktop = $desktopVersion; core = $coreVersion; desktopPeMachine = ('0x{0:x4}' -f (PeMachine $app)); corePeMachine = ('0x{0:x4}' -f (PeMachine $hc)) }
   Must ($desktopVersion -match '0\.1\.18' -and $coreVersion -match '0\.1\.22' -and (PeMachine $app) -eq 0x8664 -and (PeMachine $hc) -eq 0x8664) 'binary_version_or_architecture_mismatch'

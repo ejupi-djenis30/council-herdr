@@ -6,6 +6,7 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 $refs = @([System.Windows.Automation.AutomationElement].Assembly.Location, [System.Windows.Automation.TreeScope].Assembly.Location, [System.Runtime.InteropServices.DllImportAttribute].Assembly.Location)
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/uia-wait.cs') -ReferencedAssemblies $refs
+Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/pixel-check.cs')
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -40,9 +41,27 @@ function One([string]$name) {
   if ($nodes.Count -ne 1) { throw "uia_control_count_$($nodes.Count)" }
   return $nodes[0]
 }
+function FrameBarrier {
+  $fileName='frame-' + [Guid]::NewGuid().ToString('N') + '.png'
+  $path=Join-Path $env:COU7_ROOT $fileName
+  $watcher=[IO.FileSystemWatcher]::new($env:COU7_ROOT,$fileName)
+  $id='cou7-frame-' + [Guid]::NewGuid().ToString('N')
+  $subscription=Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier $id
+  try {
+    $watcher.EnableRaisingEvents=$true
+    & $env:COU7_APP 'shot' $path 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'desktop_frame_request_failed' }
+    if (-not (Test-Path -LiteralPath $path)) { $event=Wait-Event -SourceIdentifier $id -Timeout 15 }
+    if (-not (Test-Path -LiteralPath $path)) { throw 'desktop_frame_not_observed' }
+  } finally {
+    $watcher.EnableRaisingEvents=$false; Unregister-Event -SourceIdentifier $id -ErrorAction SilentlyContinue; $watcher.Dispose()
+    if ($event) { Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue }
+  }
+}
 function Await([string]$name) {
   $script:stage = $name
-  if (-not [Cou7UiaWait]::WaitName($hwnd.ToInt64(),$name,35000)) { throw 'uia_expected_control_absent' }
+  FrameBarrier
+  if (-not [Cou7UiaWait]::WaitName($hwnd.ToInt64(),$name,12000)) { throw 'uia_expected_control_absent' }
 }
 function Click($element) {
   CheckWindow
@@ -61,10 +80,40 @@ function Edits {
 function SetEdit($element,[string]$text) {
   CheckWindow
   $pattern=$null
-  if (-not $element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { throw 'uia_edit_value_pattern_unavailable' }
-  $pattern.SetValue($text)
-  $actual=$pattern.Current.Value -replace "`r`n","`n"
-  if ($actual -ne ($text -replace "`r`n","`n")) { throw 'uia_edit_readback_mismatch' }
+  if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { $pattern.SetValue($text) }
+  else {
+    if ($text -notmatch '^[a-zA-Z0-9.\s]+$') { throw 'unsafe_fixture_text' }
+    Click $element
+    [Windows.Forms.SendKeys]::SendWait('^a')
+    [Windows.Forms.SendKeys]::SendWait(($text -replace "`r`n","`n").Replace("`n",'{ENTER}'))
+  }
+  FrameBarrier
+  AssertEdit $element $text
+}
+function AssertEdit($element,[string]$expected) {
+  $pattern=$null
+  if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { $actual=$pattern.Current.Value }
+  else {
+    [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
+    Click $element
+    [Windows.Forms.SendKeys]::SendWait('^a'); [Windows.Forms.SendKeys]::SendWait('^c')
+    FrameBarrier
+    $actual=[Windows.Forms.Clipboard]::GetText()
+  }
+  if (($actual -replace "`r`n","`n") -ne ($expected -replace "`r`n","`n")) { throw 'uia_edit_readback_mismatch' }
+}
+function PrimaryState($element) {
+  CheckWindow
+  $r=$element.Current.BoundingRectangle
+  if ($r.IsEmpty -or $r.Width -lt 20 -or $r.Height -lt 10) { throw 'primary_button_geometry_invalid' }
+  $bmp=[Drawing.Bitmap]::new(2,1); $graphics=[Drawing.Graphics]::FromImage($bmp)
+  try {
+    $y=[int]($r.Top+[Math]::Floor($r.Height/2))
+    $graphics.CopyFromScreen([int]($r.Left+5),$y,0,0,[Drawing.Size]::new(1,1))
+    $graphics.CopyFromScreen([int]($r.Right-6),$y,1,0,[Drawing.Size]::new(1,1))
+    $a=$bmp.GetPixel(0,0); $b=$bmp.GetPixel(1,0)
+    return [Cou7PixelCheck]::Primary($a.R,$a.G,$a.B,$b.R,$b.G,$b.B)
+  } finally { $graphics.Dispose(); $bmp.Dispose() }
 }
 function Shot([string]$name) {
   try {
@@ -128,18 +177,19 @@ try {
     Click (One 'New work item')
     Await 'Save work item'; Await 'Refresh roles'
     $edits=@(Edits); if ($edits.Count -ne 2) { throw 'uia_create_edit_count_mismatch' }
-    $save=One 'Save work item'; if ($save.Current.IsEnabled) { throw 'uia_save_enabled_before_fields_and_role' }
+    $save=One 'Save work item'; if ((PrimaryState $save) -ne 'disabled_or_light') { throw 'save_initial_visual_state_unexpected' }
     SetEdit $edits[0] $title
     SetEdit $edits[1] ($criteria -join "`n")
-    $save=One 'Save work item'; if ($save.Current.IsEnabled) { throw 'uia_save_enabled_before_role' }
+    $save=One 'Save work item'; if ((PrimaryState $save) -ne 'disabled_or_light') { throw 'save_enabled_before_role' }
     $role=One 'Windows fixture · verifier'; Click $role
-    if (-not [Cou7UiaWait]::WaitEnabled($hwnd.ToInt64(),'Save work item',15000)) { throw 'uia_save_not_enabled_after_role' }
-    $save=One 'Save work item'; if (-not $save.Current.IsEnabled) { throw 'uia_save_not_enabled_after_role' }
+    FrameBarrier
+    $save=One 'Save work item'; if ((PrimaryState $save) -ne 'enabled') { throw 'save_not_visually_enabled_after_role' }
     # Read the controls again immediately before the sole save gesture.
     $edits=@(Edits); if ($edits.Count -ne 2) { throw 'uia_create_edit_count_mismatch' }
-    $p0=$null; $p1=$null
-    if (-not $edits[0].TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$p0) -or -not $edits[1].TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$p1)) { throw 'uia_edit_value_pattern_unavailable' }
-    if ($p0.Current.Value -ne $title -or ($p1.Current.Value -replace "`r`n","`n") -ne ($criteria -join "`n")) { throw 'uia_create_value_readback_mismatch' }
+    AssertEdit $edits[0] $title
+    AssertEdit $edits[1] ($criteria -join "`n")
+    FrameBarrier; $save=One 'Save work item'; if ((PrimaryState $save) -ne 'enabled') { throw 'save_not_visually_enabled_before_gesture' }
+    Record 'ui_role_selection' @{ before='disabled_or_light'; after='enabled'; evidence='native_pixel_transition_and_field_readback' }
     Shot 'form'; Mark 'form_values_and_role'
     Attempt 'save'; Click $save
     Await 'Delegate'; Shot 'created'
@@ -152,8 +202,8 @@ try {
     Click (One 'Delegate'); Await 'Confirm delegation'
     $edits=@(Edits); if ($edits.Count -ne 1) { throw 'uia_delegate_edit_count_mismatch' }
     SetEdit $edits[0] 'Operator'
-    if (-not [Cou7UiaWait]::WaitEnabled($hwnd.ToInt64(),'Confirm delegation',15000)) { throw 'uia_confirm_not_enabled' }
-    $confirm=One 'Confirm delegation'; if (-not $confirm.Current.IsEnabled) { throw 'uia_confirm_not_enabled' }
+    FrameBarrier
+    $confirm=One 'Confirm delegation'; if ((PrimaryState $confirm) -ne 'enabled') { throw 'confirm_not_visually_enabled' }
     Shot 'delegate-form'; Mark 'delegate_form'
     Attempt 'delegate'; Click $confirm
     Await 'Open delegation'; Shot 'delegated'; Mark 'delegated'
