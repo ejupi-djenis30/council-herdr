@@ -17,11 +17,23 @@ unset HC_SOCKET HC_TERMINAL_ID NODE_OPTIONS
 facts="$evidence/facts.txt"
 say() { printf '%s\n' "$*" | tee -a "$facts"; }
 fail() { say "BLOCKED: $*"; exit 1; }
-trap 'if ! grep -q "\"overall_gate\":" "$facts" 2>/dev/null; then printf "%s\n" "{\"overall_gate\":\"blocked_by_setup_or_harness\"}" >>"$facts"; fi' EXIT
+finalize() {
+  if ! grep -q '"overall_gate":' "$facts" 2>/dev/null; then printf '%s\n' '{"overall_gate":"blocked_by_setup_or_harness"}' >>"$facts"; fi
+  local verdict milestone
+  verdict=$(node -e 'const f=require("fs").readFileSync(process.argv[1],"utf8").split("\n");for(const l of f){try{const x=JSON.parse(l);if(x.overall_gate){console.log(x.overall_gate);break}}catch{}}' "$facts" 2>/dev/null)
+  milestone=$(grep '^UI_REACHED=' "$facts" | tail -1 | cut -d= -f2- || true)
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    { printf '## COU-7 Linux native gate\n\n'; printf '**UI gate: %s**\n\n' "${verdict:-unknown}";
+      printf 'Last observed UI milestone: %s. The technical job exit and CLI fallback are separate from the UI gate.\n' "${milestone:-none}"; } >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
+trap finalize EXIT
+cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/calibration.json" "$evidence/offline-calibration.json"
 say "harness_sha=$GITHUB_SHA"
 say "council_sha=$(git -C "$GITHUB_WORKSPACE/council" rev-parse HEAD)"
 say "council_tree=$(git -C "$GITHUB_WORKSPACE/council" rev-parse 'HEAD^{tree}')"
 say "runner_image=${ImageOS:-unknown} ${ImageVersion:-unknown} arch=$(uname -m) node=$(node --version)"
+say "tesseract_version=$(tesseract --version 2>/dev/null | head -1)"
 say "same_image_version_as_first=$([[ ${ImageVersion:-} == 20261122.23.1 ]] && echo yes || echo no)"
 [[ "$(git -C "$GITHUB_WORKSPACE/council" rev-parse HEAD)" == e8974841558641faaa9aecab7386fa7001928137 ]] || fail 'Council revision mismatch'
 [[ "$(git -C "$GITHUB_WORKSPACE/council" rev-parse 'HEAD^{tree}')" == d4bc8cc3a97555686c4c16f07e9a07486216b942 ]] || fail 'Council tree mismatch'

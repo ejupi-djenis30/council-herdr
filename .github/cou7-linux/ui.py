@@ -1,10 +1,10 @@
-import csv
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+import vision
 
 evidence = os.environ['COU7_EVIDENCE']
 raw_shots = os.environ['COU7_RAW_SHOTS']
@@ -29,7 +29,7 @@ def mark(name):
     print('UI_REACHED=' + name, flush=True)
 
 def normalize(value):
-    return re.sub(r'[^a-z0-9]+', ' ', value.lower()).strip()
+    return vision.normalize(value)
 
 def capture(deadline):
     path = os.path.join(raw_shots, 'ui-current.png')
@@ -40,15 +40,23 @@ def capture(deadline):
     left = deadline - time.monotonic()
     if left <= 0:
         raise TimeoutError('OCR deadline')
-    rows = list(csv.DictReader(run('tesseract', path, 'stdout', '--psm', '11', 'tsv', timeout=min(10, left)).stdout.splitlines(), delimiter='\t'))
-    grouped = {}
-    for row in rows:
-        word = normalize(row.get('text', ''))
-        if word:
-            key = tuple(row[k] for k in ('page_num', 'block_num', 'par_num', 'line_num'))
-            grouped.setdefault(key, []).append((word, row))
-    lines = [(normalize(' '.join(word for word, _ in line)), line) for line in grouped.values()]
-    return path, lines
+    lines = vision.parse_tsv(run('tesseract', path, 'stdout', '--psm', '11', 'tsv', timeout=min(10, left)).stdout)
+    left_time = deadline - time.monotonic()
+    if left_time <= 0:
+        raise TimeoutError('image geometry deadline')
+    width, height = map(int, run('identify', '-format', '%w %h', path, timeout=min(8, left_time)).stdout.split())
+    if width < vision.CROP_WIDTH or height < vision.CROP_HEIGHT:
+        raise RuntimeError('window frame is smaller than the calibrated crop')
+    left_time = deadline - time.monotonic()
+    if left_time <= 0:
+        raise TimeoutError('image sampling deadline')
+    rgb = subprocess.run(['convert', path, '-gravity', 'center', '-crop', '1000x800+0+0', '+repage',
+                          '-colorspace', 'sRGB', '-depth', '8', 'RGB:-'], capture_output=True, check=True,
+                         timeout=min(10, left_time)).stdout
+    if len(rgb) != vision.CROP_WIDTH * vision.CROP_HEIGHT * 3:
+        raise RuntimeError('unexpected calibrated crop size')
+    frame = {'width': width, 'height': height, 'left': (width - 1000) // 2, 'top': (height - 800) // 2, 'rgb': rgb}
+    return path, lines, frame
 
 def text_has(lines, phrase):
     phrase = normalize(phrase)
@@ -58,7 +66,24 @@ def export_image(raw, name):
     path = os.path.join(evidence, 'ui-' + name + '.png')
     run('convert', raw, '-gravity', 'center', '-crop', '1000x800+0+0', '+repage', '-strip', path)
 
-def ready(name, required, alternatives=(), absent=(), seconds=35):
+def export_tokens(snapshot, name):
+    allowed = set(('council workspace project work items item linux native fixture verifier no new title acceptance criteria '
+                   'refresh roles save delegate confirm delegation actor name operator saved handoff back open '
+                   'next action heading checkpoint loading in progress request responsible role cancel').split())
+    frame = snapshot[2]
+    tokens = []
+    for _text, line in snapshot[1]:
+        for word, row in line:
+            if word in allowed:
+                x, y = int(row['left']) - frame['left'], int(row['top']) - frame['top']
+                if 0 <= x < 1000 and 0 <= y < 800:
+                    tokens.append({'token': word, 'x': x, 'y': y})
+    diagnostic = {'stage': name, 'crop': [1000, 800], 'tokens': tokens,
+                  'queue': vision.queue_diagnostics(snapshot[1], frame['rgb'], frame['left'], frame['top'])}
+    with open(os.path.join(evidence, 'ui-' + name + '-ocr.json'), 'w', encoding='utf-8') as handle:
+        json.dump(diagnostic, handle)
+
+def ready(name, required, alternatives=(), absent=(), seconds=35, queue_guard=False):
     global stage
     stage = name
     end = time.monotonic() + seconds
@@ -69,7 +94,8 @@ def ready(name, required, alternatives=(), absent=(), seconds=35):
             lines = last[1]
             if (all(text_has(lines, x) for x in required)
                 and (not alternatives or any(text_has(lines, x) for x in alternatives))
-                and not any(text_has(lines, x) for x in absent)):
+                and not any(text_has(lines, x) for x in absent)
+                and (not queue_guard or vision.queue_diagnostics(lines, last[2]['rgb'], last[2]['left'], last[2]['top'])['ready'])):
                 export_image(last[0], name)
                 mark(name)
                 return last
@@ -77,6 +103,7 @@ def ready(name, required, alternatives=(), absent=(), seconds=35):
             pass
     if last:
         export_image(last[0], 'failed-' + name)
+        export_tokens(last, 'failed-' + name)
     raise RuntimeError('postcondition absent: ' + ', '.join(required) +
                        ('; alternatives: ' + ', '.join(alternatives) if alternatives else ''))
 
@@ -99,22 +126,50 @@ def locate(snapshot, phrase, topmost=False):
         raise RuntimeError(f'control {phrase!r}: expected one match, observed {len(matches)}')
     return matches[0]
 
-def click(snapshot, phrase, offset=0, topmost=False):
+def focus_window(snapshot):
     owner = int(run('xdotool', 'getwindowpid', window).stdout.strip())
     if owner != app_pid:
         raise RuntimeError('window does not belong to the launched Desktop process')
     geometry = dict(line.split('=', 1) for line in run('xdotool', 'getwindowgeometry', '--shell', window).stdout.splitlines() if '=' in line)
-    width, height = map(int, run('identify', '-format', '%w %h', snapshot[0]).stdout.split())
+    width, height = snapshot[2]['width'], snapshot[2]['height']
     if (width, height) != (int(geometry['WIDTH']), int(geometry['HEIGHT'])):
         raise RuntimeError('screenshot dimensions differ from the target window')
-    x, y = locate(snapshot, phrase, topmost)
-    y += offset
-    if not (0 <= x < width and 0 <= y < height):
-        raise RuntimeError('control coordinates are outside the target window')
     run('xdotool', 'windowfocus', '--sync', window)
     if int(run('xdotool', 'getwindowfocus').stdout.strip()) != int(window):
         raise RuntimeError('target window did not acquire keyboard focus')
+
+def click_xy(snapshot, x, y):
+    width, height = snapshot[2]['width'], snapshot[2]['height']
+    if not (0 <= x < width and 0 <= y < height):
+        raise RuntimeError('control coordinates are outside the target window')
     run('xdotool', 'mousemove', '--window', window, '--sync', str(x), str(y), 'click', '1')
+
+def click(snapshot, phrase, offset=0, topmost=False):
+    focus_window(snapshot)
+    x, y = locate(snapshot, phrase, topmost)
+    click_xy(snapshot, x, y + offset)
+
+def click_queue(snapshot):
+    focus_window(snapshot)
+    current = capture(time.monotonic() + 15)
+    focus_window(current)
+    frame = current[2]
+    if not vision.queue_diagnostics(current[1], frame['rgb'], frame['left'], frame['top'])['ready']:
+        raise RuntimeError('current frame no longer matches the calibrated queue and button geometry')
+    x, y = vision.QUEUE_CLICK
+    click_xy(current, frame['left'] + x, frame['top'] + y)
+
+def click_primary(snapshot, anchor, required):
+    focus_window(snapshot)
+    current = capture(time.monotonic() + 15)
+    focus_window(current)
+    if not all(text_has(current[1], text) for text in required):
+        raise RuntimeError('current form no longer matches the expected controls')
+    frame = current[2]
+    point = vision.primary_adjacent(current[1], frame['rgb'], anchor, left=frame['left'], top=frame['top'])
+    if point is None:
+        raise RuntimeError('primary control cannot be uniquely verified next to ' + anchor)
+    click_xy(current, frame['left'] + point[0], frame['top'] + point[1])
 
 def type_text(text):
     run('xdotool', 'type', '--clearmodifiers', '--', text)
@@ -206,9 +261,9 @@ try:
 
     snap = initial_workspace()
     click(snap, 'Work items')
-    snap = ready('queue-ready', ['Work items', 'New work item'])
-    click(snap, 'New work item')
-    snap = ready('form-and-roles-ready', ['Title', 'Acceptance criteria', 'Linux fixture', 'Save work item'],
+    snap = ready('queue-ready', ['Workspace', 'project', 'Work items', 'Linux fixture verifier', 'No work items'], queue_guard=True)
+    click_queue(snap)
+    snap = ready('form-and-roles-ready', ['Title', 'Acceptance criteria', 'Linux fixture', 'Refresh roles'],
                  absent=['Loading roles'])
     click(snap, 'Title', 25)
     type_text(title)
@@ -217,19 +272,19 @@ try:
     type_text(criteria[0]); run('xdotool', 'key', 'Return'); type_text(criteria[1])
     snap = ready('criteria-entered', [title, 'Name the first heading', 'Give a concrete next action', 'Linux fixture'])
     click(snap, 'Linux fixture')
-    snap = ready('role-chosen', [title, 'Save work item', 'Linux fixture'])
+    snap = ready('role-chosen', [title, 'Acceptance criteria', 'Linux fixture', 'Refresh roles'])
     mark_mutation('save')
-    click(snap, 'Save work item')
+    click_primary(snap, 'Refresh roles', [title, 'Acceptance criteria', 'Linux fixture', 'Refresh roles'])
     snap = ready('created-detail', [title, 'Delegate'], absent=['Saving work item'])
     item = read_created_item()
     mark('created-readback')
     click(snap, 'Delegate', topmost=True)
-    snap = ready('delegation-form', ['Confirm delegation', 'Actor name', 'Responsible role'])
+    snap = ready('delegation-form', ['Actor name', 'Responsible role', 'Cancel'])
     click(snap, 'Actor name', 25)
     type_text('Operator')
-    snap = ready('actor-entered', ['Operator', 'Confirm delegation'])
+    snap = ready('actor-entered', ['Operator', 'Actor name', 'Responsible role', 'Cancel'])
     mark_mutation('delegate')
-    click(snap, 'Confirm delegation')
+    click_primary(snap, 'Cancel', ['Operator', 'Actor name', 'Responsible role', 'Cancel'])
     ready('delegation-confirmed', [title], alternatives=['Saved request', 'Linked delegation', 'In progress'],
           absent=['Confirm delegation'])
     current = cli_read('show', '--id', item['id'])['item']
@@ -240,6 +295,14 @@ try:
     mark('delegation-readback')
     print('UI_CREATED_AND_DELEGATED', flush=True)
 except Exception as error:
+    failure_image = os.path.join(evidence, 'ui-failed-' + stage + '.png')
+    if not os.path.exists(failure_image):
+        try:
+            failure = capture(time.monotonic() + 15)
+            export_image(failure[0], 'failed-' + stage)
+            export_tokens(failure, 'failed-' + stage)
+        except Exception:
+            pass
     print('UI_LAST_SUCCESS=' + last_success, flush=True)
     print('UI_FIRST_FAILURE=' + stage + ': ' + str(error), file=sys.stderr, flush=True)
     sys.exit(1)

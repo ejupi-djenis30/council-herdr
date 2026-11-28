@@ -1,0 +1,24 @@
+{
+  "sourceRun": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46172914257",
+  "sourceArtifact": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46172914257/artifacts/15274013363",
+  "offlineEngine": "Tesseract 5.5.3.20260724 Windows portable; PSM 11; tessdata_fast eng 4.1.0",
+  "trainedDataSha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+  "positive": {
+    "frame": "ui-failed-queue-ready.png",
+    "sha256": "1c041f3f90a37eb39e8703ba990de16ce3d15d992e7299ebeb77bfec3f39613c",
+    "size": [1000, 800],
+    "anchors": ["Workspace", "project", "Work items", "Linux fixture verifier", "No work items"],
+    "samples": {"815,311": [27, 27, 30], "929,311": [27, 27, 30], "873,319": [27, 27, 30]},
+    "queueReady": true,
+    "primaryRightOfRefresh": [872, 310]
+  },
+  "negative": {
+    "frame": "ui-workspace-ready.png",
+    "sha256": "c9604066ceffe65073a8e264c9b7529f395480296e3998675d00ee36d7fbfc95",
+    "size": [1000, 800],
+    "samples": {"815,311": [255, 255, 255], "929,311": [255, 255, 255], "873,319": [255, 255, 255]},
+    "queueReady": false,
+    "primaryRightOfRefresh": null
+  },
+  "limitation": "Portable Windows OCR differs from the hosted Ubuntu Tesseract build; live OCR and geometry are revalidated before the click."
+}
