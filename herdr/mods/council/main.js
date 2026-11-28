@@ -1128,9 +1128,14 @@ export default class Council extends View {
         save: (cx, profile) => this.save(cx, 'team-set', profile),
         cancel: cx => { this.clearForm(); cx.notify(); }
       });
+      const target = { project: this.listProject ?? this.folder, engine: this.engine, spaceId: space.id };
       return teamView(t, this.data, {
         edit: (cx, member) => this.editTeamMember(cx, member),
-        call: (cx, member) => this.newTask(cx, member),
+        call: (cx, member) => {
+          if (this.tab !== 'team' || !this.currentSpace() || target.spaceId !== this.spaceId ||
+              target.engine?.machine !== this.engine.machine || target.project !== (this.listProject ?? this.folder)) return;
+          this.newTask(cx, { member, target });
+        },
         open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.listProject ?? this.folder }, { returnTo: this.workspaceReturn })
       });
     }
@@ -1258,10 +1263,10 @@ export default class Council extends View {
     });
   }
 
-  newTask(cx, member = null, mode = 'delegate') {
-    const { fields, extra } = taskFormDefaults(member ? 'delegate' : mode);
+  newTask(cx, { member = null, mode = 'delegate', target } = {}) {
+    const { fields, extra } = taskFormDefaults(mode);
     this.setForm('task', fields, {
-      ...extra, member, project: member ? this.folder : this.draftProject(),
+      ...extra, member, project: target?.project ?? this.draftProject(), teamTarget: target,
       sessionId: `desktop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
     });
     cx.notify();
@@ -1271,9 +1276,10 @@ export default class Council extends View {
     const space = localSpace();
     const form = this.form;
     if (form?.kind !== 'task' || this.saving || !this.currentSpace(space)) return;
+    const { project, teamTarget } = form;
+    if (teamTarget && (space.id !== teamTarget.spaceId || (space.machine ?? null) !== teamTarget.engine.machine)) return;
+    const engine = teamTarget?.engine ?? this.engine;
     const params = taskFormValues(form);
-    const engine = this.engine;
-    const { project } = form;
     this.saving = true;
     this.loading = false;
     this.error = '';
@@ -1330,7 +1336,7 @@ export default class Council extends View {
             node.child(label([space.name || space.folder, space.machine].filter(Boolean).join(' · '), 12, t.muted).truncate())))
         .when(current && ['debates', 'reviews'].includes(this.tab) && !this.selected && !this.form, node =>
           node.child(button(t, 'new-formal-workflow', this.tab === 'debates' ? 'Run agent debate' : 'Start review', (_e, cx) =>
-            this.newTask(cx, null, this.tab === 'debates' ? 'debate' : 'review'), 'normal', false, 'add')))
+            this.newTask(cx, { mode: this.tab === 'debates' ? 'debate' : 'review' }), 'normal', false, 'add')))
         .when(current && ['polls', 'debates'].includes(this.tab) && !this.selected && !this.form, node =>
           node.child(button(t, 'new', this.tab === 'polls' ? 'New poll' : 'New debate', (_e, cx) => this.startCreate(cx), 'primary', false, 'add').track_focus(this.newFocus)))
         .when(current && this.tab === 'delegations' && !this.selected && !this.form, node =>
