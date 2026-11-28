@@ -1,6 +1,7 @@
 param([ValidateSet('capture','create','reopen')][string]$Mode = 'create')
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+. (Join-Path $env:COU7_HARNESS '.github/cou7-windows/process.ps1')
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
@@ -49,8 +50,8 @@ function FrameBarrier {
   $subscription=Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier $id
   try {
     $watcher.EnableRaisingEvents=$true
-    & $env:COU7_APP 'shot' $path 1>$null 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'desktop_frame_request_failed' }
+    $out=Join-Path $env:COU7_ROOT 'frame-command.out'; $err=Join-Path $env:COU7_ROOT 'frame-command.err'
+    if ((Invoke-Cou7Process $env:COU7_APP @('shot',$path) $out $err 20000) -ne 0) { throw 'desktop_frame_request_failed' }
     if (-not (Test-Path -LiteralPath $path)) { $event=Wait-Event -SourceIdentifier $id -Timeout 15 }
     if (-not (Test-Path -LiteralPath $path)) { throw 'desktop_frame_not_observed' }
   } finally {

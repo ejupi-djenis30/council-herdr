@@ -1,9 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+. (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/process.ps1')
 $root = Join-Path $env:RUNNER_TEMP 'cou7-win-x64'
 $evidence = Join-Path $env:RUNNER_TEMP 'cou7-win-evidence'
 New-Item -ItemType Directory -Force -Path $root, $evidence | Out-Null
 $facts = Join-Path $evidence 'facts.jsonl'
+Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/form-replay.json') (Join-Path $evidence 'offline-form-replay.json')
+Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'harness/.github/cou7-windows/process-replay.json') (Join-Path $evidence 'offline-process-replay.json')
 $env:COU7_ROOT = $root
 $env:COU7_EVIDENCE = $evidence
 $env:APPDATA = Join-Path $root 'appdata'
@@ -28,8 +31,12 @@ function Fact([string]$stage, [object]$value) {
 }
 function Run([string]$name, [string]$exe, [string[]]$arguments) {
   $out = Join-Path $root "$name.out"; $err = Join-Path $root "$name.err"
-  & $exe @arguments 1> $out 2> $err
-  $code = $LASTEXITCODE
+  if ($env:COU7_APP -and $exe -eq $env:COU7_APP) {
+    $code = Invoke-Cou7Process $exe $arguments $out $err
+  } else {
+    & $exe @arguments 1> $out 2> $err
+    $code = $LASTEXITCODE
+  }
   Fact $name @{ exit = $code }
   return $code
 }
@@ -44,6 +51,11 @@ public static class Cou7Architecture {
 function PeMachine([string]$path) {
   $stream = [IO.File]::OpenRead($path)
   try { $reader = [IO.BinaryReader]::new($stream); $stream.Position = 0x3c; $offset = $reader.ReadUInt32(); $stream.Position = $offset + 4; return $reader.ReadUInt16() }
+  finally { $stream.Dispose() }
+}
+function PeSubsystem([string]$path) {
+  $stream = [IO.File]::OpenRead($path)
+  try { $reader = [IO.BinaryReader]::new($stream); $stream.Position = 0x3c; $offset = $reader.ReadUInt32(); $stream.Position = $offset + 24 + 68; return $reader.ReadUInt16() }
   finally { $stream.Dispose() }
 }
 function ProcessMachine($process) {
@@ -101,7 +113,7 @@ try {
   $app = Join-Path $root 'herdr-app/herdr-app.exe'
   $env:COU7_APP = $app
   $desktopVersion = (& $app --version | Out-String).Trim(); $coreVersion = (& $hc --version | Out-String).Trim()
-  Fact 'versions' @{ desktop = $desktopVersion; core = $coreVersion; desktopPeMachine = ('0x{0:x4}' -f (PeMachine $app)); corePeMachine = ('0x{0:x4}' -f (PeMachine $hc)) }
+  Fact 'versions' @{ desktop = $desktopVersion; core = $coreVersion; desktopPeMachine = ('0x{0:x4}' -f (PeMachine $app)); corePeMachine = ('0x{0:x4}' -f (PeMachine $hc)); desktopPeSubsystem=(PeSubsystem $app); corePeSubsystem=(PeSubsystem $hc) }
   Must ($desktopVersion -match '0\.1\.18' -and $coreVersion -match '0\.1\.22' -and (PeMachine $app) -eq 0x8664 -and (PeMachine $hc) -eq 0x8664) 'binary_version_or_architecture_mismatch'
   Must ((Run 'hc_skill' $hc @('--skill')) -eq 0) 'hc_skill_unavailable'
   Must ((Run 'desktop_skill' $app @('--skill')) -eq 0) 'desktop_skill_unavailable'
@@ -278,6 +290,11 @@ public static class Cou7AppWindow {
           if ((Run 'ui_uncertain_list' $node @($cli,'work-item','list')) -eq 0) {
             $list = Get-Content -Raw (Join-Path $root 'ui_uncertain_list.out') | ConvertFrom-Json
             Fact 'ui_uncertain_list' @{ items=@($list.items | ForEach-Object { @{ id=$_.id; title=$_.title; roleId=$_.roleId; state=$_.state } }) }
+            $matchingItems=@($list.items | Where-Object title -eq 'Windows native checkpoint')
+            if ($matchingItems.Count -eq 1 -and (Run 'ui_uncertain_show' $node @($cli,'work-item','show','--id',$matchingItems[0].id)) -eq 0) {
+              $savedItem=(Get-Content -Raw (Join-Path $root 'ui_uncertain_show.out') | ConvertFrom-Json).item
+              Fact 'ui_uncertain_item' @{ interface='installed_CLI_readonly'; id=$savedItem.id; title=$savedItem.title; criteria=$savedItem.criteria; roleId=$savedItem.roleId; state=$savedItem.state; revision=$savedItem.lifecycle.revision; job=$savedItem.job; noResend=$true }
+            }
           }
         } finally { Pop-Location }
       }

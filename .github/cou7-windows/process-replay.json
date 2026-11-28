@@ -1,0 +1,1 @@
+{"executableSha256":"cfea987a8ccffa77fa4e4d463f9a9f13354510eb4e907ca818b5886613e1406c","waitedExit":0,"syntheticFailureExit":37,"waitedVersion":"herdr-app 0.1.18","limitation":"Read-only CLI version probe on Windows ARM64 with x64 emulation; no Desktop window or Core started.","observedDirectStaleExit":37}
