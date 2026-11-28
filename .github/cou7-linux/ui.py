@@ -159,6 +159,18 @@ def click_handoff(snapshot):
     if not vision.emit_handoff(frame, send):
         raise RuntimeError('current item detail does not match the calibrated handoff control')
 
+def click_return_from_handoff(snapshot):
+    focus_window(snapshot)
+    current = capture(time.monotonic() + 15)
+    focus_window(current)
+    frame = current[2]
+    def send(point):
+        print('UI_HANDOFF_RETURN_POINT=' + json.dumps({'origin': [frame['left'], frame['top']],
+              'local': list(vision.return_from_handoff_plan(frame)), 'window': list(point)}), flush=True)
+        click_xy(current, *point)
+    if not vision.emit_return_from_handoff(frame, send):
+        raise RuntimeError('current handoff does not match the calibrated return control')
+
 def click_primary(snapshot, anchor, required, role_before=None):
     focus_window(snapshot)
     current = capture(time.monotonic() + 15)
@@ -254,7 +266,7 @@ try:
         click_handoff(snap)
         snap = ready('reopened-handoff', ['Saved handoff', 'Linux Native Checkpoint', 'Next action'],
                      alternatives=['compare the heading', 'saved criteria'])
-        click(snap, 'Back to work item')
+        click_return_from_handoff(snap)
         snap = ready('returned-to-item', [title, 'Open delegation'])
         click(snap, 'Open delegation')
         snap = ready('reopened-delegation', ['Copy session ID'], alternatives=[session, session[:15]])

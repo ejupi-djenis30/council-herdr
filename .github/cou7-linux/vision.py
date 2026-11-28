@@ -129,6 +129,27 @@ def emit_handoff(frame, send):
     send(window_point(frame, point))
     return True
 
+def return_from_handoff_plan(frame):
+    lines, rgb = frame['lines'], frame['rgb']
+    if len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:
+        return None
+    if not all((in_region(lines, 'Saved handoff', (70, 170, 250, 215)),
+                in_region(lines, 'Terminal screen capture', (70, 235, 260, 265)),
+                in_region(lines, 'Next action', (70, 265, 200, 290)),
+                in_region(lines, 'Linux native checkpoint', (160, 350, 420, 385)),
+                in_region(lines, 'saved criteria', (390, 375, 560, 410)))):
+        return None
+    if not all(min(pixel(rgb, x, y)) >= 250 for x,y in ((626,194),(754,194))):
+        return None
+    return (690, 194)
+
+def emit_return_from_handoff(frame, send):
+    point = return_from_handoff_plan(frame)
+    if point is None:
+        return False
+    send(window_point(frame, point))
+    return True
+
 def primary_adjacent(lines, rgb, anchor, side='left'):
     labels = boxes(lines, anchor)
     if len(labels) != 1 or len(rgb) != CROP_WIDTH * CROP_HEIGHT * 3:

@@ -1,0 +1,113 @@
+{
+  "sourceRun": "https://github.com/Ejupi-Labs/council-herdr/actions/runs/46177095795",
+  "sourceSha256": {
+    "ui-reopened-handoff.png": "2ba4e8dbeb32ea4fa69ba4cf4e07a794763ec5c4a4f29f288851bfea07c3f13f",
+    "ui-reopened-specific-item.png": "1a6ddd981f5c08e04697f976420db4ce6505c619b0d5f00b3c9361e972868743"
+  },
+  "ocr": "tesseract v5.5.3.20260724 PSM 11",
+  "cases": [
+    {
+      "case": "reader",
+      "sourceSize": [
+        1000,
+        800
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "localPoint": [
+        690,
+        194
+      ],
+      "windowPoint": [
+        690,
+        194
+      ],
+      "mockInputCount": 1
+    },
+    {
+      "case": "reader",
+      "sourceSize": [
+        1440,
+        1000
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": [
+        690,
+        194
+      ],
+      "windowPoint": [
+        910,
+        294
+      ],
+      "mockInputCount": 1
+    },
+    {
+      "case": "reader",
+      "sourceSize": [
+        1441,
+        1001
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": [
+        690,
+        194
+      ],
+      "windowPoint": [
+        910,
+        294
+      ],
+      "mockInputCount": 1
+    },
+    {
+      "case": "detail",
+      "sourceSize": [
+        1000,
+        800
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0
+    },
+    {
+      "case": "detail",
+      "sourceSize": [
+        1440,
+        1000
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0
+    },
+    {
+      "case": "detail",
+      "sourceSize": [
+        1441,
+        1001
+      ],
+      "origin": [
+        220,
+        100
+      ],
+      "localPoint": null,
+      "windowPoint": null,
+      "mockInputCount": 0
+    }
+  ],
+  "limitation": "Offline OCR differs from Ubuntu; no native input was emitted."
+}

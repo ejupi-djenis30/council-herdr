@@ -32,6 +32,7 @@ finalize() {
 trap finalize EXIT
 cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/calibration.json" "$evidence/offline-calibration.json"
 cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/handoff-calibration.json" "$evidence/offline-handoff-calibration.json"
+cp "$GITHUB_WORKSPACE/harness/.github/cou7-linux/return-calibration.json" "$evidence/offline-return-calibration.json"
 say "harness_sha=$GITHUB_SHA"
 say "council_sha=$(git -C "$GITHUB_WORKSPACE/council" rev-parse HEAD)"
 say "council_tree=$(git -C "$GITHUB_WORKSPACE/council" rev-parse 'HEAD^{tree}')"
