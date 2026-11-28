@@ -63,6 +63,17 @@ try {
   Fact 'revisions' @{ harness = $env:GITHUB_SHA; council = $sha; tree = $tree }
   Must ($sha -eq 'e8974841558641faaa9aecab7386fa7001928137' -and $tree -eq 'd4bc8cc3a97555686c4c16f07e9a07486216b942') 'pinned_checkout_mismatch'
   $node = (Get-Command node).Source
+  $uiProject = Join-Path $root 'ui-project'
+  New-Item -ItemType Directory -Force -Path $uiProject | Out-Null
+  Copy-Item (Join-Path $harness '.github/cou7-windows/participant.mjs') (Join-Path $root 'participant.mjs')
+  Copy-Item (Join-Path $harness '.github/cou7-windows/fixture-adapter.mjs') (Join-Path $root 'fixture-adapter.mjs')
+  $adapterUri = ([Uri](Join-Path $root 'fixture-adapter.mjs')).AbsoluteUri
+  $env:NODE_OPTIONS = "--import=$adapterUri"
+  $escapedNode = $node.Replace('%','%%'); $escapedFixture = (Join-Path $root 'participant.mjs').Replace('%','%%')
+  @('@echo off', '@"%SystemRoot%\System32\chcp.com" 65001 >nul || exit /b 1', "@`"$escapedNode`" `"$escapedFixture`" %*") | Set-Content -Encoding utf8 (Join-Path $bin 'junie.cmd')
+  $env:COU7_HARNESS = $harness; $env:COU7_UI_PROJECT = $uiProject; $env:COU7_NODE = $node
+  $env:COU7_HC = Join-Path $bin 'hc.exe'
+  '# Windows Native Checkpoint' | Set-Content -Encoding utf8 (Join-Path $uiProject 'README.md')
   $nodeInfo = & $node -p 'JSON.stringify({version:process.version,arch:process.arch,platform:process.platform})' | ConvertFrom-Json
   Fact 'runner' @{ image = $env:ImageOS; imageVersion = $env:ImageVersion; osVersion = [Environment]::OSVersion.Version.ToString(); os64 = [Environment]::Is64BitOperatingSystem; powershell64 = [Environment]::Is64BitProcess; node = $nodeInfo }
   Must ($nodeInfo.arch -eq 'x64' -and [Environment]::Is64BitOperatingSystem) 'runner_architecture_mismatch'
@@ -109,6 +120,7 @@ try {
     $mod = Join-Path $env:HERDR_APP_HOME 'mods/council'
     Must (Test-Path -LiteralPath (Join-Path $mod '.council-install.json')) 'mod_receipt_missing'
     $cli = Join-Path $mod 'engine/bin/council.js'
+    $env:COU7_CLI = $cli
     Must ((Run 'installed_doctor' $node @($cli,'doctor')) -eq 0) 'installed_doctor_failed'
     Must ((Run 'installed_mod_check' $app @('check',$mod)) -eq 0) 'installed_mod_check_failed'
     $checks.package = 'pass'
@@ -117,7 +129,9 @@ try {
     Push-Location $root
     try { Must ((Run 'core_start' $hc @('server','start')) -eq 0) 'isolated_core_start_failed' }
     finally { Pop-Location }
-    $testCode = Run 'npm_test' 'npm.cmd' @('test')
+    $nodeOptions = $env:NODE_OPTIONS
+    try { $env:NODE_OPTIONS = ''; $testCode = Run 'npm_test' 'npm.cmd' @('test') }
+    finally { $env:NODE_OPTIONS = $nodeOptions }
     $summary = Get-Content (Join-Path $root 'npm_test.out') | Where-Object { $_ -match '^\s*[ℹ#]?\s*(tests|pass|fail|skipped)\s+\d+' } | Select-Object -Last 8
     Fact 'test_summary' @{ exit = $testCode; lines = @($summary) }
     if ($testCode -ne 0) {
@@ -129,6 +143,9 @@ try {
     }
     $checks.tests = if ($testCode -eq 0) { 'pass' } else { 'fail' }
   } finally { Pop-Location }
+  Push-Location $uiProject
+  try { Must ((Run 'cli_ui_fixture_role' $node @($cli,'team','set','verifier','--agent','junie','--role','Windows fixture','--permission','read')) -eq 0) 'cli_ui_fixture_role_failed' }
+  finally { Pop-Location }
   'console.log("COU7_CORE_TRANSPORT_OK")' | Set-Content -Encoding utf8 (Join-Path $root 'core-probe.cjs')
   Must ((Run 'core_status' $hc @('server','status')) -eq 0) 'isolated_core_status_failed'
   $coreStatus = Get-Content -Raw (Join-Path $root 'core_status.out') | ConvertFrom-Json
@@ -204,6 +221,82 @@ public static class Cou7AppWindow {
       $checks.desktopInput = 'pass'; $checks.ui = 'harness_continuation_required'
       [void](Run 'desktop_status' $app @('status'))
       [void](Run 'desktop_internal_shot' $app @('shot',(Join-Path $evidence 'desktop-internal.png')))
+      Fact 'desktop_internal_shot_file' @{ exists = (Test-Path -LiteralPath (Join-Path $evidence 'desktop-internal.png')); note = 'internal_capture_alone_is_not_input_proof' }
+      $env:COU7_WINDOW_HANDLE = $appHandle.ToInt64().ToString(); $env:COU7_APP_PID = $desktop.Id.ToString()
+      $uiScript = Join-Path $harness '.github/cou7-windows/ui.ps1'
+      [void](Run 'ui_initial_capture' (Get-Command pwsh).Source @('-NoProfile','-STA','-File',$uiScript,'-Mode','capture'))
+      Get-Content (Join-Path $root 'ui_initial_capture.out') | Add-Content -Encoding utf8 $facts
+      $spaceCode = Run 'desktop_space_new' $app @('do','space.new','--name','COU7 x64 test','--folder',$uiProject,'--argv','["cmd.exe","/k"]')
+      Must ($spaceCode -eq 0) 'desktop_space_new_failed'
+      $space = Get-Content -Raw (Join-Path $root 'desktop_space_new.out') | ConvertFrom-Json
+      Fact 'project_terminal' @{ interface='Desktop_command'; address=$space.terminal; note='project_terminal_left_to_runner_teardown' }
+      Must ((Run 'desktop_mod_open' $app @('do','mod.open','--name','council')) -eq 0) 'desktop_mod_open_failed'
+      $uiCode = Run 'ui_create' (Get-Command pwsh).Source @('-NoProfile','-STA','-File',$uiScript,'-Mode','create')
+      Get-Content (Join-Path $root 'ui_create.out') | Add-Content -Encoding utf8 $facts
+      Fact 'ui_create_exit' @{ exit=$uiCode; saveAttempted=(Test-Path (Join-Path $root 'ui-save-attempted')); delegateAttempted=(Test-Path (Join-Path $root 'ui-delegate-attempted')) }
+      if ($uiCode -ne 0 -and -not $firstFailure) { $firstFailure='ui_create_incomplete' }
+      $deliveryCode = $null
+      if (Test-Path -LiteralPath (Join-Path $root 'ui-delegate-attempted')) {
+        $deliveryCode = Run 'ui_collect' (Get-Command pwsh).Source @('-NoProfile','-File',(Join-Path $harness '.github/cou7-windows/collect.ps1'))
+        Get-Content (Join-Path $root 'ui_collect.out') | Add-Content -Encoding utf8 $facts
+        Fact 'ui_collect_exit' @{ exit=$deliveryCode; noResend=$true }
+        if ($deliveryCode -eq 0) { $checks.core='pass_real_delivery'; $checks.cli='pass_ui_readback' }
+        else {
+          if (-not $firstFailure) { $firstFailure='ui_delivery_observation_incomplete' }
+          $createdPath=Join-Path $root 'ui-created.json'
+          if (Test-Path -LiteralPath $createdPath) {
+            $created=Get-Content -Raw $createdPath | ConvertFrom-Json
+            Push-Location $uiProject
+            try {
+              if ((Run 'ui_uncertain_show' $node @($cli,'work-item','show','--id',$created.id)) -eq 0) {
+                $savedItem=(Get-Content -Raw (Join-Path $root 'ui_uncertain_show.out') | ConvertFrom-Json).item
+                Fact 'ui_uncertain_item' @{ interface='installed_CLI_readonly'; id=$savedItem.id; state=$savedItem.state; revision=$savedItem.lifecycle.revision; job=$savedItem.job; noResend=$true }
+                if ($savedItem.job.sessionId -and (Run 'ui_uncertain_job' $node @($cli,'status','--session',$savedItem.job.sessionId)) -eq 0) {
+                  $savedJob=Get-Content -Raw (Join-Path $root 'ui_uncertain_job.out') | ConvertFrom-Json
+                  Fact 'ui_uncertain_job' @{ interface='installed_CLI_readonly'; sessionId=$savedJob.sessionId; state=$savedJob.state; deliveryState=$savedJob.deliveryState; participantAddress=$savedJob.participant.address; power=$savedJob.participant.power; workerAddress=$savedJob.worker.address }
+                }
+              }
+            } finally { Pop-Location }
+          }
+          if ((Run 'ui_uncertain_core_list' $hc @('ls','--all','--json')) -eq 0) {
+            $owned=Get-Content -Raw (Join-Path $root 'ui_uncertain_core_list.out') | ConvertFrom-Json
+            Fact 'ui_uncertain_core_list' @{ interface='isolated_Core_readonly'; terminals=@($owned.terminals | ForEach-Object { @{ address=$_.address; state=$_.state; turn=$_.turn; status=$_.status.state } }) }
+          }
+        }
+      } elseif (Test-Path -LiteralPath (Join-Path $root 'ui-save-attempted')) {
+        Fact 'ui_reconciliation' @{ interface='installed_CLI_readonly'; mode='no_redispatch'; note='save_may_have_been_accepted' }
+        Push-Location $uiProject
+        try {
+          if ((Run 'ui_uncertain_list' $node @($cli,'work-item','list')) -eq 0) {
+            $list = Get-Content -Raw (Join-Path $root 'ui_uncertain_list.out') | ConvertFrom-Json
+            Fact 'ui_uncertain_list' @{ items=@($list.items | ForEach-Object { @{ id=$_.id; title=$_.title; roleId=$_.roleId; state=$_.state } }) }
+          }
+        } finally { Pop-Location }
+      }
+      if ($uiCode -eq 0 -and $deliveryCode -eq 0) {
+        Must ((Run 'overlay_before' $app @('status')) -eq 0) 'overlay_before_status_failed'
+        $before=(Get-Content -Raw (Join-Path $root 'overlay_before.out') | ConvertFrom-Json).overlays
+        Must ('council' -in @($before)) 'overlay_before_not_observed'
+        Must ((Run 'overlay_close_command' $app @('do','mod.open','--name','council')) -eq 0) 'overlay_close_command_failed'
+        Must ((Run 'overlay_closed' $app @('status')) -eq 0) 'overlay_closed_status_failed'
+        $closed=(Get-Content -Raw (Join-Path $root 'overlay_closed.out') | ConvertFrom-Json).overlays
+        Must ('council' -notin @($closed)) 'overlay_close_not_observed'
+        Must ((Run 'overlay_open_command' $app @('do','mod.open','--name','council')) -eq 0) 'overlay_open_command_failed'
+        Must ((Run 'overlay_reopened' $app @('status')) -eq 0) 'overlay_reopened_status_failed'
+        $reopened=(Get-Content -Raw (Join-Path $root 'overlay_reopened.out') | ConvertFrom-Json).overlays
+        Must ('council' -in @($reopened)) 'overlay_reopen_not_observed'
+        Fact 'overlay_transition' @{ interface='Desktop_command_status'; before=$true; closed=$false; reopened=$true }
+        $reopenCode = Run 'ui_reopen' (Get-Command pwsh).Source @('-NoProfile','-STA','-File',$uiScript,'-Mode','reopen')
+        Get-Content (Join-Path $root 'ui_reopen.out') | Add-Content -Encoding utf8 $facts
+        Fact 'ui_reopen_exit' @{ exit=$reopenCode }
+        $records = @(Get-Content $facts | ForEach-Object { try { $_ | ConvertFrom-Json } catch { } })
+        $saveCount=@($records | Where-Object { $_.stage -eq 'ui_mutation_attempted' -and $_.value.name -eq 'save' }).Count
+        $delegateCount=@($records | Where-Object { $_.stage -eq 'ui_mutation_attempted' -and $_.value.name -eq 'delegate' }).Count
+        $content=@($records | Where-Object { $_.stage -eq 'ui_handoff_content' -and $_.value.heading -and $_.value.outputNext -and $_.value.guidance }).Count -eq 1
+        $sessionMatch=@($records | Where-Object { $_.stage -eq 'ui_session_match' -and $_.value.match }).Count -eq 1
+        Fact 'ui_gate_evidence' @{ saveGestures=$saveCount; delegateGestures=$delegateCount; handoffContent=$content; sessionMatch=$sessionMatch }
+        if ($reopenCode -eq 0 -and $saveCount -eq 1 -and $delegateCount -eq 1 -and $content -and $sessionMatch) { $checks.ui='pass' } else { $checks.ui='incomplete_reopen'; if (-not $firstFailure) { $firstFailure='ui_reopen_incomplete' } }
+      } else { $checks.ui='incomplete_create_or_delivery' }
     } else {
       $checks.desktopInput = 'blocked'
       $firstFailure = if ($appFacts.hasExited) { 'desktop_process_exited' } elseif (-not $appFacts.windowHandlePresent) { 'desktop_window_not_observed_after_uia_event_wait' } elseif (-not $appFacts.visible) { 'desktop_window_not_visible' } elseif (-not $appFacts.foreground) { 'desktop_window_not_foreground' } else { 'desktop_uia_or_session_mismatch' }
@@ -218,7 +311,7 @@ public static class Cou7AppWindow {
   Fact 'first_failure' @{ code = $firstFailure; exceptionType = $_.Exception.GetType().Name }
 } finally {
   if ($desktop -and -not $desktop.HasExited) { $desktop.CloseMainWindow() | Out-Null }
-  $overall = if ($checks.desktopInput -eq 'blocked') { 'blocked_desktop_input' } else { 'incomplete' }
+  $overall = if ($checks.desktopInput -eq 'blocked') { 'blocked_desktop_input' } elseif ($checks.ui -eq 'pass' -and $checks.package -eq 'pass' -and $checks.tests -eq 'pass' -and $checks.core -eq 'pass_real_delivery') { 'pass' } else { 'incomplete' }
   Fact 'verdict' @{ overall = $overall; firstFailure = $firstFailure; checks = $checks; jobExitIsNotGate = $true }
   @("## COU-7 Windows x64", "", "**Desktop/input: $($checks.desktopInput)**", "", "**UI gate: $($checks.ui)**", "", "**Core: $($checks.core); installed CLI: $($checks.cli)**", "", "Technical job completion is separate from the native gate.") | Add-Content -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 }

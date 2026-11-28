@@ -31,7 +31,7 @@ public static class Cou7WindowWatch {
                     found = hwnd;
                     SetEvent(signal);
                 }
-            } catch (ElementNotAvailableException) { }
+            } catch (Exception) { }
         };
         bool registered = false;
         try {
