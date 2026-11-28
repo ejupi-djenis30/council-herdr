@@ -4,17 +4,21 @@ import subprocess
 import sys
 
 evidence = os.environ['COU7_EVIDENCE']
+raw_shots = os.environ['COU7_RAW_SHOTS']
 app = os.environ['COU7_APP']
 project = os.environ['COU7_PROJECT']
+window = os.environ['COU7_WINDOW_ID']
 stage = 'initial'
 
 def run(*args):
     return subprocess.run(args, check=True, text=True, capture_output=True)
 
 def shot(name):
-    path = os.path.join(evidence, name + '.png')
-    run(app, 'shot', path)
-    return path
+    raw = os.path.join(raw_shots, name + '.png')
+    cropped = os.path.join(evidence, name + '.png')
+    run(app, 'shot', raw)
+    run('convert', raw, '-gravity', 'center', '-crop', '1000x800+0+0', '+repage', '-strip', cropped)
+    return raw
 
 def click(words, offset=0):
     path = shot('ui-' + stage)
@@ -31,8 +35,9 @@ def click(words, offset=0):
         for i in range(len(text) - len(target) + 1):
             if text[i:i + len(target)] == target:
                 first, last = line[i], line[i + len(target) - 1]
-                x = (int(first['left']) + int(last['left']) + int(last['width'])) // 2
-                y = int(first['top']) + int(first['height']) // 2 + offset
+                geometry = dict(line.split('=', 1) for line in run('xdotool', 'getwindowgeometry', '--shell', window).stdout.splitlines() if '=' in line)
+                x = int(geometry['X']) + (int(first['left']) + int(last['left']) + int(last['width'])) // 2
+                y = int(geometry['Y']) + int(first['top']) + int(first['height']) // 2 + offset
                 run('xdotool', 'mousemove', str(x), str(y), 'click', '1')
                 return
     raise RuntimeError('visible control not located: ' + words)

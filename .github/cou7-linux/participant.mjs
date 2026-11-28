@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, sep, join } from 'node:path';
 
 const address = process.env.HC_TERMINAL_ID;
@@ -37,32 +38,37 @@ log('aligned');
 report('done');
 let input = '';
 let assignments = 0;
+let turns = Promise.resolve();
+async function accept(line) {
+  const path = /Read and execute instructions in (.*\.md)\. Report findings when done\./.exec(line)?.[1];
+  if (!path) return;
+  report('working');
+  const rel = relative(join(root, '.agent_workspace'), path);
+  assert.ok(rel && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  const brief = readFileSync(path, 'utf8');
+  assert.ok(brief.includes('Name the first heading.'));
+  assert.ok(brief.includes('Give a concrete next action.'));
+  assert.equal(++assignments, 1);
+  log('assignment', { count: assignments });
+  // Coordinate observation only; the actual delivery already arrived via Herdr.
+  await writeFile(process.env.COU7_READY_FIFO, address + '\n');
+  assert.equal((await readFile(process.env.COU7_RELEASE_FIFO, 'utf8')).trim(), 'release');
+  console.log('Heading: # Linux Native Checkpoint');
+  console.log('Next action: compare the heading with the saved criteria.');
+  log('result');
+  report('done');
+}
 process.stdin.on('data', chunk => {
   input += chunk;
   let end;
   while ((end = input.search(/[\r\n]/)) >= 0) {
     const line = input.slice(0, end).replace(/\x1b\[(?:200|201)~/g, '');
     input = input.slice(end + 1);
-    const path = /Read and execute instructions in (.*\.md)\. Report findings when done\./.exec(line)?.[1];
-    if (!path) continue;
-    try {
-      report('working');
-      const rel = relative(join(root, '.agent_workspace'), path);
-      assert.ok(rel && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-      const brief = readFileSync(path, 'utf8');
-      assert.ok(brief.includes('Name the first heading.'));
-      assert.ok(brief.includes('Give a concrete next action.'));
-      assert.equal(++assignments, 1);
-      log('assignment', { count: assignments });
-      console.log('Heading: # Linux Native Checkpoint');
-      console.log('Next action: compare the heading with the saved criteria.');
-      log('result');
-      report('done');
-    } catch (error) {
+    turns = turns.then(() => accept(line)).catch(() => {
       log('error');
       console.error('Fixture validation failed');
       report('error');
-    }
+    });
   }
 });
 process.stdin.resume();

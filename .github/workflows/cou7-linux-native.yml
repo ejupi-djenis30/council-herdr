@@ -24,7 +24,7 @@ jobs:
       - name: Install disposable runner graphical prerequisites
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb xauth x11-utils xdotool imagemagick tesseract-ocr dbus-x11 vulkan-tools mesa-vulkan-drivers libvulkan1
+          sudo apt-get install -y -qq xvfb xauth x11-utils xdotool imagemagick tesseract-ocr dbus-x11 vulkan-tools mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0
       - name: Run isolated native probe
         run: xvfb-run -a -s '-screen 0 1440x1000x24' dbus-run-session -- bash "$GITHUB_WORKSPACE/harness/.github/cou7-linux/probe.sh"
       - name: Save sanitized evidence
