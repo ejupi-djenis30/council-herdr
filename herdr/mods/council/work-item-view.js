@@ -570,8 +570,12 @@ const handoffNotes = {
 };
 
 function planeStatus(plane) {
-  if (!plane.checked || plane.pending) return 'Reading Plane status…';
-  if (plane.issue) return planeProblems[plane.issue];
+  const refreshStatus = !plane.checked || plane.pending ? 'Reading Plane status…' : planeProblems[plane.issue];
+  if (plane.integrityBlocked) {
+    const explanation = 'Plane updates are read-only because part of the local Plane history could not be verified.';
+    return refreshStatus ? `${explanation} ${refreshStatus}` : explanation;
+  }
+  if (refreshStatus) return refreshStatus;
   if (plane.availability === 'disabled') return planeProblems.plane_disabled;
   if (plane.freshness === 'unavailable') return planeProblems.unavailable;
   if (plane.availability === 'read_only') return 'Plane metadata is read-only here.';
@@ -622,7 +626,7 @@ function planePanel(t, plane) {
         plane.refreshFocus?.focus();
         run(cx, () => plane.open(handoffAction));
       }))))
-    .child(label(status, 12, plane.issue ? t.blocked : t.muted).role('status').accessibility_label(status));
+    .child(label(status, 12, plane.issue || plane.integrityBlocked ? t.blocked : t.muted).role('status').accessibility_label(status));
   if (handoff) {
     const instruction = handoff.disposition === 'operator_console' ? 'Continue in the trusted Council operator console.' :
       'Open the installed Council operator console in the authenticated operator session.';
@@ -652,7 +656,9 @@ function planePanel(t, plane) {
   else if (operation) {
     card.child(label(planeStates[operation.state], 13, t.foreground).role('status'))
       .child(facts(t, [['Operation', operation.operationId], ['Work item revision', operation.itemRevision]]));
-    if (operation.reason && planeProblems[operation.reason]) card.child(label(planeProblems[operation.reason], 12, t.muted));
+    if (operation.reason !== 'integrity_error' && planeProblems[operation.reason]) {
+      card.child(label(planeProblems[operation.reason], 12, t.muted));
+    }
   }
   card.children(plane.receipts.filter(value => value !== operation).map(value => planeReceipt(t, plane, value, true)));
   return card;

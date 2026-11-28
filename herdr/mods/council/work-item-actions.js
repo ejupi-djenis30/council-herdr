@@ -451,6 +451,7 @@ class WorkItemPlane {
     this.currentLink = null;
     this.availability = availability;
     this.freshness = 'unavailable';
+    this.integrityBlocked = false;
     this.handoffRequest = null;
   }
 
@@ -469,7 +470,7 @@ class WorkItemPlane {
 
   get action() {
     if (!this.options.active() || !this.installationId || !this.screen.item?.lifecycle || this.screen.staleRead || this.pending ||
-        this.freshness !== 'current' || this.availability !== 'operator_available') return null;
+        this.integrityBlocked || this.freshness !== 'current' || this.availability !== 'operator_available') return null;
     if (!this.link) return 'link';
     if (!this.currentLink) return null;
     const operation = this.operation;
@@ -547,6 +548,7 @@ class WorkItemPlane {
     if (options.active()) {
       this.availability = plane.availability;
       this.currentLink = plane.link;
+      this.integrityBlocked = operation?.reason === 'integrity_error';
       this.freshness = cache.link && (plane.freshness === 'unavailable' || !plane.link) ? 'cached' : plane.freshness;
     }
     return operation;
@@ -587,7 +589,7 @@ class WorkItemPlane {
         if (!inspected || !this.options.active() || expectedInstallation !== this.installationId ||
             this.operation?.operationId !== operationId ||
             this.operation.state !== 'delivery_uncertain' ||
-            this.availability !== 'operator_available' || this.freshness !== 'current') return;
+            this.integrityBlocked || this.availability !== 'operator_available' || this.freshness !== 'current') return;
       }
       const { screen, options } = this;
       const generation = options.nextRequest();
