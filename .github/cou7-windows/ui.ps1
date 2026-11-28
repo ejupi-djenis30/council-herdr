@@ -8,6 +8,8 @@ Add-Type -AssemblyName System.Windows.Forms
 $refs = @([System.Windows.Automation.AutomationElement].Assembly.Location, [System.Windows.Automation.TreeScope].Assembly.Location, [System.Runtime.InteropServices.DllImportAttribute].Assembly.Location)
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/uia-wait.cs') -ReferencedAssemblies $refs
 Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/pixel-check.cs')
+$clipboardRefs=@([System.Windows.Forms.NativeWindow].Assembly.Location,[System.Windows.Forms.Message].Assembly.Location,[System.Runtime.InteropServices.DllImportAttribute].Assembly.Location)
+Add-Type -Path (Join-Path $env:COU7_HARNESS '.github/cou7-windows/clipboard-watch.cs') -ReferencedAssemblies $clipboardRefs
 . (Join-Path $env:COU7_HARNESS '.github/cou7-windows/tab-template.ps1')
 . (Join-Path $env:COU7_HARNESS '.github/cou7-windows/confirm-readback.ps1')
 Add-Type @'
@@ -113,11 +115,19 @@ function AssertEdit($element,[string]$expected) {
   else {
     [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
     Click $element
-    [Windows.Forms.SendKeys]::SendWait('^a'); [Windows.Forms.SendKeys]::SendWait('^c')
+    [Windows.Forms.SendKeys]::SendWait('^a')
+    $watch=[Cou7ClipboardWatch]::new()
+    try {
+      [Windows.Forms.SendKeys]::SendWait('^c')
+      if (-not $watch.WaitForChange(12000)) { throw 'clipboard_update_not_observed' }
+    } finally { $watch.Dispose() }
     FrameBarrier
     $actual=[Windows.Forms.Clipboard]::GetText()
   }
-  if (($actual -replace "`r`n","`n") -ne ($expected -replace "`r`n","`n")) { throw 'uia_edit_readback_mismatch' }
+  if (($actual -replace "`r`n","`n") -ne ($expected -replace "`r`n","`n")) {
+    Record 'ui_edit_comparison' @{ actualLength=$actual.Length;expectedLength=$expected.Length;sentinel=($actual -eq 'COU7 synthetic sentinel') }
+    throw 'uia_edit_readback_mismatch'
+  }
 }
 function PrimaryState($element) {
   CheckWindow
@@ -187,8 +197,9 @@ function ClickWorkItems {
 }
 function ClickOpenItem {
   $script:stage='Open work item'
-  try { Await 'Open work item' } catch { if ($_.Exception.Message -ne 'uia_expected_control_absent') { throw } }
-  $nodes=@(Nodes 'Open work item' | Where-Object { -not $_.Current.IsOffscreen })
+  $accessibleName='Open work item ' + $title
+  try { Await $accessibleName } catch { if ($_.Exception.Message -ne 'uia_expected_control_absent') { throw } }
+  $nodes=@(Nodes $accessibleName | Where-Object { -not $_.Current.IsOffscreen })
   if ($nodes.Count -eq 1) { Click $nodes[0]; return }
   if ($nodes.Count -gt 1) { throw 'open_item_control_not_unique' }
   CheckWindow
@@ -232,7 +243,7 @@ function HandoffText {
 }
 function Diagnostic {
   try {
-    $allow=@('Work items','New work item','Save work item','Refresh roles','Windows fixture · verifier','Delegate','Confirm delegation','Open delegation','Read saved handoff','Back to work item','Copy session ID','Open work item')
+    $allow=@('Work items','New work item','Save work item','Refresh roles','Windows fixture · verifier','Delegate','Confirm delegation','Open delegation','Read saved handoff','Back to work item','Copy session ID','Open work item','Open work item Windows native checkpoint')
     $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     $elements=@(foreach($element in $all) {
       try {
@@ -312,7 +323,12 @@ try {
     Record 'ui_handoff_content' @{ heading=$true; outputNext=$true; guidance=$true }
     Click (One 'Back to work item'); Await 'Open delegation'; Click (One 'Open delegation'); Await 'Copy session ID'
     [Windows.Forms.Clipboard]::SetText('COU7 synthetic sentinel')
-    Click (One 'Copy session ID')
+    $watch=[Cou7ClipboardWatch]::new()
+    try {
+      Click (One 'Copy session ID')
+      if (-not $watch.WaitForChange(12000)) { throw 'clipboard_update_not_observed' }
+    } finally { $watch.Dispose() }
+    FrameBarrier
     $copied=[Windows.Forms.Clipboard]::GetText().Trim()
     if ($copied -ne $item.job.sessionId) { throw 'reopened_session_id_mismatch' }
     Shot 'reopened-delegation'; Mark 'reopened_delegation'
