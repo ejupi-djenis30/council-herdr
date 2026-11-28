@@ -668,7 +668,7 @@ export class WorkItems {
         runCli: this.runCli, active: () => this.isCurrent(screen) && !screen.archived,
         nextRequest: () => ++this.planeRequests,
         cacheFor: installationId => {
-          const key = JSON.stringify([...planeReaderScope(scope), id, installationId]);
+          const key = JSON.stringify([recoveryScope(scope), id, installationId]);
           if (!this.planeCache.has(key)) {
             this.planeCache.set(key, { link: null, operation: null, receipts: new Map(), applied: 0 });
           }

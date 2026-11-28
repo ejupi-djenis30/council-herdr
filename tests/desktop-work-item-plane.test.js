@@ -263,6 +263,25 @@ test('the same UUID and item on another canonical project cannot see the origina
   assert.equal(selected.action, 'prepare');
 });
 
+test('a reader path change requires a fresh attestation and uses only the verified UUID for receipt recovery', async () => {
+  const moved = { ...scope, engine: { ...scope.engine, cli: 'other-launcher/council.js' } };
+  let movedReaderAttests = false;
+  const h = harness(({ project, engine }) => wire(engine === scope.engine ? replies.showA :
+    movedReaderAttests ? { ...replies.showA, plane: { ...replies.showA.plane, freshness: 'cached', operation: null } } :
+      replies.showNull, project));
+  const first = await h.select();
+  await first.refresh();
+  assert.equal(first.receipts.length, 1);
+  const second = await h.select(moved);
+  await second.refresh();
+  assert.deepEqual(second.receipts, []);
+  movedReaderAttests = true;
+  await second.refresh();
+  assert.equal(second.installationId, replies.showA.installationId);
+  assert.equal(second.receipts[0].receipt.commentId, fixture.positiveComment.id);
+  assert.equal(second.action, null);
+});
+
 test('a wrong project envelope and a nonmatching operation echo cannot grant a handoff', async () => {
   let correct = false;
   const h = harness(({ project, verb }) => wire(verb === 'show' ? uncertain : replies.openA,
