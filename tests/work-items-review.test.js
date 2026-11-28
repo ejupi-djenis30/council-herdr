@@ -24,7 +24,7 @@ function fixture(t) {
 }
 function callMcp(project, calls, options = {}) {
   const frames = calls.map((args, i) => JSON.stringify({ jsonrpc: '2.0', id: i + 1, method: 'tools/call', params: { name: 'council_work_item_' + args[0], arguments: args[1] } })).join('\n') + '\n';
-  const child = spawnSync(process.execPath, [cli, 'mcp'], { cwd: project, input: frames, encoding: 'utf8', env: { ...process.env, ...options.env } });
+  const child = spawnSync(process.execPath, [...(options.nodeArgs ?? []), cli, 'mcp'], { cwd: project, input: frames, encoding: 'utf8', env: { ...process.env, ...options.env } });
   assert.equal(child.status, 0, child.stderr);
   return new Map(child.stdout.trim().split(/\r?\n/).map(line => { const r = JSON.parse(line); return [r.id, r.result]; }));
 }
@@ -190,5 +190,92 @@ test('CLI and MCP report injected OS publication failures using contract error c
     const response = JSON.parse(mcp.stdout).result;
     assert.equal(response.isError, true);
     assert.equal(JSON.parse(response.content[0].text).error.code, 'storage_error');
+  }
+});
+
+test('invalid UTF-8 in a definition is reported as integrity_error', async t => {
+  const { project } = fixture(t);
+  await workItemOperation('create', definition, { project });
+  const store = new WorkItemStore(project);
+  const path = join(store.dir, definition.id, '00000001.json');
+  writeFileSync(path, Buffer.from([0xff]));
+
+  const shown = await workItemOperation('show', { id: definition.id }, { project });
+  assert.equal(shown.error.code, 'integrity_error');
+  const listed = await workItemOperation('list', {}, { project });
+  assert.equal(listed.errors[0].code, 'integrity_error');
+  assert.equal(listed.errors[0].id, definition.id);
+  const cliResult = spawnSync(process.execPath, [cli, 'work-item', 'show', '--project', project, '--id', definition.id], { encoding: 'utf8' });
+  assert.notEqual(cliResult.status, 0);
+  assert.equal(JSON.parse(cliResult.stdout).error.code, 'integrity_error');
+  const reply = callMcp(project, [['show', { project, id: definition.id }]]).get(1);
+  assert.equal(reply.isError, true);
+  assert.equal(JSON.parse(reply.content[0].text).error.code, 'integrity_error');
+  assert.deepEqual(fs.readFileSync(path), Buffer.from([0xff]));
+});
+
+test('invalid UTF-8 in an intent remains visible and cannot trigger another dispatch', async t => {
+  const { parent, project } = fixture(t);
+  await workItemOperation('create', definition, { project });
+  let launches = 0;
+  const options = { project, callTeamMember: async () => { launches++; } };
+  await workItemOperation('delegate', { id: definition.id }, options);
+  assert.equal(launches, 1);
+  const store = new WorkItemStore(project);
+  const path = join(store.dir, definition.id, '00000002.json');
+  const damaged = Buffer.from([0xff]);
+  writeFileSync(path, damaged);
+
+  for (const operation of ['show', 'delegate']) {
+    const result = await workItemOperation(operation, { id: definition.id }, options);
+    assert.equal(result.success, true);
+    assert.equal(result.item.state, 'needs_attention');
+    assert.equal(result.item.attention.code, 'integrity_error');
+    assert.equal(result.item.canDelegate, false);
+  }
+  const listed = await workItemOperation('list', {}, options);
+  assert.equal(listed.items[0].state, 'needs_attention');
+  assert.equal(listed.items[0].attention.code, 'integrity_error');
+  assert.deepEqual(listed.errors, []);
+  const marker = join(parent, 'unexpected-dispatch');
+  const preload = join(parent, 'prevent-dispatch.mjs');
+  const jobsUrl = new URL('../lib/jobs.js', import.meta.url).href;
+  writeFileSync(preload, `import { writeFileSync } from 'node:fs'; import { JobManager } from ${JSON.stringify(jobsUrl)}; JobManager.prototype.startJob = async function () { writeFileSync(process.env.WORK_ITEM_TEST_MARKER, 'unexpected'); return { success: false }; };`);
+  const calls = callMcp(project, [['show', { project, id: definition.id }], ['list', { project }], ['delegate', { project, id: definition.id }]], {
+    nodeArgs: ['--import', pathToFileURL(preload).href], env: { WORK_ITEM_TEST_MARKER: marker }
+  });
+  for (const response of calls.values()) {
+    assert.notEqual(response.isError, true);
+    const envelope = JSON.parse(response.content[0].text);
+    const item = envelope.item ?? envelope.items[0];
+    assert.equal(item.state, 'needs_attention');
+    assert.equal(item.attention.code, 'integrity_error');
+  }
+  assert.equal(launches, 1);
+  assert.equal(fs.existsSync(marker), false);
+  assert.deepEqual(fs.readFileSync(path), damaged);
+});
+
+test('a filesystem read error remains a storage_error', async t => {
+  const { project } = fixture(t);
+  await workItemOperation('create', definition, { project });
+  const store = new WorkItemStore(project);
+  const target = join(store.dir, definition.id, '00000001.json');
+  const original = fs.readFileSync;
+  fs.readFileSync = function (path, ...args) {
+    if (String(path) === target) {
+      const error = new Error('access denied');
+      error.code = 'EACCES';
+      throw error;
+    }
+    return original.call(this, path, ...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    const result = await workItemOperation('show', { id: definition.id }, { project });
+    assert.equal(result.error.code, 'storage_error');
+  } finally {
+    fs.readFileSync = original;
+    syncBuiltinESMExports();
   }
 });

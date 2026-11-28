@@ -22,7 +22,14 @@ export class WorkItemStore {
     if (!dir) return null;
     const raw = readBytes(join(dir, `${String(revision).padStart(8, '0')}.json`), 65536);
     if (raw === null) return null;
-    const event = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw));
+    let text;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+    } catch (error) {
+      // A decoding failure is damaged content, not a filesystem error.
+      throw new Error('Work item event contains invalid UTF-8.', { cause: error });
+    }
+    const event = JSON.parse(text);
     if (!event || typeof event !== 'object' || Array.isArray(event)) throw new Error('Invalid work item event.');
     return event;
   }
