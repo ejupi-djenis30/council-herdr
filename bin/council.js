@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { isAbsolute } from 'node:path';
+import { workItemOperation } from '../lib/work-items.js';
 import { readFileSync } from 'node:fs';
 import { HerdrClient } from '../lib/herdr.js';
 import { CouncilOrchestrator } from '../lib/modes.js';
@@ -41,6 +43,7 @@ COMMANDS:
   cast-ballot [options]         Cast a formal voting ballot (council.ballot/v1)
   poll help                     Manage advisory project polls and submit responses
   debate help                   List, open, reply to, or close Council Desktop debates
+  work-item help                Create, list, inspect and delegate work items
   team help                     Configure named roles and call on-demand team members
   activity [--session <id>]     Inspect workspace activity and the session timeline
   activity report [options]     Record a reported progress note
@@ -167,6 +170,31 @@ async function main() {
     const result = await run(rawArgs.slice(1));
     console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     return;
+  }
+  if (command === 'work-item') {
+    const args=rawArgs.slice(1), action=args.shift() ?? 'help';
+    if (action === 'help' && args.length === 0) {
+      console.log('council work-item create --input-json <JSON> | --input-file <path> [--project <absolute-folder>]\ncouncil work-item list [--project <absolute-folder>]\ncouncil work-item show --id <id> [--project <absolute-folder>]\ncouncil work-item delegate --id <id> [--timeout <seconds>] [--project <absolute-folder>]'); return;
+    }
+    let result;
+    try {
+      const allowed={create:['input-json','input-file','project'],list:['project'],show:['id','project'],delegate:['id','timeout','project']}[action];
+      if (!allowed) throw Error('Unknown work-item operation.');
+      const opts={};
+      while(args.length) { const flag=args.shift(); if (!flag.startsWith('--') || !allowed.includes(flag.slice(2)) || Object.hasOwn(opts,flag.slice(2)) || !args.length || args[0].startsWith('--')) throw Error('Invalid, duplicate or missing option.'); opts[flag.slice(2)]=args.shift(); }
+      if (opts.project !== undefined && !isAbsolute(opts.project)) throw Error('Use an absolute project path.');
+      let input={};
+      if (action === 'create') {
+        if ((opts['input-json'] === undefined) === (opts['input-file'] === undefined)) throw Error('Provide exactly one input source.');
+        const raw=opts['input-json'] ?? new TextDecoder('utf-8',{fatal:true}).decode(readFileSync(opts['input-file']));
+        input=JSON.parse(raw);
+      } else if (action !== 'list') {
+        input={id:opts.id};
+        if (opts.timeout !== undefined) input.timeoutSec=/^\d+$/.test(opts.timeout)?Number(opts.timeout):NaN;
+      }
+      result=await workItemOperation(action,input,{project:opts.project ?? process.cwd()});
+    } catch(e) { result={success:false,project:null,error:{code:'invalid_input',message:e.message}}; }
+    console.log(JSON.stringify(result)); if (!result.success) process.exitCode=1; return;
   }
   const flags = parseArgs(rawArgs.slice(1));
 

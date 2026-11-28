@@ -13,6 +13,15 @@ try {
   const root = join(temp, 'package');
   const project = join(temp, 'unrelated project');
   mkdirSync(project);
+  const cli = spawnSync(process.execPath, [join(root, 'bin/council.js'), 'work-item', 'list', '--project', project], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.deepEqual(JSON.parse(cli.stdout).items, []);
+  const setRole = spawnSync(process.execPath, [join(root, 'bin/council.js'), 'team', 'set', 'smoke', '--agent', 'codex', '--role', 'Smoke'], { cwd: project, encoding: 'utf8' });
+  assert.equal(setRole.status, 0, setRole.stderr);
+  const input = { id: 'wi-package', title: 'Package check', roleId: 'smoke', criteria: ['Check the installed command'] };
+  const create = spawnSync(process.execPath, [join(root, 'bin/council.js'), 'work-item', 'create', '--input-json', JSON.stringify(input), '--project', project], { encoding: 'utf8' });
+  assert.equal(create.status, 0, create.stderr);
+  assert.equal(JSON.parse(create.stdout).item.id, input.id);
   const read = file => JSON.parse(readFileSync(join(root, file), 'utf8'));
   const { version } = read('package.json');
   const codex = read('.codex-plugin/plugin.json');
@@ -34,7 +43,11 @@ try {
     request(undefined, 'notifications/initialized'),
     request(2, 'tools/list'),
     call(3, 'council_session_status', { sessionId: 'scoped' }),
-    call(4, 'council_poll_read', { project })
+    call(4, 'council_poll_read', { project }),
+    call(5, 'council_work_item_list', {}),
+    call(6, 'council_work_item_list', { project }),
+    call(7, 'council_work_item_show', { project, id: 'wi-package' }),
+    call(8, 'council_work_item_delegate', { project, id: '../invalid' })
   ];
   for (const [host, command] of wrappers) {
     assert.equal(command.command, 'node', host);
@@ -57,12 +70,19 @@ try {
     const tools = new Set(responses.get(2).tools.map(tool => tool.name));
     for (const name of ['council_alignment', 'council_start', 'council_session_status', 'council_result',
       'council_schedules', 'council_poll_create', 'council_poll_read', 'council_poll_vote', 'council_poll_manage',
-      'council_debate_create', 'council_debate_read', 'council_debate_reply', 'council_debate_close']) {
+      'council_debate_create', 'council_debate_read', 'council_debate_reply', 'council_debate_close',
+      'council_work_item_create', 'council_work_item_list', 'council_work_item_show', 'council_work_item_delegate']) {
       assert.ok(tools.has(name), `${host}: ${name} missing`);
     }
     assert.equal(responses.get(3).isError, true, host);
     assert.match(responses.get(3).content[0].text, /no default project/, host);
     assert.notEqual(responses.get(4).isError, true, responses.get(4).content[0].text);
+    assert.equal(responses.get(5).isError, true, host);
+    assert.equal(JSON.parse(responses.get(5).content[0].text).error.code, 'invalid_input', host);
+    assert.equal(JSON.parse(responses.get(6).content[0].text).items[0].id, 'wi-package', host);
+    assert.equal(JSON.parse(responses.get(7).content[0].text).item.id, 'wi-package', host);
+    assert.equal(responses.get(8).isError, true, host);
+    assert.equal(JSON.parse(responses.get(8).content[0].text).error.code, 'invalid_input', host);
     assert.equal(existsSync(join(root, '.agent_workspace')), false, host);
     console.log(`${host}: packaged Council ${version} handshake and project guard passed`);
   }

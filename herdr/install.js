@@ -29,7 +29,7 @@ const files = [
   'runtime/alignment.mjs', 'runtime/council.mjs', 'runtime/debate-command.mjs', 'runtime/debate-room.mjs', 'runtime/delegations.mjs', 'runtime/desktop.mjs',
   'runtime/discussion.mjs', 'runtime/invitations.mjs', 'runtime/job-record.mjs', 'runtime/poll-command.mjs', 'runtime/wait-alignment.mjs',
   'runtime/worker-observation.mjs', 'runtime/agent-discussion.mjs', 'runtime/schedule-record.mjs', 'runtime/schedule-time.mjs',
-  'runtime/polls.mjs', 'runtime/store-files.mjs', 'runtime/team.mjs',
+  'runtime/polls.mjs', 'runtime/store-files.mjs', 'runtime/team.mjs', 'runtime/work-item-store.mjs',
   ...readdirSync(join(source, 'icons')).filter(name => name.endsWith('.svg')).map(name => `icons/${name}`)
 ];
 // Keep the worker, CLI and the paths they put in agent briefs together after installation.
