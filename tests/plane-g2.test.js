@@ -12,6 +12,7 @@ import { createFixtureOperator } from '../herdr/mods/council/runtime/plane-fixtu
 import { TeamStore } from '../herdr/mods/council/runtime/team.mjs';
 import { workItemOperation } from '../lib/work-items.js';
 import { installationId, profile, issueIds, github, fixtureTransport } from './fixtures/plane-g1.mjs';
+import { githubFixture } from './fixtures/plane-github-fixture.mjs';
 
 const operatorId = '159be116-5033-4af6-aabf-3552ddc024e1';
 const target = { instanceId:profile.instanceId, origin:profile.origin, workspaceSlug:profile.workspaceSlug,
@@ -19,27 +20,35 @@ const target = { instanceId:profile.instanceId, origin:profile.origin, workspace
   itemId:issueIds[0], sequence:12, authorId:profile.principalId };
 const snapshot = (n = 1) => ({operationId:n.toString(16).padStart(32,'0'),itemRevision:4,linkRevision:1,status:'in_review',
   evidenceUrl:github.pull.html_url,createdAt:1000,expiresAt:301000});
+async function prepare(publisher, draft) {
+  const result=await publisher.prepareEvidence(draft.evidenceUrl);
+  if (result.preview) {
+    for (const key of ['operationId','itemRevision','linkRevision','status','evidenceUrl','createdAt','expiresAt']) draft[key]=result.preview[key];
+  }
+  return result.operation;
+}
 function setup(t, options = {}) {
   const root = mkdtempSync(join(tmpdir(),'council-plane-g2-'));
   t.after(() => rmSync(root,{recursive:true,force:true}));
   const project = join(root,'project'), privateRoot = join(root,'private');
   mkdirSync(project); mkdirSync(privateRoot);
   const clock = { now:2000 };
-  const current = {installationId,itemId:'wi-shared',itemRevision:4,linkRevision:1,status:'in_review',target};
+  const current = {installationId,itemId:'wi-shared',itemRevision:4,linkRevision:1,status:'in_review',target,integrity:false};
   const plane = createFixturePlane(target);
-  const args = {privateRoot,project,installationId,itemId:'wi-shared',target,registry:github.registry,plane,operatorId,
+  const githubState = githubFixture();
+  const args = {privateRoot,project,installationId,itemId:'wi-shared',target,registry:github.registry,plane,github:githubState.verifier,operatorId,
     readCurrent:()=>current,acknowledgeDirectory:()=>true,now:()=>clock.now,...options};
   const create = overrides => createFixturePublisher({...args,...overrides});
   const publisher = create();
   const approve = s => ({operatorId,approved:true,payloadDigest:publisher.payloadDigest(s)});
-  return {root, project, privateRoot, clock, current, plane, publisher, create, approve};
+  return {root, project, privateRoot, clock, current, plane, githubState, publisher, create, approve};
 }
 
 test('fixture Start posts once and validates exact readback', async t => {
   const {publisher,plane,approve} = setup(t);
   const s = snapshot();
   const planningBefore=plane.snapshot().planningFields;
-  assert.equal(publisher.prepare(s).state, 'prepared');
+  assert.equal((await prepare(publisher,s)).state, 'prepared');
   const result = await publisher.confirm(s.operationId,approve(s));
   assert.equal(result.state,'published');
   assert.equal(result.receipt.source,'response');
@@ -57,7 +66,7 @@ test('injected scoped reader exposes original operation without provider calls',
   const links=createFixtureOperator({project,privateRoot,installationId,profile,transport:fixtureTransport(),itemExists:()=>true});
   const candidate=await links.resolve('wi-shared','COU-12'); await links.confirm('wi-shared',candidate.candidateId,candidate.localRef);
   const reader=createFixturePublicationReader({links,publisher});
-  const s=snapshot(); publisher.prepare(s); await publisher.confirm(s.operationId,approve(s));
+  const s=snapshot(); await prepare(publisher,s); await publisher.confirm(s.operationId,approve(s));
   const count=plane.snapshot().calls.length;
   const show=await workItemOperation('plane_show',{id:'wi-shared',operationId:s.operationId},{project,planeFixture:reader});
   assert.equal(show.installationId,installationId); assert.equal(show.plane.operation.state,'published');
@@ -82,7 +91,7 @@ for (let i = 0; i < vectors.length; i++) {
       const links = await Promise.all([linkOperator.confirm('wi-shared',candidate.candidateId,candidate.localRef),linkOperator.confirm('wi-shared',other.candidateId,other.localRef)]);
       assert.deepEqual(links[0],links[1]);
     } else await linkOperator.confirm('wi-shared',candidate.candidateId,candidate.localRef);
-    publisher.prepare(s);
+    await prepare(publisher,s);
     let result;
     if (i === 1) plane.setMode('commit_drop');
     if (i === 2) plane.setMode('drop_without_commit');
@@ -121,7 +130,7 @@ for (let i = 0; i < vectors.length; i++) {
 
 test('fixture consent and pins fail closed without any send', async t => {
   const {publisher,plane,approve,current,create} = setup(t);
-  const s=snapshot(); publisher.prepare(s);
+  const s=snapshot(); await prepare(publisher,s);
   for (const input of [{...approve(s),approved:false}, {...approve(s),operatorId:randomUUID()},
     {...approve(s),payloadDigest:'0'.repeat(64)}, {...approve(s),unexpected:true}]) {
     await assert.rejects(publisher.confirm(s.operationId,input));
@@ -139,12 +148,12 @@ test('changed installation, item, link, status, target or provider permission de
   ];
   for (const mutate of mutations) {
     const {publisher,plane,approve,current}=setup(t);
-    const s=snapshot(); publisher.prepare(s); mutate(current);
+    const s=snapshot(); await prepare(publisher,s); mutate(current);
     assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'conflict');
     assert.equal(plane.snapshot().posts,0);
   }
   const {publisher,plane,approve}=setup(t);
-  const s=snapshot(); publisher.prepare(s); plane.setMode('unauthorized');
+  const s=snapshot(); await prepare(publisher,s); plane.setMode('unauthorized');
   const result=await publisher.confirm(s.operationId,approve(s));
   assert.equal(result.state,'conflict'); assert.equal(result.reason,'authorization_denied');
   assert.equal(plane.snapshot().posts,0);
@@ -152,24 +161,24 @@ test('changed installation, item, link, status, target or provider permission de
 
 test('expired preview stays retired after clock rollback; supersession is explicit', async t => {
   const {publisher,plane,approve,clock,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s); clock.now=s.expiresAt;
+  const s=snapshot(); await prepare(publisher,s); clock.now=s.expiresAt;
   assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'expired');
   clock.now=s.expiresAt-1;
   assert.equal(create().inspect(s.operationId).state,'expired');
   await assert.rejects(create().confirm(s.operationId,approve(s)));
   assert.equal(plane.snapshot().posts,0);
   const newer={...snapshot(2),createdAt:clock.now,expiresAt:clock.now+300000};
-  assert.equal(publisher.prepare(newer).operationId,s.operationId);
+  assert.equal((await prepare(publisher,newer)).operationId,s.operationId);
   clock.now=s.expiresAt;
   publisher.supersede(s.operationId);
-  assert.equal(publisher.prepare(newer).state,'prepared');
+  assert.equal((await prepare(publisher,newer)).state,'prepared');
 });
 
 test('expiry and stale scope after approval never reach Start', async t => {
   for (const mode of ['expire','revision','offline']) {
     let mutate=()=>{};
     const {publisher,plane,approve,clock,current,create}=setup(t,{hook:(point)=>{if(point==='after_approval') mutate();}});
-    const s=snapshot(); publisher.prepare(s);
+    const s=snapshot(); await prepare(publisher,s);
     mutate=()=>{if(mode==='expire') clock.now=s.expiresAt; if(mode==='revision') current.itemRevision++; if(mode==='offline') plane.setMode('offline');};
     const result=await publisher.confirm(s.operationId,approve(s));
     assert.equal(result.state,mode==='expire'?'expired':mode==='revision'?'conflict':'offline');
@@ -184,20 +193,22 @@ test('expiry and stale scope after approval never reach Start', async t => {
 
 test('cancelled or conflicting previews require explicit supersession', async t => {
   const {publisher,plane,approve}=setup(t);
-  const s=snapshot(); publisher.prepare(s);
+  const s=snapshot(); await prepare(publisher,s);
   assert.equal(publisher.cancel(s.operationId).state,'cancelled');
   await assert.rejects(publisher.confirm(s.operationId,approve(s)));
-  assert.equal(publisher.prepare(snapshot(2)).operationId,s.operationId);
+  assert.equal((await prepare(publisher,snapshot(2))).operationId,s.operationId);
   publisher.supersede(s.operationId);
-  assert.equal(publisher.prepare(snapshot(2)).state,'prepared');
+  assert.equal((await prepare(publisher,snapshot(2))).state,'prepared');
   assert.equal(plane.snapshot().posts,0);
 });
 
-test('unverified preview fields and non-fixture transport are rejected', t => {
+test('unverified preview fields and non-fixture transport are rejected', async t => {
   const {publisher,create,plane,project}=setup(t);
   for (const bad of [{...snapshot(),evidenceUrl:'https://github.com/example/council/pull/01'},
     {...snapshot(),status:'arbitrary'}, {...snapshot(),createdAt:1000,expiresAt:301001},
-    {...snapshot(),prompt:'private-canary'}, {...snapshot(),itemRevision:0}]) assert.throws(()=>publisher.prepare(bad));
+    {...snapshot(),prompt:'private-canary'}, {...snapshot(),itemRevision:0}]) assert.throws(()=>publisher.payloadDigest(bad));
+  assert.equal(publisher.prepare,undefined);
+  await assert.rejects(publisher.prepareEvidence({evidenceUrl:github.pull.html_url}),{code:'invalid_input'});
   assert.throws(()=>create({plane:{verify(){},post(){}}}),{code:'invalid_input'});
   assert.throws(()=>create({privateRoot:project}),{code:'scope_conflict'});
   assert.equal(plane.snapshot().posts,0);
@@ -205,7 +216,7 @@ test('unverified preview fields and non-fixture transport are rejected', t => {
 
 test('pinned route and payload exclude private source, scope and canaries', async t => {
   const {publisher,plane,approve,root}=setup(t);
-  const s=snapshot(); publisher.prepare(s); await publisher.confirm(s.operationId,approve(s));
+  const s=snapshot(); await prepare(publisher,s); await publisher.confirm(s.operationId,approve(s));
   const trace=plane.snapshot(), post=trace.calls.find(c=>c.method==='POST');
   assert.equal(post.route,`/api/v1/workspaces/${target.workspaceSlug}/projects/${target.projectId}/work-items/${target.itemId}/comments/`);
   assert.deepEqual(Object.keys(JSON.parse(post.bytes)),['access','comment_html']);
@@ -215,8 +226,8 @@ test('pinned route and payload exclude private source, scope and canaries', asyn
 
 test('approved payload bytes remain frozen if the caller later mutates its snapshot', async t => {
   const {publisher,plane}=setup(t);
-  const s=snapshot(); const originalDigest=publisher.payloadDigest(s);
-  publisher.prepare(s);
+  const s=snapshot(); await prepare(publisher,s);
+  const originalDigest=publisher.payloadDigest(s);
   s.status='closed'; s.evidenceUrl='https://github.com/example/council/pull/99';
   const result=await publisher.confirm(s.operationId,{operatorId,approved:true,payloadDigest:originalDigest});
   assert.equal(result.state,'published');
@@ -228,7 +239,7 @@ test('approved payload bytes remain frozen if the caller later mutates its snaps
 
 test('changed installation or target cannot recover another scope', async t => {
   const {publisher,plane,approve,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
+  const s=snapshot(); await prepare(publisher,s); plane.setMode('commit_drop');
   await publisher.confirm(s.operationId,approve(s));
   const replacement=create({installationId:randomUUID()});
   assert.throws(()=>replacement.inspect(s.operationId),{code:'not_found'});
@@ -247,7 +258,7 @@ test('Start storage faults never grant a send, including lost acknowledgement', 
       acknowledgeDirectory:(stage,type) => !(active && `${stage}_ack:${type}` === point)
     };
     const {publisher,plane,approve,create} = setup(t,options);
-    const s=snapshot(); publisher.prepare(s);
+    const s=snapshot(); await prepare(publisher,s);
     const result = await publisher.confirm(s.operationId,approve(s));
     assert.equal(plane.snapshot().posts,0,point);
     if (point === 'after_link:start' || point === 'after_ack:start') {
@@ -267,7 +278,7 @@ test('Start commit boundary rejects expiry, scope changes and clock rollback', a
     const {publisher,plane,approve,clock,current,privateRoot}=setup(t,{
       hook:(point,type)=>{ if (point === 'before_link' && type === 'start') mutate(); }
     });
-    const s=snapshot(); publisher.prepare(s);
+    const s=snapshot(); await prepare(publisher,s);
     mutate=()=>{
       if (change === 'expiry') clock.now=s.expiresAt;
       if (change === 'revision') current.itemRevision++;
@@ -290,11 +301,13 @@ test('Start commit boundary rejects expiry, scope changes and clock rollback', a
 
 test('Start commit rechecks time after the synchronous scope reader returns', async t => {
   let atBoundary=false;
+  let expiry;
   const context=setup(t,{
     hook:(point,type)=>{ if (point === 'before_link' && type === 'start') atBoundary=true; },
-    readCurrent:()=>{ if (atBoundary) context.clock.now=301000; return context.current; }
+    readCurrent:()=>{ if (atBoundary) context.clock.now=expiry; return context.current; }
   });
-  const s=snapshot(); context.publisher.prepare(s);
+  const s=snapshot(); await prepare(context.publisher,s);
+  expiry=s.expiresAt;
   const result=await context.publisher.confirm(s.operationId,context.approve(s));
   assert.equal(result.state,'expired'); assert.equal(result.reason,'stale_preview');
   assert.equal(context.plane.snapshot().posts,0);
@@ -308,14 +321,14 @@ test('intent, approval, post and receipt interruptions keep truthful restart sta
     const {publisher,plane,approve,create}=setup(t,{hook:(stage,type)=>{if(active && `${stage}:${type}`===point) throw Error('fixture interruption');}});
     const s=snapshot();
     if (point.endsWith(':intent')) {
-      assert.throws(()=>publisher.prepare(s));
+      await assert.rejects(prepare(publisher,s));
       active=false;
       if (point.startsWith('before')) assert.throws(()=>create().inspect(s.operationId),{code:'not_found'});
-      else assert.equal(create().inspect(s.operationId).state,'prepared');
+      else assert.equal(create().latest().state,'prepared');
       assert.equal(plane.snapshot().posts,0);
       continue;
     }
-    publisher.prepare(s);
+    await prepare(publisher,s);
     const result=await publisher.confirm(s.operationId,approve(s));
     const expected=point==='before_link:approval'?'prepared':point==='after_link:approval'?'approved_unsent':'delivery_uncertain';
     assert.equal(result.state,expected,point);
@@ -341,7 +354,7 @@ test('unverifiable storage blocks writes and a receipt is not exposed without re
       hook:(point,type)=>{if(point==='after_link' && type==='receipt') broken=true;},
       acknowledgeDirectory:(stage,type)=>!(broken && (stage==='read' || (stage==='after' && type==='receipt')))
     });
-    const s=snapshot(); publisher.prepare(s);
+    const s=snapshot(); await prepare(publisher,s);
     await assert.rejects(publisher.confirm(s.operationId,approve(s)),{code:'storage_error'});
     assert.equal(plane.snapshot().posts,1);
     assert.throws(()=>publisher.inspect(s.operationId),{code:'storage_error'});
@@ -352,9 +365,9 @@ test('unverifiable storage blocks writes and a receipt is not exposed without re
   }
 });
 
-test('storage diagnostics never expose fixture paths or raw errors', t => {
+test('storage diagnostics never expose fixture paths or raw errors', async t => {
   const {publisher,root,plane}=setup(t,{hook:()=>{throw Error('sensitive-directory-canary');}});
-  assert.throws(()=>publisher.prepare(snapshot()),error=>{
+  await assert.rejects(prepare(publisher,snapshot()),error=>{
     assert.equal(error.code,'storage_error');
     assert.ok(!error.message.includes(root));
     assert.ok(!error.message.includes('sensitive-directory-canary'));
@@ -365,11 +378,11 @@ test('storage diagnostics never expose fixture paths or raw errors', t => {
 
 test('uncertain Start remains the item barrier across restart and changed snapshot', async t => {
   const {publisher,plane,approve,create,current} = setup(t);
-  const s=snapshot(); publisher.prepare(s); plane.setMode('drop_without_commit');
+  const s=snapshot(); await prepare(publisher,s); plane.setMode('drop_without_commit');
   assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'delivery_uncertain');
   const restarted=create(); current.itemRevision=5;
   const newer={...snapshot(2),itemRevision:5};
-  assert.equal(restarted.prepare(newer).operationId,s.operationId);
+  assert.equal((await prepare(restarted,newer)).operationId,s.operationId);
   assert.throws(()=>restarted.supersede(s.operationId),{code:'scope_conflict'});
   assert.equal((await restarted.reconcile(s.operationId)).state,'delivery_uncertain');
   assert.equal((await restarted.confirm(s.operationId,approve(s))).state,'delivery_uncertain');
@@ -378,10 +391,10 @@ test('uncertain Start remains the item barrier across restart and changed snapsh
 
 test('an earlier receipt remains inspectable while a newer revision is uncertain', async t => {
   const {publisher,plane,approve,create,current}=setup(t);
-  const first=snapshot(); publisher.prepare(first);
+  const first=snapshot(); await prepare(publisher,first);
   assert.equal((await publisher.confirm(first.operationId,approve(first))).state,'published');
   current.itemRevision=5;
-  const second={...snapshot(2),itemRevision:5}; publisher.prepare(second); plane.setMode('commit_drop');
+  const second={...snapshot(2),itemRevision:5}; await prepare(publisher,second); plane.setMode('commit_drop');
   assert.equal((await publisher.confirm(second.operationId,approve(second))).state,'delivery_uncertain');
   const reopened=create();
   assert.equal(reopened.latest().operationId,second.operationId);
@@ -396,7 +409,7 @@ test('an earlier receipt remains inspectable while a newer revision is uncertain
 test('malformed acknowledgement and detail failure stay uncertain until positive readback', async t => {
   for (const mode of ['malformed_response','detail_error']) {
     const {publisher,plane,approve,create} = setup(t);
-    const s=snapshot(); publisher.prepare(s); plane.setMode(mode);
+    const s=snapshot(); await prepare(publisher,s); plane.setMode(mode);
     assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'delivery_uncertain');
     plane.setMode('normal');
     const result=await create().reconcile(s.operationId);
@@ -414,7 +427,7 @@ test('reconciliation requires exact scope, author, creator, audience and content
   ];
   for (const mutate of mutations) {
     const {publisher,plane,approve,create}=setup(t);
-    const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
+    const s=snapshot(); await prepare(publisher,s); plane.setMode('commit_drop');
     assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'delivery_uncertain');
     const comment=plane.snapshot().comments[0]; mutate(comment); plane.replaceComments([comment]); plane.setMode('normal');
     assert.equal((await create().reconcile(s.operationId)).state,'delivery_uncertain');
@@ -426,7 +439,7 @@ test('reconciliation proves one hit on second page and rejects ambiguity or malf
   const cases=['second_page','duplicate','repeat_row','loop','too_many_pages','oversize_cursor','malformed','malformed_other','wrong_scope_other','oversize_body','missing'];
   for (const scenario of cases) {
     const {publisher,plane,approve,create}=setup(t);
-    const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
+    const s=snapshot(); await prepare(publisher,s); plane.setMode('commit_drop');
     await publisher.confirm(s.operationId,approve(s)); plane.setMode('normal');
     const good=plane.snapshot().comments[0];
     if (scenario === 'second_page') { plane.replaceComments([{...good,id:randomUUID(),comment_html:'unrelated'},good]); plane.setPageSize(1); }
@@ -454,7 +467,7 @@ test('reconciliation proves one hit on second page and rejects ambiguity or malf
 test('terminal v1 page accepts a cursor and metadata but never follows that cursor', async t => {
   for (const extra of [{}, {count:1,total_pages:1,prev_page_results:false,prev_cursor:'opaque-previous'}]) {
     const {publisher,plane,approve,create}=setup(t);
-    const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
+    const s=snapshot(); await prepare(publisher,s); plane.setMode('commit_drop');
     assert.equal((await publisher.confirm(s.operationId,approve(s))).state,'delivery_uncertain');
     const original=plane.snapshot().comments[0]; plane.setMode('normal');
     plane.setPages([{...extra,results:[original],next_page_results:false,next_cursor:'opaque-terminal'}]);
@@ -469,7 +482,7 @@ test('terminal v1 page accepts a cursor and metadata but never follows that curs
 
 test('concurrent GET-only reconciliation records the same unique receipt', async t => {
   const {publisher,plane,approve,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s); plane.setMode('commit_drop');
+  const s=snapshot(); await prepare(publisher,s); plane.setMode('commit_drop');
   await publisher.confirm(s.operationId,approve(s)); plane.setMode('normal');
   const [a,b]=await Promise.all([create().reconcile(s.operationId),create().reconcile(s.operationId)]);
   assert.equal(a.state,'published'); assert.deepEqual(a.receipt,b.receipt);
@@ -478,7 +491,7 @@ test('concurrent GET-only reconciliation records the same unique receipt', async
 
 test('a later conflicting positive proof is recorded without replacing the original receipt', async t => {
   const {publisher,plane,approve,privateRoot,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s);
+  const s=snapshot(); await prepare(publisher,s);
   const original=await publisher.confirm(s.operationId,approve(s));
   const conflicting={...plane.snapshot().comments[0],id:randomUUID()};
   plane.replaceComments([conflicting]);
@@ -494,7 +507,7 @@ test('a later conflicting positive proof is recorded without replacing the origi
 
 test('damaged journal is blocked and does not produce a new send', async t => {
   const {publisher,plane,approve,privateRoot,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s); plane.setMode('drop_without_commit');
+  const s=snapshot(); await prepare(publisher,s); plane.setMode('drop_without_commit');
   await publisher.confirm(s.operationId,approve(s));
   const dir=join(privateRoot,readdirSync(privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
   const tail=readdirSync(dir).filter(n=>/^\d{8}\.json$/.test(n)).sort().at(-1);
@@ -511,11 +524,11 @@ test('a corrupt later intent leaves the prior receipt visible with integrity err
   assert.equal((await workItemOperation('create',{id:'wi-shared',title:'Fixture',roleId:'dev',criteria:['done']},{project})).success,true);
   const links=createFixtureOperator({project,privateRoot,installationId,profile,transport:fixtureTransport(),itemExists:()=>true});
   const candidate=await links.resolve('wi-shared','COU-12'); await links.confirm('wi-shared',candidate.candidateId,candidate.localRef);
-  const first=snapshot(); publisher.prepare(first);
+  const first=snapshot(); await prepare(publisher,first);
   const published=await publisher.confirm(first.operationId,approve(first));
   assert.equal(published.state,'published');
   current.itemRevision=5;
-  const second={...snapshot(2),itemRevision:5}; publisher.prepare(second);
+  const second={...snapshot(2),itemRevision:5}; await prepare(publisher,second);
   const dir=join(privateRoot,readdirSync(privateRoot).find(name=>/^[a-f0-9]{64}$/.test(name)));
   const receiptFile=readdirSync(dir).find(name=>/^\d{8}\.json$/.test(name) && JSON.parse(readFileSync(join(dir,name))).type === 'receipt');
   const originalReceiptBytes=readFileSync(join(dir,receiptFile));
@@ -537,7 +550,7 @@ test('a corrupt later intent leaves the prior receipt visible with integrity err
   assert.equal(show.plane.operation.reason,'integrity_error'); assert.deepEqual(show.plane.operation.receipt,published.receipt);
   const missing=await workItemOperation('plane_show',{id:'wi-shared',operationId:second.operationId},{project,planeFixture:reader});
   assert.equal(missing.success,false); assert.equal(missing.error.code,'integrity_error');
-  assert.throws(()=>restarted.prepare({...snapshot(3),itemRevision:5}),{code:'integrity_error'});
+  await assert.rejects(prepare(restarted,{...snapshot(3),itemRevision:5}),{code:'integrity_error'});
   assert.throws(()=>restarted.cancel(first.operationId),{code:'integrity_error'});
   assert.throws(()=>restarted.supersede(first.operationId),{code:'integrity_error'});
   await assert.rejects(restarted.confirm(first.operationId,approve(first)),{code:'integrity_error'});
@@ -548,7 +561,7 @@ test('a corrupt later intent leaves the prior receipt visible with integrity err
 
 test('replacement of the bound journal directory fails closed on reopen', async t => {
   const {publisher,plane,approve,privateRoot,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s); plane.setMode('drop_without_commit');
+  const s=snapshot(); await prepare(publisher,s); plane.setMode('drop_without_commit');
   await publisher.confirm(s.operationId,approve(s));
   const name=readdirSync(privateRoot).find(entry=>/^[a-f0-9]{64}$/.test(entry));
   const dir=join(privateRoot,name);
@@ -560,8 +573,8 @@ test('replacement of the bound journal directory fails closed on reopen', async 
 
 test('real process exit after Start leaves uncertainty and never replays', async t => {
   const {publisher,plane,approve,project,privateRoot,create}=setup(t);
-  const s=snapshot(); publisher.prepare(s);
-  const child=spawnSync(process.execPath,[resolve('tests/fixtures/plane-g2-child.mjs'),project,privateRoot,'crash'],{encoding:'utf8'});
+  const s=snapshot(); await prepare(publisher,s);
+  const child=spawnSync(process.execPath,[resolve('tests/fixtures/plane-g2-child.mjs'),project,privateRoot,'crash',JSON.stringify(s)],{encoding:'utf8'});
   assert.equal(child.status,73,child.stderr);
   const restarted=create();
   assert.equal(restarted.inspect(s.operationId).state,'delivery_uncertain');
@@ -572,8 +585,8 @@ test('real process exit after Start leaves uncertainty and never replays', async
 
 test('real processes compete for one Start and at most one sends', async t => {
   const {publisher,project,privateRoot}=setup(t);
-  const s=snapshot(); publisher.prepare(s);
-  const children=Array.from({length:2},()=>fork(resolve('tests/fixtures/plane-g2-child.mjs'),[project,privateRoot,'race'],{stdio:['ignore','ignore','ignore','ipc']}));
+  const s=snapshot(); await prepare(publisher,s);
+  const children=Array.from({length:2},()=>fork(resolve('tests/fixtures/plane-g2-child.mjs'),[project,privateRoot,'race',JSON.stringify(s)],{stdio:['ignore','ignore','ignore','ipc']}));
   t.after(()=>{ for (const child of children) if (child.exitCode === null) child.kill(); });
   const results=children.map(child=>new Promise((resolveResult,reject)=>{
     let finished=false;

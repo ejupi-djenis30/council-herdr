@@ -20,8 +20,9 @@ try {
   const installed=spawnSync(process.execPath,[join(root,'package/herdr/install.js'),'--app-home',app],{encoding:'utf8',env});
   assert.equal(installed.status,0,installed.stderr);
   const engine=join(app,'mods/council/engine');
-  for (const file of ['plane-journal-fixture.mjs','plane-publication-fixture.mjs','plane-transport-fixture.mjs'])
+  for (const file of ['plane-journal-fixture.mjs','plane-publication-fixture.mjs','plane-transport-fixture.mjs','plane-github.mjs'])
     assert.ok(readFileSync(join(engine,'herdr/mods/council/runtime',file)).length);
+  assert.ok(readFileSync(join(engine,'lib/plane-evidence.js')).length);
   const cli=join(engine,'bin/council.js');
   for (const action of ['show','open']) {
     const child=spawnSync(process.execPath,[cli,'work-item','plane',action,'--id','wi-package','--project',project],{encoding:'utf8',env});

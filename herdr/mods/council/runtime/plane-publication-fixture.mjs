@@ -1,12 +1,14 @@
 // G2 protocol fixture. There is no network implementation or installed
 // authority: identity, consent, provider and directory acknowledgement are
-// injected test doubles. T006's verified preview is supplied by the fixture.
-import { randomUUID } from 'node:crypto';
+// injected test doubles. GitHub evidence is verified through an explicit,
+// separately injected read transport before preparation and before Start.
+import { randomBytes, randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 import { fixtureJournal, digest, tupleDigest, problem } from './plane-journal-fixture.mjs';
 import { isFixturePlane } from './plane-transport-fixture.mjs';
 import { parseEvidenceUrl } from './plane-fixture.mjs';
+import { isGitHubVerifier } from './plane-github.mjs';
 
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const opId = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
@@ -42,10 +44,10 @@ function projection(record) {
     reason:record.state === 'delivery_uncertain' ? 'receipt_not_proven' : record.reason ?? null, receipt:record.receipt ?? null };
 }
 
-export function createFixturePublisher({ privateRoot, project, installationId, itemId, target, registry, plane,
+export function createFixturePublisher({ privateRoot, project, installationId, itemId, target, registry, plane, github,
   operatorId, readCurrent, acknowledgeDirectory, now = Date.now, hook = () => {} }) {
   if (!uuid(installationId) || typeof itemId !== 'string' || !/^wi-[a-z0-9][a-z0-9-]{0,59}$/.test(itemId) ||
-      !validTarget(target) || !uuid(operatorId) || !isFixturePlane(plane) || typeof readCurrent !== 'function' ||
+      !validTarget(target) || !uuid(operatorId) || !isFixturePlane(plane) || !isGitHubVerifier(github) || !github.matchesRegistry(registry) || typeof readCurrent !== 'function' ||
       typeof acknowledgeDirectory !== 'function' || typeof now !== 'function' || typeof hook !== 'function') throw problem('invalid_input');
   // Validate the registry before any journal mutation without contacting GitHub.
   parseEvidenceUrl(`https://github.com/${registry?.fullName}/pull/1`, registry);
@@ -67,9 +69,20 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
     if (timestamp(at) && at >= s.expiresAt) throw Object.assign(problem('stale_preview'), { expiredAt:at });
     if (!ownScope() || !timestamp(at) || at < s.createdAt) throw problem('stale_preview');
     let current;
-    try { current = readCurrent(); } catch { throw problem('scope_conflict'); }
-    if (!current || current.installationId !== installationId || current.itemId !== itemId || current.itemRevision !== s.itemRevision ||
+    try { current = readCurrent(); } catch (error) { throw problem(error?.code === 'integrity_error' ? 'integrity_error' : 'scope_conflict'); }
+    if (!current || current.integrity !== false) throw problem('integrity_error');
+    if (current.installationId !== installationId || current.itemId !== itemId || current.itemRevision !== s.itemRevision ||
         current.linkRevision !== s.linkRevision || current.status !== s.status || !same(current.target, targetPin)) throw problem('scope_conflict');
+  }
+  function guardCommit(snapshot, event, deadline) {
+    github.assertDeadline(deadline);
+    const before = now();
+    if (!timestamp(before) || before < event.data.at) throw Object.assign(problem('stale_preview'), { rollbackAt:event.data.at });
+    fresh(snapshot, before);
+    const after = now();
+    if (!timestamp(after) || after < before) throw Object.assign(problem('stale_preview'), { rollbackAt:before });
+    if (after >= snapshot.expiresAt) throw Object.assign(problem('stale_preview'), { expiredAt:after });
+    github.assertDeadline(deadline);
   }
   // Replay validates hashes and transitions; malformed tails never grant a send.
   function fold(state, event) {
@@ -104,7 +117,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       existing.conflicts.push(d.commentId);
     } else if (event.type === 'offline' || event.type === 'conflict' || event.type === 'expired') {
       if (!exact(d,['at','operationId','reason']) || !existing || !['prepared','approved_unsent','offline'].includes(existing.state) ||
-          (event.type === 'offline' ? d.reason !== 'offline' : event.type === 'conflict' ? !['scope_conflict','authorization_denied','stale_preview'].includes(d.reason) :
+          (event.type === 'offline' ? d.reason !== 'offline' : event.type === 'conflict' ? !['scope_conflict','authorization_denied','stale_preview','evidence_unverified','integrity_error'].includes(d.reason) :
             d.reason !== 'stale_preview' || d.at < existing.snapshot.expiresAt)) throw problem('integrity_error');
       existing.state = event.type; existing.reason = d.reason;
     } else if (event.type === 'cancel') {
@@ -121,8 +134,9 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
   const journal = fixtureJournal({ privateRoot:privateDir, scope:idScope, fold, acknowledgeDirectory, hook });
   function current() { if (!ownScope()) throw problem('scope_conflict'); return journal.read().state; }
   function at(state) { const n = now(); if (!timestamp(n) || n < state.lastAt) throw Object.assign(problem('stale_preview'), { rollbackAt:state.lastAt }); return n; }
-  function saved(id) { const state = current(); const result = state.operations[id]; if (!result) throw problem('not_found'); return result; }
+  function saved(id) { if (!opId(id)) throw problem('invalid_input'); const state = current(); const result = state.operations[id]; if (!result) throw problem('not_found'); return result; }
   function inspection(id) {
+    if (id !== undefined && !opId(id)) throw problem('invalid_input');
     if (!ownScope()) throw problem('scope_conflict');
     const head = journal.readPrefix();
     const record = id === undefined ? (head.state.active ? head.state.operations[head.state.active] : Object.values(head.state.operations).at(-1)) : head.state.operations[id];
@@ -151,7 +165,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
     if (timestamp(e?.expiredAt)) return mark(id,'expired',e.expiredAt);
     if (timestamp(e?.rollbackAt)) return mark(id,'conflict',e.rollbackAt,'stale_preview');
     if (e?.code === 'offline') return mark(id,'offline');
-    if (['scope_conflict','authorization_denied'].includes(e?.code)) return mark(id,'conflict',undefined,e.code);
+    if (['scope_conflict','authorization_denied','evidence_unverified','integrity_error'].includes(e?.code)) return mark(id,'conflict',undefined,e.code);
     throw e;
   }
   function validComment(comment, snapshot) {
@@ -191,6 +205,40 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
     } catch { /* A failed write never invents a receipt. */ }
     return projection(saved(id));
   }
+  async function prepareVerified(snapshot, deadline) {
+    if (!validSnapshot(snapshot,repoPin)) throw problem('invalid_input');
+    const proposed = structuredClone(snapshot);
+    let output;
+    const key = tupleDigest([scope,itemId,proposed.linkRevision,proposed.itemRevision,proposed.status,proposed.evidenceUrl]);
+    const head = current();
+    if (head.active) return projection(head.operations[head.active]);
+    const prior = Object.values(head.operations).find(r => r.snapshotKey === key && !r.superseded);
+    if (prior && !['prepared','approved_unsent','offline'].includes(prior.state)) return projection(prior);
+    fresh(prior?.snapshot ?? proposed,at(head));
+    try { await github.verify(proposed.evidenceUrl,deadline); }
+    catch (error) {
+      const latest=current();
+      if (latest.active) return projection(latest.operations[latest.active]);
+      throw error;
+    }
+    const rechecked = current();
+    if (rechecked.active) return projection(rechecked.operations[rechecked.active]);
+    const latestPrior = Object.values(rechecked.operations).find(r => r.snapshotKey === key && !r.superseded);
+    if (latestPrior && !['prepared','approved_unsent','offline'].includes(latestPrior.state)) return projection(latestPrior);
+    fresh(latestPrior?.snapshot ?? proposed,at(rechecked));
+    github.assertDeadline(deadline);
+    journal.append('intent', state => {
+      if (state.active) { output = projection(state.operations[state.active]); return {}; }
+      const repeated = Object.values(state.operations).find(r => r.snapshotKey === key && !r.superseded);
+      if (repeated) { output = projection(repeated); return {}; }
+      if (Object.values(state.operations).some(r => r.state !== 'published' && !r.superseded) || state.operations[proposed.operationId]) throw problem('scope_conflict');
+      const when = at(state); fresh(proposed, when);
+      return { data:{ at:when, operationId:proposed.operationId, snapshot:proposed, scope, target:targetPin,
+        payloadDigest:digest(payload(proposed)), snapshotKey:key } };
+    }, event => guardCommit(proposed,event,deadline));
+    github.assertDeadline(deadline);
+    return output ?? projection(saved(proposed.operationId));
+  }
   return {
     matches(projectPath, selectedId, selectedInstallation, link) {
       if (!ownScope() || realpathSync.native(projectPath) !== root || selectedId !== itemId || selectedInstallation !== installationId || !link) return false;
@@ -199,25 +247,34 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
         link.itemIdentifier === `${targetPin.projectKey}-${targetPin.sequence}`;
     },
     owns(projectPath) { try { return ownScope() && realpathSync.native(projectPath) === root; } catch { return false; } },
-    prepare(snapshot) {
+    async prepareEvidence(evidenceUrl) {
+      const head=current();
+      if (head.active) return {operation:projection(head.operations[head.active]),preview:null};
+      const deadline=github.deadline();
+      let local;
+      try { local=readCurrent(); } catch (error) { throw problem(error?.code === 'integrity_error' ? 'integrity_error' : 'scope_conflict'); }
+      if (!local || local.integrity !== false) throw problem('integrity_error');
+      const createdAt=now();
+      if (!timestamp(createdAt) || !timestamp(createdAt+300000)) throw problem('stale_preview');
+      const snapshot={operationId:randomBytes(16).toString('hex'),itemRevision:local.itemRevision,linkRevision:local.linkRevision,
+        status:local.status,evidenceUrl,createdAt,expiresAt:createdAt+300000};
       if (!validSnapshot(snapshot,repoPin)) throw problem('invalid_input');
-      const proposed = structuredClone(snapshot);
-      let output;
-      const key = tupleDigest([scope,itemId,proposed.linkRevision,proposed.itemRevision,proposed.status,proposed.evidenceUrl]);
-      journal.append('intent', state => {
-        if (state.active) { output = projection(state.operations[state.active]); return {}; }
-        const repeated = Object.values(state.operations).find(r => r.snapshotKey === key && !r.superseded);
-        if (repeated) { output = projection(repeated); return {}; }
-        if (Object.values(state.operations).some(r => r.state !== 'published' && !r.superseded) || state.operations[proposed.operationId]) throw problem('scope_conflict');
-        const when = at(state); fresh(proposed, when);
-        return { data:{ at:when, operationId:proposed.operationId, snapshot:proposed, scope, target:targetPin,
-          payloadDigest:digest(payload(proposed)), snapshotKey:key } };
-      });
-      return output ?? projection(saved(proposed.operationId));
+      fresh(snapshot,createdAt);
+      const operation=await prepareVerified(snapshot,deadline);
+      if (!['prepared','approved_unsent','offline'].includes(operation.state)) return {operation,preview:null};
+      const record=saved(operation.operationId);
+      fresh(record.snapshot,at(current()));
+      github.assertDeadline(deadline);
+      return { operation, preview:{ operationId:record.snapshot.operationId, scopeRef:scope, installationId, itemId,
+        itemRevision:record.snapshot.itemRevision, linkRevision:record.snapshot.linkRevision, status:record.snapshot.status,
+        evidenceUrl:record.snapshot.evidenceUrl, visibility:'INTERNAL', target:structuredClone(targetPin),
+        payloadUtf8:Buffer.from(payload(record.snapshot),'utf8'), payloadDigest:record.payloadDigest,
+        createdAt:record.snapshot.createdAt, expiresAt:record.snapshot.expiresAt } };
     },
     inspect(id) { return inspection(id); },
     latest() { return inspection(); },
     cancel(id) {
+      if (!opId(id)) throw problem('invalid_input');
       journal.append('cancel', state => {
         const r = state.operations[id];
         if (!r) throw problem('not_found');
@@ -227,6 +284,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       return projection(saved(id));
     },
     supersede(id) {
+      if (!opId(id)) throw problem('invalid_input');
       journal.append('supersede', state => {
         const r = state.operations[id];
         if (!r) throw problem('not_found');
@@ -236,15 +294,17 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
       return projection(saved(id));
     },
     async confirm(id, approval) {
-      if (!exact(approval,['operatorId','approved','payloadDigest']) || approval.approved !== true || approval.operatorId !== operatorId) throw problem('operator_required');
       let record = saved(id);
       if (['delivery_uncertain','published'].includes(record.state)) return projection(record);
+      if (!exact(approval,['operatorId','approved','payloadDigest']) || approval.approved !== true || approval.operatorId !== operatorId) throw problem('operator_required');
       if (!['prepared','approved_unsent','offline'].includes(record.state) || approval.payloadDigest !== record.payloadDigest) throw problem('scope_conflict');
       let state = current(); let startTime = at(state);
       try { fresh(record.snapshot, startTime); } catch (e) { return failedPrestart(id,e); }
-      try { await plane.verify(targetPin); } catch (e) { if (e.code === 'offline') return mark(id,'offline'); if (['authorization_denied','scope_conflict'].includes(e.code)) return mark(id,'conflict',undefined,e.code); throw e; }
+      const deadline=github.deadline();
+      try { await plane.verify(targetPin); await github.verify(record.snapshot.evidenceUrl,deadline); }
+      catch (e) { if (e.code === 'offline') return mark(id,'offline'); if (['authorization_denied','scope_conflict','evidence_unverified'].includes(e.code)) return mark(id,'conflict',undefined,e.code); throw e; }
       state = current(); const checked = at(state); if (checked < startTime) throw Object.assign(problem('stale_preview'), { rollbackAt:startTime });
-      try { fresh(record.snapshot, checked); } catch (e) { return failedPrestart(id,e); }
+      try { fresh(record.snapshot, checked); github.assertDeadline(deadline); } catch (e) { return failedPrestart(id,e); }
       const approvalId = randomUUID();
       try {
         const result = journal.append('approval', s => {
@@ -257,6 +317,9 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
         if (!result.written) return result.result;
         hook('after_approval', 'approval');
         await plane.verify(targetPin);
+        await github.verify(record.snapshot.evidenceUrl,deadline);
+        const afterTransport=current(); const transportTime=at(afterTransport);
+        fresh(record.snapshot,transportTime);
         const resultStart = journal.append('start', s => {
           const r = s.operations[id];
           if (r?.state === 'delivery_uncertain' || r?.state === 'published') return { result:projection(r) };
@@ -264,14 +327,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
           if (r.approval !== approvalId) return { result:projection(r) };
           const when = at(s); fresh(r.snapshot, when);
           return { data:{at:when,operationId:id,approvalId,payloadDigest:r.payloadDigest} };
-        }, event => {
-          const before = now();
-          if (!timestamp(before) || before < event.data.at) throw Object.assign(problem('stale_preview'), { rollbackAt:event.data.at });
-          fresh(record.snapshot, before);
-          const after = now();
-          if (!timestamp(after) || after < before) throw Object.assign(problem('stale_preview'), { rollbackAt:before });
-          if (after >= record.snapshot.expiresAt) throw Object.assign(problem('stale_preview'), { expiredAt:after });
-        });
+        }, event => guardCommit(record.snapshot,event,deadline));
         if (!resultStart.written) return resultStart.result;
         // Only this live call has a positive acknowledgement for its own Start.
         hook('after_start', 'start');
@@ -282,7 +338,7 @@ export function createFixturePublisher({ privateRoot, project, installationId, i
         return await recordReceipt(id, reply.body.id, 'response');
       } catch (e) {
         const r = saved(id);
-        if (['prepared','approved_unsent','offline'].includes(r.state) && (timestamp(e?.expiredAt) || timestamp(e?.rollbackAt) || ['offline','scope_conflict','authorization_denied'].includes(e?.code))) return failedPrestart(id,e);
+        if (['prepared','approved_unsent','offline'].includes(r.state) && (timestamp(e?.expiredAt) || timestamp(e?.rollbackAt) || ['offline','scope_conflict','authorization_denied','evidence_unverified','integrity_error'].includes(e?.code))) return failedPrestart(id,e);
         return projection(r);
       }
     },

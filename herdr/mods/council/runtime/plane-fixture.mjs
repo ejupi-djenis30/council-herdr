@@ -126,6 +126,13 @@ export function createFixtureOperator({ privateRoot, project, installationId, pr
   return {
     owns,
     readerIdentity(id) { requireItem(id); return installationId; },
+    publicationTarget(id) {
+      const link = read(id);
+      if (!link) throw error('scope_conflict');
+      return { instanceId:pins.instanceId, origin:pins.origin, workspaceSlug:pins.workspaceSlug, workspaceId:pins.workspaceId,
+        projectKey:pins.projectKey, projectId:pins.projectId, itemId:link.itemId,
+        sequence:Number(link.itemIdentifier.slice(pins.projectKey.length + 1)), authorId:pins.principalId };
+    },
     localRef(id) { requireItem(id); return refFor(id); },
     inspect(id) { return { availability: 'read_only', freshness: 'cached', link: read(id), operation: null }; },
     async resolve(id, ref) {
