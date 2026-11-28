@@ -13,6 +13,8 @@ import { newSchedule, renderSchedules, changeSchedule } from './schedule-view.js
 import { hostId, desktopId, focusedProject, participantTerminal, executeEngine, peerEngine, invitationWorkerArgs } from './machine-engine.js';
 import { taskEditor, teamEditor, teamView } from './team-view.js';
 import { workspaceView } from './workspace-view.js';
+import { folderKey, WorkItems, workItemScopeKey, workItemScreenVisible } from './work-item-actions.js';
+import { makeWorkItemFields } from './work-item-view.js';
 
 const modes = [
   ['choice', 'Options'],
@@ -54,12 +56,6 @@ function localProjects(active, allSpaces) {
     seen.add(folderKey(folder));
     return true;
   });
-}
-
-function folderKey(folder) {
-  const path = folder?.replaceAll('\\', '/').replace(/^\/\/\?\/UNC\//i, '//')
-    .replace(/^\/\/\?\//, '').replace(/\/+$/, '') ?? '';
-  return /^(?:[a-z]:|\/\/)/i.test(path) ? path.toLowerCase() : path;
 }
 
 function activityProjects(space, focus) {
@@ -156,6 +152,7 @@ export default class Council extends View {
     this.wideNavigation = false;
     this.folder = null;
     this.spaceId = null;
+    this.spaceMachine = null;
     this.recovering = false;
     this.allSpaces = false;
     this.selected = null;
@@ -175,6 +172,12 @@ export default class Council extends View {
     this.backFocus = cx.focus_handle();
     this.newFocus = cx.focus_handle();
     this.workspace = { view: 'runs', group: 'all', component: null, limit: 9, pinned: null, diagnostics: false };
+    this.workItems = new WorkItems({
+      runCli: (project, args, engine) => this.runCli(project, args, engine),
+      readTeam: (project, engine) => this.request(project, 'team', {}, engine),
+      visible: screen => this.workItemVisible(screen)
+    });
+    this.workItemForm = null;
     this.activityTarget = null;
     this.discoveredProjects = [];
     this.activityFollows = null;
@@ -269,6 +272,7 @@ export default class Council extends View {
   navigate(cx, tab, selection = null, { returnTo = null, listProject = null, trail = [] } = {}) {
     const returningToList = this.tab === tab && this.selected && !selection;
     if (tab !== this.tab) this.clearFilters();
+    this.leaveWorkItems();
     this.pollSection = 'results';
     this.epoch++;
     this.loading = false;
@@ -291,6 +295,115 @@ export default class Council extends View {
 
   workspaceBookmark() {
     return { ...this.workspace, target: this.activityTarget, search: this.activitySearch.value() };
+  }
+
+  workItemTarget(space) {
+    return this.workspace.pinned || focusedProject(focused(), space) || this.lastFocusedProject || space?.folder;
+  }
+
+  workItemVisible(screen) {
+    const space = localSpace();
+    return workItemScreenVisible(screen, {
+      space, target: this.workItemTarget(space),
+      workspaceActive: this.tab === 'activity' && this.workspace.view === 'work-items' && this.currentSpace(space)
+    });
+  }
+
+  syncWorkItemFields() {
+    const screen = this.workItems.current;
+    if (this.workItemForm?.screen === screen) return;
+    if (this.workItemForm) {
+      this.workItemForm.fields.title.release();
+      this.workItemForm.fields.criteria.release();
+      this.workItemForm = null;
+    }
+    if (screen?.kind === 'create') this.workItemForm = { screen, fields: makeWorkItemFields() };
+  }
+
+  leaveWorkItems() {
+    this.workItems.leave();
+    this.syncWorkItemFields();
+  }
+
+  runWorkItemAction(cx, action) {
+    cx.spawn(async cx => {
+      const task = action();
+      this.syncWorkItemFields();
+      cx.notify();
+      await task;
+      this.syncWorkItemFields();
+      cx.notify();
+    });
+  }
+
+  syncWorkItems(cx, space = localSpace()) {
+    const workItems = this.workItems;
+    if (this.tab !== 'activity' || this.workspace.view !== 'work-items' || !this.data?.project || !this.currentSpace(space)) return;
+    const scope = Object.freeze({
+      space: space.id, project: this.data.project, engine: Object.freeze({ ...this.engine }), anchor: this.activityTarget
+    });
+    if (workItems.current && workItemScopeKey(workItems.current.scope) === workItemScopeKey(scope)) return;
+    this.runWorkItemAction(cx, () => {
+      if (!this.workItemVisible({ kind: 'list', scope }) ||
+          (workItems.current && workItemScopeKey(workItems.current.scope) === workItemScopeKey(scope))) return;
+      return workItems.showList(scope);
+    });
+  }
+
+  backToWorkItems(cx, screen) {
+    if (!this.workItems.isCurrent(screen)) return;
+    if (folderKey(this.workItemTarget(localSpace())) === folderKey(screen.scope.anchor)) {
+      this.runWorkItemAction(cx, () => this.workItems.isCurrent(screen) && this.workItems.showList(screen.scope));
+      return;
+    }
+    this.leaveWorkItems();
+    this.workspace.pinned = screen.scope.project;
+    this.refresh(cx);
+    this.syncWorkItems(cx);
+    cx.notify();
+  }
+
+  openWorkItemSection(cx, screen, tab, selection = null) {
+    if (!this.workItems.isCurrent(screen)) return;
+    const { project } = screen.scope;
+    const bookmark = { ...this.workspaceBookmark(), target: project };
+    this.navigate(cx, tab, selection, { returnTo: bookmark, listProject: selection ? null : project });
+  }
+
+  workItemViewProps() {
+    const workItems = this.workItems;
+    const screen = workItems.current;
+    const fields = this.workItemForm?.screen === screen ? this.workItemForm?.fields : null;
+    if (!screen || !this.workItemVisible(screen)) return { screen: null };
+    const perform = (cx, action) => this.runWorkItemAction(cx, () => workItems.isCurrent(screen) && action());
+    return {
+      screen, fields,
+      attempt: screen.kind === 'create' ? workItems.createAttempt(screen) : null,
+      delegation: screen.kind === 'detail' ? workItems.delegationPending(screen) : null,
+      actions: {
+        refresh: (_e, cx) => perform(cx, () => workItems.refresh(screen)),
+        create: (_e, cx) => perform(cx, () => workItems.startCreate(screen)),
+        open: (cx, id) => perform(cx, () => workItems.open(screen, id)),
+        role: (cx, id) => {
+          if (!workItems.isCurrent(screen) || workItems.createAttempt(screen)) return;
+          screen.roleId = id;
+          cx.notify();
+        },
+        save: (_e, cx) => perform(cx, () => workItems.save(screen,
+          fields && { title: fields.title.value(), criteria: fields.criteria.value() })),
+        discard: (_e, cx) => perform(cx, () => workItems.discardCreate(screen)),
+        back: (_e, cx) => this.backToWorkItems(cx, screen),
+        team: (_e, cx) => this.openWorkItemSection(cx, screen, 'team'),
+        delegate: (_e, cx) => perform(cx, () => workItems.delegate(screen)),
+        delegation: (_e, cx) => {
+          const link = workItems.delegationLink(screen);
+          if (link) this.openWorkItemSection(cx, screen, link.tab, { id: link.id, project: link.project });
+        },
+        copyOutput: (_e, cx) => {
+          if (workItems.isCurrent(screen) && screen.item?.result) this.copy(cx, screen.item.result.output, 'Saved handoff copied.');
+        }
+      }
+    };
   }
 
   openLinked(cx, tab, selection) {
@@ -336,9 +449,11 @@ export default class Council extends View {
   refresh(cx) {
     const space = localSpace();
     const folder = space?.folder || null;
-    if (folder !== this.folder || space?.id !== this.spaceId) {
+    const machine = space?.machine ?? null;
+    if (folder !== this.folder || space?.id !== this.spaceId || machine !== this.spaceMachine) {
       this.folder = folder;
       this.spaceId = space?.id;
+      this.spaceMachine = machine;
       this.engine = null;
       this.peerEngines.clear();
       this.allSpaces = false;
@@ -350,6 +465,8 @@ export default class Council extends View {
       return;
     }
     if (!folder || !this.config) return;
+    const workItemScreen = this.workItems.current;
+    if (workItemScreen && workItemScreen.kind !== 'list' && this.workItemVisible(workItemScreen)) return;
     let target = folder;
     let activityOptions;
     if (this.tab === 'activity') {
@@ -364,6 +481,7 @@ export default class Council extends View {
       const followFocus = !this.workspace.pinned;
       activityOptions = { followFocus, spaceFolder: folder, ...(followFocus ? { projects } : {}) };
       if (target !== this.activityTarget || followFocus !== this.activityFollows) {
+        this.leaveWorkItems();
         this.activityTarget = target;
         this.activityFollows = followFocus;
         this.workspace.component = null;
@@ -394,6 +512,7 @@ export default class Council extends View {
           const changed = this.readError || JSON.stringify(data) !== JSON.stringify(this.data);
           this.readError = '';
           this.data = data;
+          this.syncWorkItems(cx, space);
           if (changed) cx.notify();
         }
       } catch (error) {
@@ -961,7 +1080,8 @@ export default class Council extends View {
         Object.assign(this.workspace, changes);
         cx.notify();
       };
-      return workspaceView(t, this.data, { ...this.workspace, projects, live, wide: this.wide, search: this.activitySearch }, {
+      const workItems = this.workspace.view === 'work-items' ? this.workItemViewProps() : null;
+      return workspaceView(t, this.data, { ...this.workspace, projects, live, workItems, wide: this.wide, search: this.activitySearch }, {
         open: (cx, tab, id, origin = project) => this.navigate(cx, tab, { id, project: origin }, { returnTo: this.workspaceBookmark() }),
         history: cx => this.openWorkspaceHistory(cx, project),
         create: (cx, tab) => {
@@ -970,14 +1090,23 @@ export default class Council extends View {
         },
         focus: (cx, address) => this.focusAgent(cx, address, space),
         project: (cx, pinned) => {
+          this.leaveWorkItems();
           this.workspace.pinned = pinned;
           this.refresh(cx);
+          this.syncWorkItems(cx);
           cx.notify();
         },
         showRuns: (cx, group) => update(cx, { view: 'runs', group, limit: 9 }),
         view: (cx, view) => {
+          const previous = this.workspace.view;
+          if (view === 'work-items' && previous === view) return;
+          this.leaveWorkItems();
           this.activitySearch.set_value('');
           update(cx, { view, limit: 9 });
+          if (view === 'work-items' || previous === 'work-items') {
+            this.refresh(cx);
+            this.syncWorkItems(cx);
+          }
         },
         component: (cx, component) => update(cx, { component }),
         more: cx => update(cx, { limit: this.workspace.limit + 9 }),
@@ -999,10 +1128,15 @@ export default class Council extends View {
         save: (cx, profile) => this.save(cx, 'team-set', profile),
         cancel: cx => { this.clearForm(); cx.notify(); }
       });
+      const target = { project: this.listProject ?? this.folder, engine: this.engine, spaceId: space.id };
       return teamView(t, this.data, {
         edit: (cx, member) => this.editTeamMember(cx, member),
-        call: (cx, member) => this.newTask(cx, member),
-        open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.folder })
+        call: (cx, member) => {
+          if (this.tab !== 'team' || !this.currentSpace() || target.spaceId !== this.spaceId ||
+              target.engine?.machine !== this.engine.machine || target.project !== (this.listProject ?? this.folder)) return;
+          this.newTask(cx, { member, target });
+        },
+        open: (cx, id) => this.navigate(cx, 'delegations', { id, project: this.listProject ?? this.folder }, { returnTo: this.workspaceReturn })
       });
     }
     if (['create', 'create-debate'].includes(this.form?.kind)) return this.withProjectPicker(t, space, this.renderCreate(t, space));
@@ -1060,6 +1194,7 @@ export default class Council extends View {
     this.setForm('team', {
       id: '', role: member?.role ?? '', model: member?.model ?? '', instructions: member?.instructions ?? ''
     }, {
+      project: this.listProject ?? this.folder,
       memberId: member?.id ?? null, agent: member?.agent ?? 'codex',
       reportsTo: member?.reportsTo ?? '', permission: member?.permission ?? 'read'
     });
@@ -1128,10 +1263,10 @@ export default class Council extends View {
     });
   }
 
-  newTask(cx, member = null, mode = 'delegate') {
-    const { fields, extra } = taskFormDefaults(member ? 'delegate' : mode);
+  newTask(cx, { member = null, mode = 'delegate', target } = {}) {
+    const { fields, extra } = taskFormDefaults(mode);
     this.setForm('task', fields, {
-      ...extra, member, project: member ? this.folder : this.draftProject(),
+      ...extra, member, project: target?.project ?? this.draftProject(), teamTarget: target,
       sessionId: `desktop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
     });
     cx.notify();
@@ -1141,9 +1276,10 @@ export default class Council extends View {
     const space = localSpace();
     const form = this.form;
     if (form?.kind !== 'task' || this.saving || !this.currentSpace(space)) return;
+    const { project, teamTarget } = form;
+    if (teamTarget && (space.id !== teamTarget.spaceId || (space.machine ?? null) !== teamTarget.engine.machine)) return;
+    const engine = teamTarget?.engine ?? this.engine;
     const params = taskFormValues(form);
-    const engine = this.engine;
-    const { project } = form;
     this.saving = true;
     this.loading = false;
     this.error = '';
@@ -1200,7 +1336,7 @@ export default class Council extends View {
             node.child(label([space.name || space.folder, space.machine].filter(Boolean).join(' · '), 12, t.muted).truncate())))
         .when(current && ['debates', 'reviews'].includes(this.tab) && !this.selected && !this.form, node =>
           node.child(button(t, 'new-formal-workflow', this.tab === 'debates' ? 'Run agent debate' : 'Start review', (_e, cx) =>
-            this.newTask(cx, null, this.tab === 'debates' ? 'debate' : 'review'), 'normal', false, 'add')))
+            this.newTask(cx, { mode: this.tab === 'debates' ? 'debate' : 'review' }), 'normal', false, 'add')))
         .when(current && ['polls', 'debates'].includes(this.tab) && !this.selected && !this.form, node =>
           node.child(button(t, 'new', this.tab === 'polls' ? 'New poll' : 'New debate', (_e, cx) => this.startCreate(cx), 'primary', false, 'add').track_focus(this.newFocus)))
         .when(current && this.tab === 'delegations' && !this.selected && !this.form, node =>
@@ -1238,7 +1374,9 @@ export default class Council extends View {
         }
         if (event.key !== 'escape' || this.saving) return;
         if (this.form) this.cancelForm(cx);
-        else if (this.trail.length || this.workspaceReturn || this.selected) this.goBack(cx);
+        else if (this.workItems.current && this.workItems.current.kind !== 'list' && this.workItemVisible(this.workItems.current)) {
+          this.backToWorkItems(cx, this.workItems.current);
+        } else if (this.trail.length || this.workspaceReturn || this.selected) this.goBack(cx);
         else return;
         cx.stop_propagation();
       })

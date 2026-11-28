@@ -3,8 +3,12 @@ import { Button, h_flex, v_flex } from 'gpui-base';
 import { button, cardHeading, columns, glyph, iconTile, input, label, panel, progress, reviewStatus, statusPill } from './components.js';
 import { delegationStatus } from './delegation-view.js';
 import { countLabel, discussionType } from './poll-text.js';
+import { workItemView } from './work-item-view.js';
 
-const tabs = [['runs', 'Runs', 'delegations'], ['plan', 'Plan', 'plan'], ['changes', 'Changes', 'changes']];
+const tabs = [
+  ['runs', 'Runs', 'delegations'], ['plan', 'Plan', 'plan'], ['changes', 'Changes', 'changes'],
+  ['work-items', 'Work items', 'file']
+];
 const groups = [
   ['attention', 'Needs attention', 'warning', 'blocked'],
   ['active', 'In flight', 'working', 'working'],
@@ -287,7 +291,9 @@ export function workspaceView(t, data, ui, actions) {
       countLabel(data.errors.length, 'read issue'), (_e, cx) => actions.diagnostics(cx),
       ui.diagnostics ? 'active' : 'normal', false, 'warning')));
   const view = ui.view === 'plan' ? planView(t, data, ui, actions)
-    : ui.view === 'changes' ? changesView(t, data.git, ui, actions) : runsView(t, data, ui, actions);
+    : ui.view === 'changes' ? changesView(t, data.git, ui, actions)
+      : ui.view === 'work-items' ? workItemView(t, ui.workItems?.screen, ui.workItems, ui.workItems?.actions)
+        : runsView(t, data, ui, actions);
   return v_flex().w_full().min_w_0().gap(10).child(header).child(nav)
     .when(ui.diagnostics && data.errors.length > 0, body => body.child(panel(t).child(cardHeading(t, 'Read issues', 'warning'))
       .children(data.errors.map(issue => v_flex().gap(3).child(label(issue.source, 12, t.foreground).font_semibold())
