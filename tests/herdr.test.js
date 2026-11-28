@@ -71,21 +71,35 @@ test('a Windows batch launcher receives the complete initial notice through Herd
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   writeFileSync(join(cwd, 'record.cjs'), "require('node:fs').writeFileSync('argv.json', JSON.stringify(process.argv.slice(2)))");
   const launcher = join(cwd, 'record.cmd');
-  writeFileSync(launcher, '@echo off\r\n@node "%~dp0record.cjs" %*\r\n');
+  writeFileSync(launcher, `@echo off\r\n@"${process.execPath.replace(/%/g, '%%')}" "%~dp0record.cjs" %*\r\n`);
   const client = new HerdrClient({ cwd });
+  const exec = client.exec.bind(client);
+  let launchArgs;
+  let sends = 0;
+  client.exec = (args, options) => {
+    if (args[0] === 'run') launchArgs = args;
+    return exec(args, options);
+  };
+  client.send = () => { sends++; throw new Error('The private assignment must not be sent'); };
   client.waitForAlignment = address => {
     const wait = client.exec(['wait', '--json', address, '--timeout', '10']);
     const finished = client.parseJson(wait.stdout);
+    if (finished?.ended) client.exec(['rm', address]);
+    assert.equal(finished?.reason, 'exit', wait.stderr || wait.stdout);
     assert.equal(finished?.exit_code, 0, wait.stderr || wait.stdout);
-    client.exec(['rm', address]);
     return { state: 'unconfirmed' };
   };
   const result = client.launchAgent({ name: `batch-${process.pid}`, agent: launcher, task: 'Private assignment' });
   assert.ok(result.address, result.error);
   const received = JSON.parse(readFileSync(join(cwd, 'argv.json'), 'utf8'));
-  assert.equal(received.length, 1);
-  assert.match(received[0], /Council alignment check/);
-  assert.match(received[0], /challenge: [a-f0-9]{32}/);
+  const notice = launchArgs.at(-1);
+  assert.deepEqual(received, [notice]);
+  assert.match(notice, /Council alignment check/);
+  const challenge = /challenge: ([a-f0-9]{32})/.exec(notice)?.[1];
+  assert.ok(challenge);
+  assert.ok(launchArgs.some(arg => arg.startsWith('council.challenge=') && arg.endsWith(`.${challenge}`)));
+  assert.equal(sends, 0);
+  assert.equal(result.alignment, 'unconfirmed');
   assert.doesNotMatch(received[0], /Private assignment|[\r\n]/);
 });
 
