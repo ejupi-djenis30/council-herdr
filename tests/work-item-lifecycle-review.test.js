@@ -52,7 +52,7 @@ async function formalFixture(t, votes, options = {}) {
   const participants = ['author', 'reviewer', 'simplifier'].map(role => ({ name: `review-${role}`, role, agent: 'codex' }));
   const { sessionDir } = workspace.initSession({ sessionId: 'formal-test', mode: 'review', task: 'Formal review', participants });
   const proposal = workspace.writeArtifact(sessionDir, { phase: 'proposal', author: 'review-author',
-    content: `Council-Work-Item-Review: sha256:${options.wrongBinding ? '0'.repeat(64) : review.snapshotSha256}\nFormal assessment.` });
+    content: `${options.bomBinding ? '\ufeff' : ''}Council-Work-Item-Review: sha256:${options.wrongBinding ? '0'.repeat(64) : review.snapshotSha256}\nFormal assessment.` });
   saveFormalRound(sessionDir, { mode: 'review', round: 1, previousSession: null, sha256: proposal.sha256, representative: 'review-reviewer' });
   for (const [voter, vote] of votes) workspace.castBallot(sessionDir, { voter, role: voter, agent: 'codex', vote,
     rationale: `${vote} evidence`, targetArtifactSha256: proposal.sha256, round: 1, score: 8 });
@@ -282,4 +282,10 @@ test('a persisted artifact that differs from the job capture cannot be frozen', 
     actor: 'Lead', reviewOwnerRoleId: 'dev', policy: 'operator' }, { project });
   assert.equal(result.error.code, 'integrity_error');
   assert.equal((await workItemOperation('show', { id: item.id }, { project })).item.lifecycle.state, 'open');
+});
+
+
+test('a leading BOM cannot silently alter the exact formal proposal binding line', async t => {
+  const f = await formalFixture(t, [['review-reviewer', 'approve'], ['review-simplifier', 'approve']], { bomBinding: true });
+  assert.equal(f.attached.error.code, 'integrity_error');
 });

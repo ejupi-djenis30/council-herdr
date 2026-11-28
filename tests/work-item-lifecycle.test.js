@@ -424,3 +424,152 @@ test('competing close and reopen processes keep one decision and replay its rece
   assert.equal(recovered.item.lifecycle.state, 'open');
   assert.equal(recovered.item.lifecycle.cycle, 2);
 });
+
+async function completedLegacy(t, output = 'Saved handoff') {
+  const context = await setup(t);
+  const { mkdirSync } = await import('node:fs');
+  const delegated = await workItemOperation('delegate', { id: definition.id }, { project: context.project, callTeamMember: async (_manager, call) => {
+    const dir = join(context.store.base, call.sessionId);
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'job.json'), JSON.stringify({ $schema: 'council.job/v1', sessionId: call.sessionId,
+      mode: 'delegate', workItemId: definition.id, participant: { team: { id: 'dev' } }, state: 'completed',
+      deliveryState: 'acknowledged', deadlineAt: new Date(Date.now() + 60000).toISOString(),
+      result: { output, captureScope: 'history', turn: 2, completedAt: new Date().toISOString() } }));
+  } });
+  assert.equal(delegated.item.state, 'result_ready');
+  return { ...context, sessionId: delegated.item.job.sessionId };
+}
+
+test('a leading UTF-8 BOM remains part of active and archived frozen capture bytes', async t => {
+  const { createHash } = await import('node:crypto');
+  const output = '\ufeffFirst line\nNext line';
+  const { project } = await completedLegacy(t, output);
+  const started = await workItemOperation('review', { action: 'start', id: definition.id, ifRevision: 2,
+    requestId: 'bom-review', actor: 'Lead', reviewOwnerRoleId: 'dev', policy: 'operator' }, { project });
+  assert.equal(started.success, true, JSON.stringify(started));
+  const review = started.item.lifecycle.review;
+  const expected = Buffer.from(output, 'utf8');
+  assert.equal(review.capture.verified, true);
+  assert.deepEqual(Buffer.from(review.capture.output, 'utf8'), expected);
+  assert.equal(createHash('sha256').update(review.capture.output, 'utf8').digest('hex'), review.capture.sha256);
+  const closed = await workItemOperation('close', { id: definition.id, ifRevision: 3, requestId: 'bom-close', actor: 'Lead',
+    reviewId: review.id, evidenceToken: review.evidenceToken, decision: 'accept', reason: 'Reviewed.', nextAction: 'Share.' }, { project });
+  assert.equal(closed.success, true, JSON.stringify(closed));
+  const reopened = await workItemOperation('reopen', { id: definition.id, ifRevision: 4, requestId: 'bom-reopen', actor: 'Lead',
+    decisionId: closed.item.lifecycle.decision.id, snapshotSha256: review.snapshotSha256, reason: 'Follow up.', roleId: 'dev', nextAction: 'Check again.' }, { project });
+  assert.equal(reopened.success, true, JSON.stringify(reopened));
+  const archived = await workItemOperation('show', { id: definition.id, reviewId: review.id }, { project });
+  assert.deepEqual(Buffer.from(archived.archivedReview.capture.output, 'utf8'), expected);
+  assert.equal(createHash('sha256').update(archived.archivedReview.capture.output, 'utf8').digest('hex'), review.capture.sha256);
+});
+
+test('formal review returned before attachment requires formal policy in the next cycle', async t => {
+  const { mkdirSync } = await import('node:fs');
+  const { project, store } = await completedLegacy(t);
+  const started = await workItemOperation('review', { action: 'start', id: definition.id, ifRevision: 2,
+    requestId: 'formal-review', actor: 'Lead', reviewOwnerRoleId: 'dev', policy: 'formal' }, { project });
+  const review = started.item.lifecycle.review;
+  assert.equal(review.formal, null);
+  assert.equal(started.item.lifecycle.formalRequired, true);
+  const returned = await workItemOperation('review', { action: 'return', id: definition.id, ifRevision: 3,
+    requestId: 'return-before-attach', actor: 'Lead', reviewId: review.id, evidenceToken: review.evidenceToken,
+    reason: 'More work.', roleId: 'dev', nextAction: 'Revise.' }, { project });
+  assert.equal(returned.success, true, JSON.stringify(returned));
+  assert.equal(returned.item.lifecycle.formalRequired, true);
+  assert.equal(returned.item.lifecycle.decision.formal, null);
+  const second = await workItemOperation('delegate', { id: definition.id, ifRevision: 4, requestId: 'second', actor: 'Lead' }, {
+    project, callTeamMember: async (_manager, call) => {
+      const dir = join(store.base, call.sessionId); mkdirSync(dir);
+      writeFileSync(join(dir, 'job.json'), JSON.stringify({ $schema: 'council.job/v1', sessionId: call.sessionId,
+        mode: 'delegate', workItemId: definition.id, workItemBinding: call.workItemBinding, participant: { team: { id: 'dev' } },
+        state: 'completed', deliveryState: 'acknowledged', deadlineAt: new Date(Date.now() + 60000).toISOString(), result: { output: 'Second handoff' } }));
+    }
+  });
+  assert.equal(second.item.lifecycle.formalRequired, true);
+  const downgraded = await workItemOperation('review', { action: 'start', id: definition.id, ifRevision: 5,
+    requestId: 'operator', actor: 'Lead', reviewOwnerRoleId: 'dev', policy: 'operator' }, { project });
+  assert.equal(downgraded.error.code, 'review_not_authorized');
+  const formal = await workItemOperation('review', { action: 'start', id: definition.id, ifRevision: 5,
+    requestId: 'formal-second', actor: 'Lead', reviewOwnerRoleId: 'dev', policy: 'formal' }, { project });
+  assert.equal(formal.success, true, JSON.stringify(formal));
+  assert.equal(formal.item.lifecycle.formalRequired, true);
+});
+
+test('a damaged journal suffix preserves a COU-2-compatible completed result and the validated history', async t => {
+  const { mkdirSync } = await import('node:fs');
+  const { WorkItems } = await import('../herdr/mods/council/work-item-actions.js');
+  const { project, store } = await setup(t);
+  const started = await workItemOperation('delegate', { id: definition.id, ifRevision: 1, requestId: 'attempt', actor: 'Lead' }, {
+    project, callTeamMember: async (_manager, call) => {
+      const dir = join(store.base, call.sessionId); mkdirSync(dir);
+      writeFileSync(join(dir, 'job.json'), JSON.stringify({ $schema: 'council.job/v1', sessionId: call.sessionId,
+        mode: 'delegate', workItemId: definition.id, workItemBinding: call.workItemBinding, participant: { team: { id: 'dev' } },
+        state: 'completed', deliveryState: 'acknowledged', deadlineAt: new Date(Date.now() + 60000).toISOString(), result: { output: 'Saved result' } }));
+    }
+  });
+  assert.equal(started.item.state, 'result_ready');
+  writeFileSync(join(store.directory(definition.id), 'lifecycle', '00000003.json'), Buffer.from([0xff]));
+  const shown = await workItemOperation('show', { id: definition.id }, { project });
+  assert.equal(shown.item.state, 'result_ready');
+  assert.equal(shown.item.result.output, 'Saved result');
+  assert.equal(shown.item.lifecycle.integrity.code, 'integrity_error');
+  assert.equal(shown.item.lifecycle.needsAttention, true);
+  assert.match(shown.item.lifecycle.guidance, /journal/i);
+  assert.ok(Object.values(shown.item.lifecycle.actions).every(value => value === false));
+  const history = await workItemOperation('history', { id: definition.id }, { project });
+  assert.equal(history.events[0].type, 'attempt_reserved');
+  assert.equal(history.integrity.code, 'integrity_error');
+  const blocked = await workItemOperation('triage', { id: definition.id, ifRevision: 2, requestId: 'blocked', actor: 'Lead', patch: { priority: 'high' } }, { project });
+  assert.equal(blocked.error.code, 'integrity_error');
+  const scope = { project: store.root, space: 'fixture', anchor: store.root, engine: { machine: null } };
+  const controller = new WorkItems({ runCli: async (_cwd, args) => {
+    const result = args[1] === 'list' ? await workItemOperation('list', {}, { project }) : shown;
+    return { code: 0, stdout: JSON.stringify(result), stderr: '' };
+  }, readTeam: async () => ({ members: [] }) });
+  await controller.showList(scope);
+  await controller.open(controller.current, definition.id);
+  assert.equal(controller.current.error, '');
+  assert.equal(controller.current.item.result.output, 'Saved result');
+});
+
+test('a delayed observation from the first attempt cannot time out a second cycle', async t => {
+  const { mkdirSync } = await import('node:fs');
+  const { project, store, sessionId: firstSession } = await completedLegacy(t);
+  let release;
+  let entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const pendingShow = workItemOperation('show', { id: definition.id }, { project, manager: {
+    async getStatus(sessionId) { assert.equal(sessionId, firstSession); entered(); await gate; return { sessionId, outcome: 'timed_out' }; }
+  } });
+  await waiting;
+  const started = await workItemOperation('review', { action: 'start', id: definition.id, ifRevision: 2,
+    requestId: 'review-race', actor: 'Lead', reviewOwnerRoleId: 'dev', policy: 'operator' }, { project });
+  const review = started.item.lifecycle.review;
+  const closed = await workItemOperation('close', { id: definition.id, ifRevision: 3, requestId: 'close-race', actor: 'Lead',
+    reviewId: review.id, evidenceToken: review.evidenceToken, decision: 'accept', reason: 'Reviewed.', nextAction: 'Ship.' }, { project });
+  const reopened = await workItemOperation('reopen', { id: definition.id, ifRevision: 4, requestId: 'reopen-race', actor: 'Lead',
+    decisionId: closed.item.lifecycle.decision.id, snapshotSha256: review.snapshotSha256, reason: 'New work.', roleId: 'dev', nextAction: 'Recheck.' }, { project });
+  assert.equal(reopened.success, true, JSON.stringify(reopened));
+  const second = await workItemOperation('delegate', { id: definition.id, ifRevision: 5, requestId: 'second-race', actor: 'Lead' }, {
+    project, callTeamMember: async (_manager, call) => {
+      const dir = join(store.base, call.sessionId); mkdirSync(dir);
+      writeFileSync(join(dir, 'job.json'), JSON.stringify({ $schema: 'council.job/v1', sessionId: call.sessionId,
+        mode: 'delegate', workItemId: definition.id, workItemBinding: call.workItemBinding, participant: { team: { id: 'dev' } },
+        state: 'starting', deliveryState: 'planned', deadlineAt: new Date(Date.now() + 60000).toISOString() }));
+    }
+  });
+  assert.notEqual(second.item.job.sessionId, firstSession);
+  release();
+  const delayed = await pendingShow;
+  assert.equal(delayed.item.job.sessionId, second.item.job.sessionId);
+  assert.equal(delayed.item.lifecycle.cycle, 2);
+  assert.equal(delayed.item.state, 'in_progress');
+  assert.equal(delayed.item.job.outcome, 'starting');
+  const fresh = await workItemOperation('show', { id: definition.id }, { project, manager: {
+    async getStatus(sessionId) { return { sessionId, outcome: 'starting' }; }
+  } });
+  assert.equal(fresh.item.state, delayed.item.state);
+  assert.equal(fresh.item.job.sessionId, delayed.item.job.sessionId);
+  assert.equal(fresh.item.job.outcome, delayed.item.job.outcome);
+});
